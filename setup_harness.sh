@@ -5,14 +5,15 @@
 #     desmarcar/sync_git/vincular-grafo + registrar/consultar.
 #   - Integracion graphify (estructura automatica, rebuild semantico, hub).
 #   - Superficies y hooks multi-LLM auto-instalados (Claude, Codex, Gemini,
-#     Grok, generica) sin flag --target.
+#     Grok, Antigravity, generica) sin flag --target.
 #   - Capa opcional de subagentes (lider/implementer/reviewer, harness.py).
 #   - Respaldos *.bak.* archivados bajo bkp/ (HARNESS_BKP_DIR para overridear).
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-# Subagentes y graphify quedan activos por defecto (opt-out con --no-subagents / --no-graphify).
+# Subagentes, graphify y Antigravity quedan activos por defecto.
 INSTALL_GRAPHIFY=1
+INSTALL_ANTIGRAVITY=1
 WITH_SUBAGENTS=1
 FORCE=0
 # Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
@@ -30,6 +31,8 @@ Opciones:
   --no-graphify        No asegura graphify (por defecto se asegura, instalandolo si falta).
   --with-subagents     Ya es el default; se mantiene por compatibilidad.
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
+  --install-antigravity Ya es el default; asegura Antigravity CLI si falta.
+  --no-antigravity     No instala Antigravity CLI.
   --subdir             (DEFAULT) El arnes vive en esta subcarpeta y orquesta el
                        directorio PADRE: escribe superficies multi-LLM en el
                        padre (raiz multi-repo) y mantiene aqui los scripts.
@@ -41,8 +44,8 @@ Opciones:
 
 El layout por defecto es subdir (usa --root para el layout clasico). Por defecto
 instala todas las superficies y hooks LLM conocidos (sin --target), la capa de
-subagentes y asegura graphify (lo instala si falta). Respalda archivos
-existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
+subagentes, asegura graphify y Antigravity CLI (los instala si faltan).
+Respalda archivos existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
 USAGE
 }
 
@@ -50,8 +53,10 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --with-subagents) WITH_SUBAGENTS=1 ;;
         --install-graphify) INSTALL_GRAPHIFY=1 ;;
+        --install-antigravity) INSTALL_ANTIGRAVITY=1 ;;
         --no-subagents) WITH_SUBAGENTS=0 ;;
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
+        --no-antigravity) INSTALL_ANTIGRAVITY=0 ;;
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
         --force) FORCE=1 ;;
@@ -111,8 +116,8 @@ write_agent_surface() {
 # Harness Process
 
 Estas operando en la raiz de un arnes multi-repo compatible con Claude Code,
-Codex, Gemini, Grok y otros agentes CLI. No elijas proveedor ni target: sigue
-este mismo protocolo desde la raiz del proyecto.
+Codex, Gemini, Grok, Antigravity y otros agentes CLI. No elijas proveedor ni
+target: sigue este mismo protocolo desde la raiz del proyecto.
 
 ## Arranque automatico
 
@@ -122,6 +127,8 @@ El instalador deja hooks nativos cuando la herramienta los soporta:
 - Codex: `.codex/hooks.json` (revisa y confia con `/hooks` si lo pide)
 - Gemini CLI: `.gemini/settings.json`
 - Grok Build: `.grok/hooks/` (confia con `/hooks-trust` si lo pide)
+- Antigravity CLI: sin hooks nativos conocidos; usa `bin/harness-antigravity`
+  para inicializar el arnes antes de abrir el agente.
 
 Tambien quedan launchers en `bin/` para arrancar desde la raiz y ejecutar
 `init.sh` antes de abrir el agente:
@@ -131,6 +138,7 @@ bin/harness-claude
 bin/harness-codex
 bin/harness-gemini
 bin/harness-grok
+bin/harness-antigravity
 ```
 
 Si tu agente no ejecuta hooks o no ves el mapa del hub, corre manualmente:
@@ -197,8 +205,8 @@ Servicios transversales:
 ## Commits
 
 - Prohibido incluir firmas o trailers de IA (`Co-Authored-By`, `Generated with
-  Claude/Codex/Gemini/Grok/OpenAI/Anthropic/xAI`, etc.). El hook `commit-msg`
-  intenta limpiarlos automaticamente.
+  Claude/Codex/Gemini/Grok/Antigravity/OpenAI/Anthropic/xAI`, etc.). El hook
+  `commit-msg` intenta limpiarlos automaticamente.
 - Usa Conventional Commits desde terminal.
 - Commitea cada microservicio afectado antes de cerrar la task, salvo decision
   explicita de bloqueo documentada en `__HREL__progress/`.
@@ -227,6 +235,7 @@ Archivos principales:
 - `.codex/hooks.json`: hooks nativos para Codex.
 - `.gemini/settings.json`: hooks nativos para Gemini CLI.
 - `.grok/hooks/`: hooks nativos para Grok Build.
+- `ANTIGRAVITY.md`: superficie para Antigravity CLI.
 - `bin/harness-*`: launchers con preflight del harness.
 
 Todo hallazgo relevante se escribe en `__HREL__progress/`. Una respuesta corta
@@ -494,7 +503,7 @@ GROK_MD_EOF
 
 write_launchers() {
     mkdir -p "$SURFACE_DIR/bin"
-    for agent in claude codex gemini grok; do
+    for agent in claude codex gemini grok antigravity; do
         launcher="$SURFACE_DIR/bin/harness-$agent"
         cat <<'LAUNCHER_EOF' > "$launcher"
 #!/bin/bash
@@ -515,6 +524,7 @@ export CODEX_PROJECT_DIR="$ROOT"
 export GEMINI_PROJECT_DIR="$ROOT"
 export GROK_PROJECT_DIR="$ROOT"
 export GROK_WORKSPACE_ROOT="$ROOT"
+export ANTIGRAVITY_PROJECT_DIR="$ROOT"
 
 bash "$HARNESS_DIR/init.sh"
 cd "$ROOT"
@@ -532,15 +542,40 @@ LAUNCHER_EOF
             "$launcher" > "$launcher_tmp" && mv "$launcher_tmp" "$launcher"
         chmod +x "$launcher"
     done
-    write_file_notice "bin/harness-claude|codex|gemini|grok ($SURFACE_DIR)"
+    write_file_notice "bin/harness-claude|codex|gemini|grok|antigravity ($SURFACE_DIR)"
+}
+
+ensure_antigravity_cli() {
+    echo "Asegurando Antigravity CLI..."
+    if command -v antigravity >/dev/null 2>&1; then
+        echo "   -> antigravity ya esta disponible."
+    elif [ "$INSTALL_ANTIGRAVITY" -eq 1 ]; then
+        if ! command -v curl >/dev/null 2>&1; then
+            echo "   -> aviso: curl no esta disponible; instala Antigravity manualmente."
+            return 0
+        fi
+
+        set +e
+        curl -fsSL https://antigravity.google/cli/install.sh | bash
+        status=$?
+        set -e
+
+        if [ "$status" -eq 0 ]; then
+            echo "   -> Antigravity CLI instalado."
+        else
+            echo "   -> aviso: no se pudo instalar Antigravity CLI."
+        fi
+    else
+        echo "   -> Antigravity CLI no instalado (--no-antigravity activo)."
+    fi
 }
 
 # --- Resolucion de layout -----------------------------------------------------
 # HARNESS_DIR : carpeta donde viven los scripts del arnes (= cwd del instalador).
 # REPO_ROOT   : raiz multi-repo (donde estan los microservicios). En 'subdir' es
 #               el padre; en 'root' es el propio HARNESS_DIR.
-# SURFACE_DIR : donde van CLAUDE.md, AGENTS.md, GEMINI.md, GROK.md, LLM.md y
-#               .claude/settings.json (= REPO_ROOT).
+# SURFACE_DIR : donde van CLAUDE.md, AGENTS.md, GEMINI.md, GROK.md,
+#               ANTIGRAVITY.md, LLM.md y .claude/settings.json (= REPO_ROOT).
 # HARNESS_EXEC: prefijo historico para superficies Claude (sin llaves).
 # HOOK_BASE   : prefijo para las rutas en .claude/settings.json (con llaves).
 # HREL        : prefijo relativo de archivos del arnes vistos desde REPO_ROOT.
@@ -564,9 +599,10 @@ PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 echo "== Instalando Harness Process en: $HARNESS_DIR =="
 echo "   proyecto:   $PROJECT_NAME"
 echo "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
-echo "   superficies/hooks: Claude, Codex, Gemini, Grok, generica"
+echo "   superficies/hooks: Claude, Codex, Gemini, Grok, Antigravity, generica"
 echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
+echo "   antigravity:$([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo " asegurar" || echo " no")"
 
 if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
     echo "[!] --subdir requiere correr el instalador DESDE la subcarpeta del arnes," >&2
@@ -618,6 +654,7 @@ backup_file "$SURFACE_DIR/CLAUDE.md"
 backup_file "$SURFACE_DIR/AGENTS.md"
 backup_file "$SURFACE_DIR/GEMINI.md"
 backup_file "$SURFACE_DIR/GROK.md"
+backup_file "$SURFACE_DIR/ANTIGRAVITY.md"
 backup_file "$SURFACE_DIR/LLM.md"
 backup_file "$SURFACE_DIR/.claude/settings.json"
 backup_file "$SURFACE_DIR/.codex/hooks.json"
@@ -631,6 +668,7 @@ backup_file "$SURFACE_DIR/bin/harness-claude"
 backup_file "$SURFACE_DIR/bin/harness-codex"
 backup_file "$SURFACE_DIR/bin/harness-gemini"
 backup_file "$SURFACE_DIR/bin/harness-grok"
+backup_file "$SURFACE_DIR/bin/harness-antigravity"
 
 echo "Generando .claude/settings.json..."
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -1137,7 +1175,7 @@ IFS=$'\n\t'
 HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 # REPO_ROOT: raiz multi-repo. Prioriza override explicito y variables de agente;
 # en runs manuales usa el marcador .harness_layout.
-AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-${ANTIGRAVITY_PROJECT_DIR:-}}}}}"
 REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
@@ -1245,7 +1283,7 @@ HOOKEOF
 set -u
 msg_file="${1:?commit message file missing}"
 tmp="${msg_file}.harness.$$"
-sed -E '/^Co-Authored-By:.*([Cc]laude|[Cc]odex|[Gg]emini|[Gg]rok|[Oo]pen[Aa][Ii]|[Aa]nthropic|[Gg]oogle|[Xx][Aa][Ii]|[Aa][Ii])/d; /^Generated with .*([Cc]laude|[Cc]odex|[Gg]emini|[Gg]rok|[Oo]pen[Aa][Ii]|[Aa]nthropic|[Gg]oogle|[Xx][Aa][Ii]|[Aa][Ii])/d' "$msg_file" > "$tmp" && mv "$tmp" "$msg_file"
+sed -E '/^Co-Authored-By:.*([Cc]laude|[Cc]odex|[Gg]emini|[Gg]rok|[Aa]ntigravity|[Oo]pen[Aa][Ii]|[Aa]nthropic|[Gg]oogle|[Xx][Aa][Ii]|[Aa][Ii])/d; /^Generated with .*([Cc]laude|[Cc]odex|[Gg]emini|[Gg]rok|[Aa]ntigravity|[Oo]pen[Aa][Ii]|[Aa]nthropic|[Gg]oogle|[Xx][Aa][Ii]|[Aa][Ii])/d' "$msg_file" > "$tmp" && mv "$tmp" "$msg_file"
 rm -f "$tmp" "$msg_file.bak"
 CMEOF
     chmod +x "$COMMIT_MSG"
@@ -1374,7 +1412,7 @@ cat <<'STATUS_EOF' > harness_status.sh
 set -Eeuo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-${ANTIGRAVITY_PROJECT_DIR:-}}}}}"
 REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
@@ -1429,7 +1467,7 @@ STOP_HOOK_ACTIVE=0
 printf '%s' "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && STOP_HOOK_ACTIVE=1
 
 HARNESS_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-${ANTIGRAVITY_PROJECT_DIR:-}}}}}"
 REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
@@ -1468,7 +1506,7 @@ cat <<'CHECK_SH_EOF' > harness_check.sh
 set -Eeuo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-${ANTIGRAVITY_PROJECT_DIR:-}}}}}"
 REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
@@ -1687,8 +1725,8 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 
 ## Archivos principales
 
-- `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `GROK.md`, `LLM.md`: superficies
-  raiz para distintos agentes.
+- `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `GROK.md`, `ANTIGRAVITY.md`,
+  `LLM.md`: superficies raiz para distintos agentes.
 - `CHECKPOINTS.md`: criterios de cierre.
 - `feature_list.json`: backlog ejecutable.
 - `progress/current.md`: estado vivo de la tarea.
@@ -1857,6 +1895,7 @@ write_agent_surface "$SURFACE_DIR/CLAUDE.md"
 write_agent_surface "$SURFACE_DIR/AGENTS.md"
 write_agent_surface "$SURFACE_DIR/GEMINI.md"
 write_agent_surface "$SURFACE_DIR/GROK.md"
+write_agent_surface "$SURFACE_DIR/ANTIGRAVITY.md"
 write_agent_surface "$SURFACE_DIR/LLM.md"
 
 echo "Generando hooks y launchers multi-LLM..."
@@ -1891,6 +1930,8 @@ else
     echo "   -> graphify no instalado (--no-graphify activo). Quita ese flag para asegurarlo."
 fi
 
+ensure_antigravity_cli
+
 echo ""
 echo "========================================================"
 echo "Harness Process instalado exitosamente (layout: $LAYOUT)."
@@ -1900,12 +1941,13 @@ echo "  $SURFACE_DIR/CLAUDE.md"
 echo "  $SURFACE_DIR/AGENTS.md"
 echo "  $SURFACE_DIR/GEMINI.md"
 echo "  $SURFACE_DIR/GROK.md"
+echo "  $SURFACE_DIR/ANTIGRAVITY.md"
 echo "  $SURFACE_DIR/LLM.md"
 echo "  $SURFACE_DIR/.claude/settings.json (hooks automaticos para Claude Code)"
 echo "  $SURFACE_DIR/.codex/hooks.json (hooks automaticos para Codex; confiar con /hooks)"
 echo "  $SURFACE_DIR/.gemini/settings.json (hooks automaticos para Gemini CLI)"
 echo "  $SURFACE_DIR/.grok/hooks/harness.sh (hooks automaticos para Grok; confiar con /hooks-trust)"
-echo "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok"
+echo "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok|antigravity"
 if [ "$LAYOUT" = "subdir" ]; then
     echo ""
     echo "Scripts del arnes en: $HARNESS_DIR"
@@ -1922,6 +1964,7 @@ echo "  python3 ${HREL}harness.py status"
 echo "  bin/harness-codex"
 echo "  bin/harness-gemini"
 echo "  bin/harness-grok"
+echo "  bin/harness-antigravity"
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     echo ""
     echo "Modo subagentes activo:"
