@@ -13,11 +13,11 @@ IFS=$'\n\t'
 INSTALL_GRAPHIFY=1
 WITH_SUBAGENTS=1
 FORCE=0
-# Layout: 'root' = el arnes vive en la raiz multi-repo (default, hermano de los
-# microservicios). 'subdir' = el arnes vive en una subcarpeta y orquesta el
+# Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
 # directorio PADRE; la superficie (CLAUDE.md + .claude/settings.json) se escribe
-# en el padre y los scripts resuelven el padre como raiz multi-repo.
-LAYOUT=root
+# en el padre y los scripts resuelven el padre como raiz multi-repo. 'root'
+# (--root) = el arnes vive EN la raiz multi-repo, hermano de los microservicios.
+LAYOUT=subdir
 
 usage() {
     cat <<'USAGE'
@@ -28,15 +28,18 @@ Opciones:
   --no-graphify        No asegura graphify (por defecto se asegura, instalandolo si falta).
   --with-subagents     Ya es el default; se mantiene por compatibilidad.
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
-  --subdir             El arnes vive en esta subcarpeta y orquesta el directorio
-                       PADRE: escribe CLAUDE.md y .claude/settings.json en el
-                       padre (raiz multi-repo) y mantiene aqui los scripts.
+  --subdir             (DEFAULT) El arnes vive en esta subcarpeta y orquesta el
+                       directorio PADRE: escribe CLAUDE.md y .claude/settings.json
+                       en el padre (raiz multi-repo) y mantiene aqui los scripts.
                        Correlo desde dentro de la subcarpeta del arnes.
+  --root               El arnes vive EN la raiz multi-repo (hermano de los
+                       microservicios). Layout clasico; desactiva el default.
   --force              Sobrescribe archivos sin crear backup.
   -h, --help           Muestra esta ayuda.
 
-Por defecto instala la capa de subagentes y asegura graphify (lo instala si
-falta). Respalda archivos existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
+El layout por defecto es subdir (usa --root para el layout clasico). Por defecto
+instala la capa de subagentes y asegura graphify (lo instala si falta). Respalda
+archivos existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
 USAGE
 }
 
@@ -47,6 +50,7 @@ while [ "$#" -gt 0 ]; do
         --no-subagents) WITH_SUBAGENTS=0 ;;
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
         --subdir) LAYOUT=subdir ;;
+        --root) LAYOUT=root ;;
         --force) FORCE=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
