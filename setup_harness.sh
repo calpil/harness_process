@@ -2509,15 +2509,21 @@ fi
 
 # Despliega el comando /graphify nativo en cada agente que graphify soporta, para
 # que el rebuild semantico no sea exclusivo de Claude. Se corre desde un directorio
-# AISLADO con scope global (HOME): las skills quedan en ~/.claude, ~/.agents (Codex),
-# ~/.gemini y ~/.gemini/config (Antigravity); los archivos que `graphify install`
-# escribe en el cwd (GEMINI.md, .gemini/settings.json) caen en el tmp descartable y
-# NO pisan la superficie del arnes.
+# AISLADO con scope global (HOME): las skills quedan en ~/.claude (Claude),
+# ~/.agents (estandar compartido que tambien lee Gemini) y ~/.gemini/config
+# (Antigravity); los archivos que `graphify install` escribe en el cwd (GEMINI.md,
+# .gemini/settings.json) caen en el tmp descartable y NO pisan la superficie.
+#
+# NO instalamos --platform gemini a proposito: Gemini CLI lee la skill desde el
+# estandar compartido ~/.agents/skills/ (que puebla --platform codex) ADEMAS de su
+# ~/.gemini/skills/ nativo. Instalar en ambos la deja duplicada y Gemini avisa
+# "Skill conflict: graphify from ~/.agents ... overriding ... ~/.gemini". Con solo
+# codex, Gemini toma /graphify de ~/.agents/ y no hay conflicto.
 if [ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && command -v graphify >/dev/null 2>&1; then
     echo "Desplegando el comando /graphify por agente..."
     gx_tmp="$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}/harness-graphify.$$")"
     mkdir -p "$gx_tmp"
-    for gx_plat in claude codex gemini antigravity; do
+    for gx_plat in claude codex antigravity; do
         if ( cd "$gx_tmp" && graphify install --platform "$gx_plat" ) >/dev/null 2>&1; then
             echo "   -> /graphify disponible en $gx_plat."
         else
