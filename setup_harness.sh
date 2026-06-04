@@ -263,7 +263,7 @@ write_harness_hook_runtime() {
 #!/bin/bash
 set -Eeuo pipefail
 
-MODE="${1:-plain}"   # plain | gemini-json
+MODE="${1:-plain}"   # plain | gemini-json | codex-json
 EVENT="${2:-${GROK_HOOK_EVENT:-unknown}}"
 ROOT="${HARNESS_REPO_ROOT:-${GROK_WORKSPACE_ROOT:-}}"
 if [ -z "$ROOT" ]; then
@@ -329,6 +329,25 @@ if [ "$MODE" = "gemini-json" ]; then
                 ;;
         esac
     fi
+elif [ "$MODE" = "codex-json" ]; then
+    # Codex parsea el stdout del hook como JSON: cualquier texto plano que empiece
+    # con '{' o '[' (p.ej. lineas "[Harness] ...") rompe con "invalid ... JSON
+    # output". Mandamos la salida legible a stderr y dejamos stdout vacio, que es
+    # un no-op valido para todos los eventos. Solo el gate Stop emite JSON.
+    if run_event >&2; then
+        exit 0
+    else
+        case "$EVENT" in
+            stop|Stop|AfterAgent|SessionEnd|SessionStop)
+                printf '{"decision":"block","reason":"Harness check fallo; corrige el estado del repo antes de cerrar."}\n'
+                exit 0
+                ;;
+            *)
+                echo "Harness hook fallo; revisa la salida del hook." >&2
+                exit 0
+                ;;
+        esac
+    fi
 else
     run_event
 fi
@@ -353,7 +372,7 @@ write_codex_hooks() {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"bin/harness-hook\" plain session-start",
+            "command": "bash \"bin/harness-hook\" codex-json session-start",
             "timeout": 120,
             "statusMessage": "Inicializando Harness"
           }
@@ -366,7 +385,7 @@ write_codex_hooks() {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"bin/harness-hook\" plain post-tool",
+            "command": "bash \"bin/harness-hook\" codex-json post-tool",
             "timeout": 30,
             "statusMessage": "Actualizando Harness"
           }
@@ -378,7 +397,7 @@ write_codex_hooks() {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"bin/harness-hook\" plain stop",
+            "command": "bash \"bin/harness-hook\" codex-json stop",
             "timeout": 120,
             "statusMessage": "Verificando Harness"
           }
