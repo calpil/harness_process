@@ -4,6 +4,8 @@
 #   - Memoria hub compartida (graph_memory.py) con mapa/impacto/vincular/
 #     desmarcar/sync_git/vincular-grafo + registrar/consultar.
 #   - Integracion graphify (estructura automatica, rebuild semantico, hub).
+#   - Superficies y hooks multi-LLM auto-instalados (Claude, Codex, Gemini,
+#     Grok, generica) sin flag --target.
 #   - Capa opcional de subagentes (lider/implementer/reviewer, harness.py).
 #   - Respaldos *.bak.* archivados bajo bkp/ (HARNESS_BKP_DIR para overridear).
 set -Eeuo pipefail
@@ -14,9 +16,9 @@ INSTALL_GRAPHIFY=1
 WITH_SUBAGENTS=1
 FORCE=0
 # Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
-# directorio PADRE; la superficie (CLAUDE.md + .claude/settings.json) se escribe
-# en el padre y los scripts resuelven el padre como raiz multi-repo. 'root'
-# (--root) = el arnes vive EN la raiz multi-repo, hermano de los microservicios.
+# directorio PADRE; las superficies LLM se escriben en el padre y los scripts
+# resuelven el padre como raiz multi-repo. 'root' (--root) = el arnes vive EN la
+# raiz multi-repo, hermano de los microservicios.
 LAYOUT=subdir
 
 usage() {
@@ -29,8 +31,8 @@ Opciones:
   --with-subagents     Ya es el default; se mantiene por compatibilidad.
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
   --subdir             (DEFAULT) El arnes vive en esta subcarpeta y orquesta el
-                       directorio PADRE: escribe CLAUDE.md y .claude/settings.json
-                       en el padre (raiz multi-repo) y mantiene aqui los scripts.
+                       directorio PADRE: escribe superficies multi-LLM en el
+                       padre (raiz multi-repo) y mantiene aqui los scripts.
                        Correlo desde dentro de la subcarpeta del arnes.
   --root               El arnes vive EN la raiz multi-repo (hermano de los
                        microservicios). Layout clasico; desactiva el default.
@@ -38,8 +40,9 @@ Opciones:
   -h, --help           Muestra esta ayuda.
 
 El layout por defecto es subdir (usa --root para el layout clasico). Por defecto
-instala la capa de subagentes y asegura graphify (lo instala si falta). Respalda
-archivos existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
+instala todas las superficies y hooks LLM conocidos (sin --target), la capa de
+subagentes y asegura graphify (lo instala si falta). Respalda archivos
+existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
 USAGE
 }
 
@@ -101,12 +104,444 @@ write_file_notice() {
     echo "   -> $1"
 }
 
+write_agent_surface() {
+    target="$1"
+    mkdir -p "$(dirname "$target")"
+    cat <<'SURFACE_EOF' > "$target"
+# Harness Process
+
+Estas operando en la raiz de un arnes multi-repo compatible con Claude Code,
+Codex, Gemini, Grok y otros agentes CLI. No elijas proveedor ni target: sigue
+este mismo protocolo desde la raiz del proyecto.
+
+## Arranque automatico
+
+El instalador deja hooks nativos cuando la herramienta los soporta:
+
+- Claude Code: `.claude/settings.json`
+- Codex: `.codex/hooks.json` (revisa y confia con `/hooks` si lo pide)
+- Gemini CLI: `.gemini/settings.json`
+- Grok Build: `.grok/hooks/` (confia con `/hooks-trust` si lo pide)
+
+Tambien quedan launchers en `bin/` para arrancar desde la raiz y ejecutar
+`init.sh` antes de abrir el agente:
+
+```bash
+bin/harness-claude
+bin/harness-codex
+bin/harness-gemini
+bin/harness-grok
+```
+
+Si tu agente no ejecuta hooks o no ves el mapa del hub, corre manualmente:
+
+```bash
+bash "__HREL__init.sh"
+bash "__HREL__harness_status.sh"
+```
+
+Antes de tocar codigo, arquitectura o dependencias entre servicios, en ESTE
+orden:
+
+1. Revisa el mapa del hub:
+   `python3 "__HREL__graph_memory.py" mapa`
+2. Si vas a modificar un servicio, revisa su radio de impacto:
+   `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+3. Si existe `graphify-out/graph.json`, consulta el grafo antes de leer a
+   ciegas: `graphify query "<pregunta de la task>"`
+4. Trabaja dentro del microservicio correspondiente; no programes en la raiz
+   multi-repo salvo que la tarea sea del arnes.
+5. Valida los servicios afectados y deja evidencia en `__HREL__progress/`.
+6. Al cerrar, ejecuta:
+   `bash "__HREL__harness_check.sh"`
+
+Los comandos anteriores usan rutas relativas a la raiz multi-repo. Si estas
+dentro de un microservicio, vuelve a la raiz o usa la ruta absoluta del arnes.
+
+## Hub de memoria y graphify
+
+Son sistemas separados:
+
+- **Hub** (`~/.harness-hub/graph_db.json`, configurable con `HARNESS_HUB`):
+  rastrea proyectos, microservicios, commits y dependencias entre servicios.
+  Los ids se namespacean como `<proyecto>/<servicio>`.
+- **graphify** (`graphify-out/`): grafo del contenido del codigo. Para preguntas
+  de arquitectura o "como funciona X", consulta primero `graphify query`.
+
+Servicios transversales:
+
+- Ver dependencias de todos los proyectos:
+  `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+- Declarar una dependencia:
+  `python3 "__HREL__graph_memory.py" vincular --microservicio <consumidor> --destino <proyecto>/<servicio>`
+- Marcar destino transversal:
+  agrega `--transversal` al comando `vincular`.
+- Quitar marca transversal:
+  `python3 "__HREL__graph_memory.py" desmarcar --microservicio <servicio>`
+- Registrar progreso:
+  `python3 "__HREL__graph_memory.py" registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
+- Consultar progreso:
+  `python3 "__HREL__graph_memory.py" consultar --artefacto <nombre> [--microservicio <servicio>]`
+
+## graphify
+
+- El hook `post-commit` de cada microservicio corre `graphify update` en segundo
+  plano cuando hay grafo existente y marca `graphify-out/.graphify_stale` si
+  detecta cambios que requieren rebuild semantico.
+- Primera construccion o rebuild semantico: usa `/graphify` o
+  `/graphify --update` si tu agente lo soporta. Si solo tienes CLI, usa el
+  comando `graphify` disponible en tu entorno.
+- Despues del rebuild, borra `graphify-out/.graphify_stale` y refresca el hub:
+  `python3 "__HREL__graph_memory.py" vincular-grafo`
+
+## Commits
+
+- Prohibido incluir firmas o trailers de IA (`Co-Authored-By`, `Generated with
+  Claude/Codex/Gemini/Grok/OpenAI/Anthropic/xAI`, etc.). El hook `commit-msg`
+  intenta limpiarlos automaticamente.
+- Usa Conventional Commits desde terminal.
+- Commitea cada microservicio afectado antes de cerrar la task, salvo decision
+  explicita de bloqueo documentada en `__HREL__progress/`.
+- La politica de cierre se controla con `HARNESS_COMMIT_GUARD_MODE=block|warn|off`.
+
+## Mapa de agentes
+
+Si existe `__HREL__AGENTS.md`, usalo como mapa progresivo. Si tu herramienta no
+soporta subagentes nativos, aplica los roles como fases manuales:
+
+1. Lider: decide alcance, impacto y delegacion.
+2. Implementer: modifica una unidad concreta y escribe evidencia en
+   `__HREL__progress/`.
+3. Reviewer: verifica tests, impacto, checkpoints y estado Git.
+
+Archivos principales:
+
+- `__HREL__CHECKPOINTS.md`: criterios de cierre.
+- `__HREL__feature_list.json`: backlog ejecutable.
+- `__HREL__progress/current.md`: estado vivo de la tarea.
+- `__HREL__progress/history.md`: bitacora append-only.
+- `__HREL__docs/architecture.md`: mapa de arquitectura.
+- `__HREL__docs/conventions.md`: convenciones del equipo.
+- `__HREL__docs/verification.md`: comandos de validacion.
+- `__HREL__.claude/agents/`: roles nativos para Claude Code cuando existan.
+- `.codex/hooks.json`: hooks nativos para Codex.
+- `.gemini/settings.json`: hooks nativos para Gemini CLI.
+- `.grok/hooks/`: hooks nativos para Grok Build.
+- `bin/harness-*`: launchers con preflight del harness.
+
+Todo hallazgo relevante se escribe en `__HREL__progress/`. Una respuesta corta
+en chat no reemplaza evidencia persistida.
+SURFACE_EOF
+
+    surface_tmp="$target.harness.tmp"
+    sed -e "s|__HREL__|$HREL|g" "$target" > "$surface_tmp" && mv "$surface_tmp" "$target"
+    write_file_notice "$(basename "$target") ($SURFACE_DIR)"
+}
+
+harness_rel_without_slash() {
+    printf '%s' "${HREL%/}"
+}
+
+write_harness_hook_runtime() {
+    mkdir -p "$SURFACE_DIR/bin"
+    cat <<'HOOK_RUNTIME_EOF' > "$SURFACE_DIR/bin/harness-hook"
+#!/bin/bash
+set -Eeuo pipefail
+
+MODE="${1:-plain}"   # plain | gemini-json
+EVENT="${2:-${GROK_HOOK_EVENT:-unknown}}"
+ROOT="${HARNESS_REPO_ROOT:-${GROK_WORKSPACE_ROOT:-}}"
+if [ -z "$ROOT" ]; then
+    ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+fi
+
+HARNESS_REL="__HREL_NOSLASH__"
+if [ -n "$HARNESS_REL" ]; then
+    HARNESS_DIR="$ROOT/$HARNESS_REL"
+else
+    HARNESS_DIR="$ROOT"
+fi
+
+run_session_start() {
+    HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/init.sh"
+    HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_status.sh"
+}
+
+run_post_tool() {
+    HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_status.sh" --brief
+}
+
+run_stop() {
+    HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh"
+}
+
+run_event() {
+    case "$EVENT" in
+        session-start|SessionStart|InstructionsLoaded|BeforeAgent)
+            run_session_start
+            ;;
+        post-tool|PostToolUse|AfterTool|Tool)
+            run_post_tool
+            ;;
+        stop|Stop|AfterAgent|SessionEnd|SessionStop)
+            run_stop
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+if [ "$MODE" = "gemini-json" ]; then
+    if run_event >&2; then
+        case "$EVENT" in
+            session-start|SessionStart)
+                printf '{"systemMessage":"Harness inicializado.","suppressOutput":true}\n'
+                ;;
+            *)
+                printf '{"suppressOutput":true}\n'
+                ;;
+        esac
+    else
+        case "$EVENT" in
+            stop|AfterAgent)
+                printf '{"continue":false,"stopReason":"Harness check fallo; corrige el estado del repo antes de continuar.","systemMessage":"Harness check fallo; revisa la salida del hook."}\n'
+                exit 0
+                ;;
+            *)
+                printf '{"systemMessage":"Harness hook fallo; revisa la salida del hook.","suppressOutput":false}\n'
+                exit 1
+                ;;
+        esac
+    fi
+else
+    run_event
+fi
+HOOK_RUNTIME_EOF
+
+    hook_runtime_tmp="$SURFACE_DIR/bin/harness-hook.tmp"
+    sed "s|__HREL_NOSLASH__|$(harness_rel_without_slash)|g" \
+        "$SURFACE_DIR/bin/harness-hook" > "$hook_runtime_tmp" \
+        && mv "$hook_runtime_tmp" "$SURFACE_DIR/bin/harness-hook"
+    chmod +x "$SURFACE_DIR/bin/harness-hook"
+    write_file_notice "bin/harness-hook ($SURFACE_DIR)"
+}
+
+write_codex_hooks() {
+    mkdir -p "$SURFACE_DIR/.codex"
+    cat <<'CODEX_HOOKS_EOF' > "$SURFACE_DIR/.codex/hooks.json"
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"bin/harness-hook\" plain session-start",
+            "timeout": 120,
+            "statusMessage": "Inicializando Harness"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"bin/harness-hook\" plain post-tool",
+            "timeout": 30,
+            "statusMessage": "Actualizando Harness"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"bin/harness-hook\" plain stop",
+            "timeout": 120,
+            "statusMessage": "Verificando Harness"
+          }
+        ]
+      }
+    ]
+  }
+}
+CODEX_HOOKS_EOF
+    write_file_notice ".codex/hooks.json ($SURFACE_DIR)"
+}
+
+write_gemini_hooks() {
+    mkdir -p "$SURFACE_DIR/.gemini/commands/harness"
+    cat <<'GEMINI_SETTINGS_EOF' > "$SURFACE_DIR/.gemini/settings.json"
+{
+  "hooksConfig": {
+    "enabled": true,
+    "notifications": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "harness-session-start",
+            "description": "Inicializa el Harness Process y muestra el mapa del hub.",
+            "command": "bash \"bin/harness-hook\" gemini-json session-start",
+            "timeout": 120000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "harness-status",
+            "description": "Muestra estado breve del harness despues de herramientas.",
+            "command": "bash \"bin/harness-hook\" gemini-json post-tool",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "harness-check",
+            "description": "Verifica checkpoints y estado Git al terminar el turno.",
+            "command": "bash \"bin/harness-hook\" gemini-json stop",
+            "timeout": 120000
+          }
+        ]
+      }
+    ]
+  }
+}
+GEMINI_SETTINGS_EOF
+
+    cat <<'GEMINI_CHECK_EOF' > "$SURFACE_DIR/.gemini/commands/harness/check.toml"
+description = "Ejecuta el cierre del Harness Process."
+prompt = """
+Ejecuta este comando y corrige cualquier bloqueo antes de cerrar:
+
+```bash
+!{bash bin/harness-hook plain stop}
+```
+"""
+GEMINI_CHECK_EOF
+
+    cat <<'GEMINI_STATUS_EOF' > "$SURFACE_DIR/.gemini/commands/harness/status.toml"
+description = "Muestra el estado actual del Harness Process."
+prompt = """
+Resume el estado del Harness Process usando esta salida:
+
+```text
+!{bash bin/harness-hook plain session-start}
+```
+"""
+GEMINI_STATUS_EOF
+
+    write_file_notice ".gemini/settings.json / commands ($SURFACE_DIR)"
+}
+
+write_grok_hooks() {
+    mkdir -p "$SURFACE_DIR/.grok/hooks"
+    cat <<'GROK_HOOK_EOF' > "$SURFACE_DIR/.grok/hooks/harness.sh"
+#!/bin/bash
+set -Eeuo pipefail
+
+ROOT="${GROK_WORKSPACE_ROOT:-}"
+if [ -z "$ROOT" ]; then
+    ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+fi
+export HARNESS_REPO_ROOT="$ROOT"
+
+case "${GROK_HOOK_EVENT:-}" in
+    SessionStart|InstructionsLoaded|BeforeAgent)
+        exec "$ROOT/bin/harness-hook" plain session-start
+        ;;
+    PostToolUse|AfterTool|Tool)
+        exec "$ROOT/bin/harness-hook" plain post-tool
+        ;;
+    Stop|AfterAgent|SessionEnd|SessionStop)
+        exec "$ROOT/bin/harness-hook" plain stop
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+GROK_HOOK_EOF
+    chmod +x "$SURFACE_DIR/.grok/hooks/harness.sh"
+
+    cat <<'GROK_MD_EOF' > "$SURFACE_DIR/.grok/GROK.md"
+# Harness Process para Grok
+
+Este proyecto instala hooks del Harness Process en `.grok/hooks/`.
+Si Grok solicita confianza, abre `/hooks` o ejecuta `/hooks-trust`.
+Tambien puedes iniciar con `bin/harness-grok`.
+GROK_MD_EOF
+    write_file_notice ".grok/hooks/harness.sh / .grok/GROK.md ($SURFACE_DIR)"
+}
+
+write_launchers() {
+    mkdir -p "$SURFACE_DIR/bin"
+    for agent in claude codex gemini grok; do
+        launcher="$SURFACE_DIR/bin/harness-$agent"
+        cat <<'LAUNCHER_EOF' > "$launcher"
+#!/bin/bash
+set -Eeuo pipefail
+
+AGENT="__AGENT__"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+HARNESS_REL="__HREL_NOSLASH__"
+if [ -n "$HARNESS_REL" ]; then
+    HARNESS_DIR="$ROOT/$HARNESS_REL"
+else
+    HARNESS_DIR="$ROOT"
+fi
+
+export HARNESS_REPO_ROOT="$ROOT"
+export CLAUDE_PROJECT_DIR="$ROOT"
+export CODEX_PROJECT_DIR="$ROOT"
+export GEMINI_PROJECT_DIR="$ROOT"
+export GROK_PROJECT_DIR="$ROOT"
+export GROK_WORKSPACE_ROOT="$ROOT"
+
+bash "$HARNESS_DIR/init.sh"
+cd "$ROOT"
+
+if ! command -v "$AGENT" >/dev/null 2>&1; then
+    echo "[Harness] No encontre el comando '$AGENT' en PATH." >&2
+    exit 127
+fi
+
+exec "$AGENT" "$@"
+LAUNCHER_EOF
+        launcher_tmp="$launcher.tmp"
+        sed -e "s|__AGENT__|$agent|g" \
+            -e "s|__HREL_NOSLASH__|$(harness_rel_without_slash)|g" \
+            "$launcher" > "$launcher_tmp" && mv "$launcher_tmp" "$launcher"
+        chmod +x "$launcher"
+    done
+    write_file_notice "bin/harness-claude|codex|gemini|grok ($SURFACE_DIR)"
+}
+
 # --- Resolucion de layout -----------------------------------------------------
 # HARNESS_DIR : carpeta donde viven los scripts del arnes (= cwd del instalador).
 # REPO_ROOT   : raiz multi-repo (donde estan los microservicios). En 'subdir' es
 #               el padre; en 'root' es el propio HARNESS_DIR.
-# SURFACE_DIR : donde van CLAUDE.md y .claude/settings.json (= REPO_ROOT).
-# HARNESS_EXEC: prefijo para invocar scripts desde CLAUDE.md (sin llaves).
+# SURFACE_DIR : donde van CLAUDE.md, AGENTS.md, GEMINI.md, GROK.md, LLM.md y
+#               .claude/settings.json (= REPO_ROOT).
+# HARNESS_EXEC: prefijo historico para superficies Claude (sin llaves).
 # HOOK_BASE   : prefijo para las rutas en .claude/settings.json (con llaves).
 # HREL        : prefijo relativo de archivos del arnes vistos desde REPO_ROOT.
 HARNESS_DIR="$(pwd -P)"
@@ -129,6 +564,7 @@ PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 echo "== Instalando Harness Process en: $HARNESS_DIR =="
 echo "   proyecto:   $PROJECT_NAME"
 echo "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
+echo "   superficies/hooks: Claude, Codex, Gemini, Grok, generica"
 echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
 
@@ -140,7 +576,7 @@ fi
 
 mkdir -p .claude
 [ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p .claude/agents docs progress
-[ "$LAYOUT" = "subdir" ] && mkdir -p "$SURFACE_DIR/.claude"
+mkdir -p "$SURFACE_DIR/.claude" "$SURFACE_DIR/.codex" "$SURFACE_DIR/.gemini" "$SURFACE_DIR/.grok" "$SURFACE_DIR/bin"
 
 # Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
 printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
@@ -177,105 +613,24 @@ fi
 for f in "${generated[@]}"; do
     backup_file "$f"
 done
-# La superficie (CLAUDE.md + settings.json) puede vivir en el padre (subdir).
+# Las superficies LLM pueden vivir en el padre (subdir).
 backup_file "$SURFACE_DIR/CLAUDE.md"
+backup_file "$SURFACE_DIR/AGENTS.md"
+backup_file "$SURFACE_DIR/GEMINI.md"
+backup_file "$SURFACE_DIR/GROK.md"
+backup_file "$SURFACE_DIR/LLM.md"
 backup_file "$SURFACE_DIR/.claude/settings.json"
-
-echo "Generando CLAUDE.md (en $SURFACE_DIR)..."
-cat <<'CLAUDE_MD_EOF' > "$SURFACE_DIR/CLAUDE.md"
-# Harness Process
-
-Estas operando en la raiz de un arnes multi-repo que coordina microservicios,
-memoria transversal compartida (hub), un grafo de conocimiento del codigo
-(graphify), validaciones y, si esta instalado, subagentes.
-
-## Protocolo obligatorio
-
-> Los scripts del arnes se invocan con la ruta que aparece en cada comando
-> (basada en `$CLAUDE_PROJECT_DIR`), asi funcionan desde cualquier carpeta.
-
-Antes de tocar codigo, arquitectura o dependencias entre servicios, en ESTE
-orden (no son opcionales):
-
-1. Revisa el mapa del hub que `init.sh` imprime en cada `SessionStart`, o:
-   `python3 "__HARNESS__/graph_memory.py" mapa`
-2. Si vas a modificar un servicio, revisa su radio de impacto:
-   `python3 "__HARNESS__/graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
-3. Si existe `graphify-out/graph.json` (en la raiz), consulta el grafo ANTES de
-   leer a ciegas: `graphify query "<pregunta de la task>"`
-4. Trabaja dentro del microservicio correspondiente; NUNCA programes en la raiz
-   (`cd <microservicio>` y al terminar vuelve con `cd ..`).
-5. Valida los servicios afectados y deja evidencia.
-6. Al cerrar, los repos afectados deben quedar limpios o con commits hechos,
-   segun la politica configurada por `HARNESS_COMMIT_GUARD_MODE`.
-
-## Hub de memoria (~/.harness-hub) vs graphify (graphify-out/)
-
-Son sistemas SEPARADOS: graphify NO usa el hub y el hub NO usa graphify.
-
-- **Hub** (`~/.harness-hub/graph_db.json`, configurable con `HARNESS_HUB`):
-  rastrea proyectos, microservicios, commits y dependencias entre servicios.
-  Es COMPARTIDO entre todos los proyectos; los ids se namespacean como
-  `<proyecto>/<servicio>`. `init.sh` lo siembra solo en cada `SessionStart`.
-  Si agregas un microservicio a mitad de sesion, reinicia Claude Code.
-- **graphify** (`graphify-out/`): grafo del CONTENIDO del codigo (funciones,
-  tipos, conceptos, comunidades). Para preguntas de arquitectura o "como
-  funciona X", consulta primero `graphify query "<pregunta>"`.
-
-## Servicios transversales y dependencias
-
-- `impacto` ve dependencias de TODOS los proyectos del hub. Para un servicio de
-  otro proyecto usa el id calificado `<proyecto>/<servicio>`.
-- Declarar que un servicio depende de otro:
-  `python3 "__HARNESS__/graph_memory.py" vincular --microservicio <consumidor> --destino <proyecto>/<servicio>`.
-  Agrega `--transversal` SOLO si el destino es un servicio nucleo/compartido
-  consumido por varios proyectos. Para quitar la marca:
-  `python3 "__HARNESS__/graph_memory.py" desmarcar --microservicio <servicio>`.
-- Registrar/consultar progreso de un artefacto en el hub:
-  `python3 "__HARNESS__/graph_memory.py" registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
-  y `python3 "__HARNESS__/graph_memory.py" consultar --artefacto <nombre> [--microservicio <servicio>]`.
-- Tras commitear, valida los proyectos afectados (tests unitarios; para
-  frontends `"__HARNESS__/validate_ui.sh" <url-dev-server>`,
-  se auto-localiza desde cualquier carpeta).
-
-## graphify: ciclo de actualizacion
-
-- **Estructura (automatico, sin LLM):** el hook `post-commit` de cada
-  microservicio corre `graphify update` (solo AST, en segundo plano) y marca
-  `graphify-out/.graphify_stale`. No gasta tokens.
-- **Construccion (manual, la 1a vez):** abre Claude en esta carpeta y corre
-  `/graphify`. El arnes ya NO lo construye en segundo plano.
-- **Rebuild semantico tras commits:** si existe `graphify-out/.graphify_stale`,
-  ejecuta `/graphify --update`, borra el marcador
-  (`rm -f graphify-out/.graphify_stale`) y refresca el hub con
-  `python3 "__HARNESS__/graph_memory.py" vincular-grafo`.
-
-## Commits
-
-- PROHIBIDO incluir firmas o trailers de IA (`Co-Authored-By`,
-  `Generated with Claude`); un hook `commit-msg` lo refuerza.
-- Usa Conventional Commits desde terminal. Al commitear, el hub se actualiza
-  solo. Commitea CADA microservicio afectado antes de cerrar la task; el hook
-  `Stop` te bloquea si quedan cambios sin commitear
-  (`HARNESS_COMMIT_GUARD_MODE=block|warn|off`).
-
-## Subagentes
-
-Si existe `__HREL__AGENTS.md`, usalo como mapa progresivo. Si existen agentes en
-`__HREL__.claude/agents/`, aplica este flujo:
-
-- Lider: decide alcance, impacto y delegacion.
-- Implementer: modifica una unidad concreta y escribe reporte en `__HREL__progress/`.
-- Reviewer: verifica tests, impacto, checkpoints y estado del repo.
-
-Los subagentes deben persistir resultados en archivos de `__HREL__progress/`; las
-respuestas cortas en chat no reemplazan la evidencia.
-CLAUDE_MD_EOF
-# Sustituye los placeholders de ruta segun el layout.
-claude_tmp="$SURFACE_DIR/CLAUDE.md.harness.tmp"
-sed -e "s|__HARNESS__|$HARNESS_EXEC|g" -e "s|__HREL__|$HREL|g" \
-    "$SURFACE_DIR/CLAUDE.md" > "$claude_tmp" && mv "$claude_tmp" "$SURFACE_DIR/CLAUDE.md"
-write_file_notice "CLAUDE.md ($SURFACE_DIR)"
+backup_file "$SURFACE_DIR/.codex/hooks.json"
+backup_file "$SURFACE_DIR/.gemini/settings.json"
+backup_file "$SURFACE_DIR/.gemini/commands/harness/check.toml"
+backup_file "$SURFACE_DIR/.gemini/commands/harness/status.toml"
+backup_file "$SURFACE_DIR/.grok/hooks/harness.sh"
+backup_file "$SURFACE_DIR/.grok/GROK.md"
+backup_file "$SURFACE_DIR/bin/harness-hook"
+backup_file "$SURFACE_DIR/bin/harness-claude"
+backup_file "$SURFACE_DIR/bin/harness-codex"
+backup_file "$SURFACE_DIR/bin/harness-gemini"
+backup_file "$SURFACE_DIR/bin/harness-grok"
 
 echo "Generando .claude/settings.json..."
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -732,7 +1087,7 @@ def main():
     parser.add_argument("--transversal", action="store_true")
     parser.add_argument("--artefacto")
     parser.add_argument("--meta")
-    parser.add_argument("--agente", default="ClaudeCode")
+    parser.add_argument("--agente", default="AgentCLI")
     parser.add_argument("--accion")
     parser.add_argument("--estado")
     args = parser.parse_args()
@@ -780,10 +1135,10 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-# REPO_ROOT: raiz multi-repo. Prioriza override explicito y CLAUDE_PROJECT_DIR
-# (que en layout subdir apunta al padre, donde vive .claude); en runs manuales
-# usa el marcador .harness_layout.
-REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+# REPO_ROOT: raiz multi-repo. Prioriza override explicito y variables de agente;
+# en runs manuales usa el marcador .harness_layout.
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
         REPO_ROOT="$(dirname "$HARNESS_DIR")"
@@ -890,7 +1245,7 @@ HOOKEOF
 set -u
 msg_file="${1:?commit message file missing}"
 tmp="${msg_file}.harness.$$"
-sed -E '/^Co-Authored-By:.*[Cc]laude/d; /^Generated with .*Claude/d' "$msg_file" > "$tmp" && mv "$tmp" "$msg_file"
+sed -E '/^Co-Authored-By:.*([Cc]laude|[Cc]odex|[Gg]emini|[Gg]rok|[Oo]pen[Aa][Ii]|[Aa]nthropic|[Gg]oogle|[Xx][Aa][Ii]|[Aa][Ii])/d; /^Generated with .*([Cc]laude|[Cc]odex|[Gg]emini|[Gg]rok|[Oo]pen[Aa][Ii]|[Aa]nthropic|[Gg]oogle|[Xx][Aa][Ii]|[Aa][Ii])/d' "$msg_file" > "$tmp" && mv "$tmp" "$msg_file"
 rm -f "$tmp" "$msg_file.bak"
 CMEOF
     chmod +x "$COMMIT_MSG"
@@ -1019,7 +1374,8 @@ cat <<'STATUS_EOF' > harness_status.sh
 set -Eeuo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
         REPO_ROOT="$(dirname "$HARNESS_DIR")"
@@ -1073,7 +1429,8 @@ STOP_HOOK_ACTIVE=0
 printf '%s' "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && STOP_HOOK_ACTIVE=1
 
 HARNESS_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
         REPO_ROOT=$(dirname "$HARNESS_DIR")
@@ -1111,7 +1468,8 @@ cat <<'CHECK_SH_EOF' > harness_check.sh
 set -Eeuo pipefail
 
 HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+AGENT_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CODEX_PROJECT_DIR:-${GEMINI_PROJECT_DIR:-${GROK_PROJECT_DIR:-}}}}"
+REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
         REPO_ROOT="$(dirname "$HARNESS_DIR")"
@@ -1329,7 +1687,8 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 
 ## Archivos principales
 
-- `CLAUDE.md`: protocolo minimo siempre activo.
+- `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `GROK.md`, `LLM.md`: superficies
+  raiz para distintos agentes.
 - `CHECKPOINTS.md`: criterios de cierre.
 - `feature_list.json`: backlog ejecutable.
 - `progress/current.md`: estado vivo de la tarea.
@@ -1423,7 +1782,7 @@ Ejemplos:
 go test ./...
 npm test
 npm run lint
-bash "$CLAUDE_PROJECT_DIR/validate_ui.sh" http://localhost:5173
+bash validate_ui.sh http://localhost:5173
 ```
 VERIF_EOF
 
@@ -1493,6 +1852,20 @@ REVIEWER_EOF
     write_file_notice "AGENTS.md / CHECKPOINTS.md / docs / progress / .claude/agents"
 fi
 
+echo "Generando superficies multi-LLM..."
+write_agent_surface "$SURFACE_DIR/CLAUDE.md"
+write_agent_surface "$SURFACE_DIR/AGENTS.md"
+write_agent_surface "$SURFACE_DIR/GEMINI.md"
+write_agent_surface "$SURFACE_DIR/GROK.md"
+write_agent_surface "$SURFACE_DIR/LLM.md"
+
+echo "Generando hooks y launchers multi-LLM..."
+write_harness_hook_runtime
+write_codex_hooks
+write_gemini_hooks
+write_grok_hooks
+write_launchers
+
 chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness.py
 
 echo "Asegurando graphify..."
@@ -1521,27 +1894,39 @@ fi
 echo ""
 echo "========================================================"
 echo "Harness Process instalado exitosamente (layout: $LAYOUT)."
+echo ""
+echo "Superficies multi-LLM escritas en la raiz:"
+echo "  $SURFACE_DIR/CLAUDE.md"
+echo "  $SURFACE_DIR/AGENTS.md"
+echo "  $SURFACE_DIR/GEMINI.md"
+echo "  $SURFACE_DIR/GROK.md"
+echo "  $SURFACE_DIR/LLM.md"
+echo "  $SURFACE_DIR/.claude/settings.json (hooks automaticos para Claude Code)"
+echo "  $SURFACE_DIR/.codex/hooks.json (hooks automaticos para Codex; confiar con /hooks)"
+echo "  $SURFACE_DIR/.gemini/settings.json (hooks automaticos para Gemini CLI)"
+echo "  $SURFACE_DIR/.grok/hooks/harness.sh (hooks automaticos para Grok; confiar con /hooks-trust)"
+echo "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok"
 if [ "$LAYOUT" = "subdir" ]; then
     echo ""
-    echo "Superficie (auto-descubierta por Claude Code) escrita en la raiz:"
-    echo "  $SURFACE_DIR/CLAUDE.md"
-    echo "  $SURFACE_DIR/.claude/settings.json"
     echo "Scripts del arnes en: $HARNESS_DIR"
-    echo "IMPORTANTE: lanza Claude Code DESDE la raiz ($REPO_ROOT) para que"
-    echo "los hooks y el protocolo se activen."
+    echo "IMPORTANTE: lanza tu agente DESDE la raiz ($REPO_ROOT) para que"
+    echo "descubra la superficie correspondiente."
 fi
 echo ""
 echo "Comandos utiles:"
-echo "  bash init.sh"
-echo "  bash harness_status.sh"
-echo "  bash harness_check.sh"
-echo "  python3 graph_memory.py mapa"
-echo "  python3 harness.py status"
+echo "  bash ${HREL}init.sh"
+echo "  bash ${HREL}harness_status.sh"
+echo "  bash ${HREL}harness_check.sh"
+echo "  python3 ${HREL}graph_memory.py mapa"
+echo "  python3 ${HREL}harness.py status"
+echo "  bin/harness-codex"
+echo "  bin/harness-gemini"
+echo "  bin/harness-grok"
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     echo ""
     echo "Modo subagentes activo:"
-    echo "  python3 harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
-    echo "  python3 harness.py start --feature 1"
-    echo "  python3 harness.py close --feature 1 --status done"
+    echo "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
+    echo "  python3 ${HREL}harness.py start --feature 1"
+    echo "  python3 ${HREL}harness.py close --feature 1 --status done"
 fi
 echo "========================================================"
