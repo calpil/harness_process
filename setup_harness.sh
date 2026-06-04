@@ -580,8 +580,8 @@ ensure_antigravity_cli() {
 # HARNESS_DIR : carpeta donde viven los scripts del arnes (= cwd del instalador).
 # REPO_ROOT   : raiz multi-repo (donde estan los microservicios). En 'subdir' es
 #               el padre; en 'root' es el propio HARNESS_DIR.
-# SURFACE_DIR : donde van CLAUDE.md, AGENTS.md, GEMINI.md, GROK.md,
-#               ANTIGRAVITY.md, LLM.md y .claude/settings.json (= REPO_ROOT).
+# SURFACE_DIR : donde van CLAUDE.md, AGENTS.md, GEMINI.md, LLM.md y
+#               .claude/settings.json (= REPO_ROOT).
 # HARNESS_EXEC: prefijo historico para superficies Claude (sin llaves).
 # HOOK_BASE   : prefijo para las rutas en .claude/settings.json (con llaves).
 # HREL        : prefijo relativo de archivos del arnes vistos desde REPO_ROOT.
@@ -628,6 +628,8 @@ printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"
+archive_legacy_file "$SURFACE_DIR/GROK.md" "GROK.md no se usa; Grok Build lee AGENTS.md/CLAUDE.md"
+archive_legacy_file "$SURFACE_DIR/ANTIGRAVITY.md" "ANTIGRAVITY.md no se usa; Antigravity lee AGENTS.md/.agents/rules"
 
 generated=(
     "graph_memory.py"
@@ -662,8 +664,6 @@ done
 backup_file "$SURFACE_DIR/CLAUDE.md"
 backup_file "$SURFACE_DIR/AGENTS.md"
 backup_file "$SURFACE_DIR/GEMINI.md"
-backup_file "$SURFACE_DIR/GROK.md"
-backup_file "$SURFACE_DIR/ANTIGRAVITY.md"
 backup_file "$SURFACE_DIR/LLM.md"
 backup_file "$SURFACE_DIR/.claude/settings.json"
 backup_file "$SURFACE_DIR/.claude/agents/leader.md"
@@ -2110,9 +2110,9 @@ echo "Generando superficies multi-LLM..."
 write_agent_surface "$SURFACE_DIR/CLAUDE.md"
 write_agent_surface "$SURFACE_DIR/AGENTS.md"
 write_agent_surface "$SURFACE_DIR/GEMINI.md"
-write_agent_surface "$SURFACE_DIR/GROK.md"
-write_agent_surface "$SURFACE_DIR/ANTIGRAVITY.md"
 write_agent_surface "$SURFACE_DIR/LLM.md"
+# GROK.md / ANTIGRAVITY.md no se generan: Grok Build lee AGENTS.md/CLAUDE.md y
+# Antigravity lee AGENTS.md/.agents/rules. Ambos toman el AGENTS.md de arriba.
 
 echo "Generando hooks y launchers multi-LLM..."
 write_harness_hook_runtime
@@ -2156,8 +2156,6 @@ echo "Superficies multi-LLM escritas en la raiz:"
 echo "  $SURFACE_DIR/CLAUDE.md"
 echo "  $SURFACE_DIR/AGENTS.md"
 echo "  $SURFACE_DIR/GEMINI.md"
-echo "  $SURFACE_DIR/GROK.md"
-echo "  $SURFACE_DIR/ANTIGRAVITY.md"
 echo "  $SURFACE_DIR/LLM.md"
 echo "  $SURFACE_DIR/.claude/settings.json (hooks automaticos para Claude Code)"
 echo "  $SURFACE_DIR/.codex/hooks.json (hooks automaticos para Codex; confiar con /hooks)"
