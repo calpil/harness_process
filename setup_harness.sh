@@ -199,7 +199,13 @@ Servicios transversales:
   agrega `--transversal` al comando `vincular`.
 - Quitar marca transversal:
   `python3 "__HREL__graph_memory.py" desmarcar --microservicio <servicio>`
-- Registrar progreso:
+- Registrar un avance de la feature activa (mueve hub + graphify + history.md +
+  current.md de una vez):
+  `python3 "__HREL__harness.py" advance --nota "<que avanzaste>"`
+  El arnes ademas hace este checkpoint AUTOMATICAMENTE al cierre de cada turno
+  (hook multi-LLM en Claude/Codex/Gemini/Grok) si el plan o la evidencia
+  cambiaron; `advance` queda para dejar la nota explicita.
+- Registrar progreso (evento de bajo nivel en el hub):
   `python3 "__HREL__graph_memory.py" registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
 - Consultar progreso:
   `python3 "__HREL__graph_memory.py" consultar --artefacto <nombre> [--microservicio <servicio>]`
@@ -309,6 +315,11 @@ run_post_tool() {
 }
 
 run_stop() {
+    # Checkpoint automatico de avance (multi-LLM: corre al cierre de turno en
+    # Claude/Codex/Gemini/Grok). Si el plan o la evidencia cambiaron, sincroniza
+    # hub + graphify. No-fatal y sin tocar el exit code: el gate sigue siendo
+    # harness_check (que manda en el resultado del hook).
+    HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" autocheck 1>&2 || true
     HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh"
 }
 
@@ -765,7 +776,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/harness_check.sh\""
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/harness.py\" autocheck >/dev/null 2>&1 || true; bash \"${CLAUDE_PROJECT_DIR}/harness_check.sh\""
           }
         ]
       }
@@ -1677,11 +1688,13 @@ def _repo_root():
     return ROOT
 
 
-REPO_ROOT = _repo_root()
+REPO_ROOT = os.environ.get("HARNESS_REPO_ROOT") or _repo_root()
 # Los planes (y demas docs durables del proyecto) viven en el docs/ de la RAIZ
 # multi-repo, junto a los PLAN-*.md / RUNBOOK del equipo, NO en la subcarpeta del
 # arnes. progress/ queda solo para el estado vivo (current.md + history.md).
 PLANS = os.path.join(REPO_ROOT, "docs")
+# Linea base del checkpoint automatico (mtime = ultimo autocheck del hook).
+AUTOCHECK_STAMP = os.path.join(PROGRESS, ".last_autocheck")
 
 
 def load_features():
@@ -1801,9 +1814,7 @@ def _graphify_refresh():
             pass
 
 
-def update_memories(accion, estado, artefacto, meta="", refresh_graphify=False):
-    """Mueve las memorias junto con la task: registra el evento en el hub y, en
-    cierres, refresca graphify. Best-effort: nunca aborta la operacion de task."""
+def _hub_register(accion, estado, artefacto, meta=""):
     try:
         subprocess.run(
             [sys.executable, GRAPH_MEM, "registrar",
@@ -1813,6 +1824,53 @@ def update_memories(accion, estado, artefacto, meta="", refresh_graphify=False):
         )
     except Exception as exc:
         print(f"[memoria] hub no actualizado: {exc}")
+
+
+def _graphify_refresh_bg():
+    """Como _graphify_refresh pero detached: lanza el rebuild en segundo plano y
+    retorna de inmediato, para no colgar el turno cuando lo dispara un hook. Usa
+    el mismo lock que el hook post-commit; el proceso hijo lo libera al terminar."""
+    graph_json = os.path.join(REPO_ROOT, "graphify-out", "graph.json")
+    if not (shutil.which("graphify") and os.path.exists(graph_json)):
+        return
+    lock = os.path.join(REPO_ROOT, "graphify-out", ".update.lock")
+    try:
+        os.mkdir(lock)
+    except OSError:
+        return  # ya hay un refresh en curso
+    stale = os.path.join(REPO_ROOT, "graphify-out", ".graphify_stale")
+    script = (
+        "trap 'rmdir \"$LOCK\" 2>/dev/null || true' EXIT; "
+        "if graphify update \"$ROOT\" >/dev/null 2>&1; then rm -f \"$STALE\"; "
+        "else : > \"$STALE\"; fi"
+    )
+    env = dict(os.environ, ROOT=REPO_ROOT, STALE=stale, LOCK=lock)
+    try:
+        subprocess.Popen(
+            ["bash", "-c", script], env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+    except Exception:
+        try:
+            os.rmdir(lock)
+        except OSError:
+            pass
+
+
+def _touch_stamp():
+    """Fija la linea base del checkpoint automatico (mtime = ahora)."""
+    try:
+        os.makedirs(PROGRESS, exist_ok=True)
+        open(AUTOCHECK_STAMP, "w").close()
+    except OSError:
+        pass
+
+
+def update_memories(accion, estado, artefacto, meta="", refresh_graphify=False):
+    """Mueve las memorias junto con la task: registra el evento en el hub y, en
+    cierres/avances manuales, refresca graphify (sincrono). Best-effort."""
+    _hub_register(accion, estado, artefacto, meta)
     if refresh_graphify:
         _graphify_refresh()
 
@@ -1867,6 +1925,7 @@ def cmd_start(args):
         f.write("\nEvidencia:\n- \n")
     log(f"start feature #{feature.get('id')} {feature.get('name')}")
     update_memories("start", "in_progress", f"feature-{feature.get('id')}", feature.get("name", ""))
+    _touch_stamp()  # linea base: el plan recien creado no dispara autocheck
     print(f"Feature #{feature.get('id')} iniciada. Plan: {rel_plan}")
 
 
@@ -1888,7 +1947,89 @@ def cmd_close(args):
         f.write("# Estado Actual\n\nSin feature activa.\n\n## Evidencia\n\n-\n")
     log(f"close feature #{feature.get('id')} status={args.status} note={args.note or ''}")
     update_memories("close", args.status, f"feature-{feature.get('id')}", args.note or "", refresh_graphify=True)
+    try:
+        os.remove(AUTOCHECK_STAMP)  # cierra el ciclo de checkpoints automaticos
+    except OSError:
+        pass
     print(f"Feature #{feature.get('id')} cerrada como {args.status}.")
+
+
+def active_feature(data, fid=None):
+    """La feature objetivo de un avance: la indicada por --feature, o la unica
+    in_progress si se omite."""
+    if fid is not None:
+        return find_feature(data, fid)
+    active = [f for f in data.get("features", []) if f.get("status") == "in_progress"]
+    if not active:
+        raise SystemExit("No hay feature in_progress. Inicia una: harness.py start --feature <id>")
+    if len(active) > 1:
+        ids = ", ".join(f"#{f.get('id')}" for f in active)
+        raise SystemExit(f"Varias features in_progress ({ids}); especifica --feature <id>.")
+    return active[0]
+
+
+def cmd_advance(args):
+    """Registra un hito intermedio de la feature activa SIN cerrarla: mueve plan,
+    current.md, history.md y las memorias (hub + graphify) de una sola vez."""
+    data = load_features()
+    feature = active_feature(data, args.feature)
+    if feature.get("status") != "in_progress":
+        raise SystemExit(f"Feature #{feature.get('id')} no esta in_progress (status={feature.get('status')}); usa start.")
+    fid = feature.get("id")
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 1) Plan: deja rastro del hito en el cuerpo del plan (append, no pisa).
+    plan = plan_path(feature)
+    if os.path.exists(plan):
+        with open(plan, "a", encoding="utf-8") as f:
+            f.write(f"\n### Avance {stamp}\n{args.nota}\n")
+    # 2) current.md: suma el avance a la evidencia (append, no reescribe).
+    if os.path.exists(CURRENT):
+        with open(CURRENT, "a", encoding="utf-8") as f:
+            f.write(f"- {stamp} {args.nota}\n")
+    # 3) history.md: una linea append-only.
+    log(f"advance feature #{fid} {args.nota}")
+    # 4) Memorias: hub (in_progress, con la nota) + graphify (best-effort).
+    update_memories("advance", "in_progress", f"feature-{fid}", args.nota,
+                    refresh_graphify=not args.no_graphify)
+    _touch_stamp()  # un advance manual tambien resetea la linea base del auto
+    extra = "" if args.no_graphify else " (hub + graphify)"
+    print(f"Avance registrado en feature #{fid}{extra}.")
+
+
+def cmd_autocheck(args):
+    """Checkpoint automatico para los hooks (fin de turno, multi-LLM): si hay UNA
+    feature in_progress y su plan/evidencia cambio desde el ultimo checkpoint,
+    registra un avance auto (hub + graphify en segundo plano + history.md).
+    Silencioso, idempotente y best-effort: jamas debe romper un turno."""
+    try:
+        data = load_features()
+        active = [f for f in data.get("features", []) if f.get("status") == "in_progress"]
+        if len(active) != 1:
+            return
+        feature = active[0]
+        fid = feature.get("id")
+        last = os.path.getmtime(AUTOCHECK_STAMP) if os.path.exists(AUTOCHECK_STAMP) else 0.0
+        watched = []
+        plan = plan_path(feature)
+        if os.path.exists(plan):
+            watched.append(plan)
+        if os.path.isdir(PLANS):
+            for name in os.listdir(PLANS):
+                if name.endswith(".md") and name.startswith(("impl-", "review-")):
+                    watched.append(os.path.join(PLANS, name))
+        changed = sorted({os.path.basename(p) for p in watched if os.path.getmtime(p) > last})
+        if not changed:
+            return
+        nota = "auto: " + ", ".join(changed)
+        log(f"autocheck feature #{fid} {nota}")
+        _hub_register("advance", "in_progress", f"feature-{fid}", nota)
+        if not args.no_graphify:
+            _graphify_refresh_bg()
+        _touch_stamp()
+        print(f"[autocheck] avance auto en feature #{fid}: {nota}")
+    except Exception as exc:
+        # Best-effort absoluto: corre al cierre de cada turno; nunca abortes.
+        print(f"[autocheck] omitido: {exc}")
 
 
 def cmd_add(args):
@@ -1923,6 +2064,16 @@ def main():
     close.add_argument("--status", choices=["done", "blocked", "pending"], required=True)
     close.add_argument("--note")
     close.set_defaults(func=cmd_close)
+
+    adv = sub.add_parser("advance")
+    adv.add_argument("--feature")
+    adv.add_argument("--nota", required=True)
+    adv.add_argument("--no-graphify", action="store_true")
+    adv.set_defaults(func=cmd_advance)
+
+    autochk = sub.add_parser("autocheck")
+    autochk.add_argument("--no-graphify", action="store_true")
+    autochk.set_defaults(func=cmd_autocheck)
 
     add = sub.add_parser("add")
     add.add_argument("--name", required=True)
@@ -2022,6 +2173,11 @@ Implementas UNA unidad concreta del plan del lider.
 3. Haz cambios pequenos y verificables. Ejecuta los tests cercanos al cambio
    (ver `__HREL__docs/verification.md`).
 4. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ).
+5. Registra hitos intermedios con
+   `python3 "__HREL__harness.py" advance --nota "<que avanzaste>"`: mueve hub,
+   graphify, history.md y current.md sin esperar al cierre. (Al cerrar cada turno
+   el hook hace un checkpoint automatico si el plan/evidencia cambio; usa
+   `advance` para la nota explicita de que hiciste.)
 
 ## Reporte minimo (docs/impl-<feature>.md)
 
