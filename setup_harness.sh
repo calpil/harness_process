@@ -3,7 +3,8 @@
 # Unifica las variantes previas (setup basico + improved) en un solo instalador:
 #   - Memoria hub compartida (graph_memory.py) con mapa/impacto/vincular/
 #     desmarcar/sync_git/vincular-grafo + registrar/consultar.
-#   - Integracion graphify (estructura automatica, rebuild semantico, hub).
+#   - Integracion graphify (estructura automatica, rebuild semantico, hub) con el
+#     comando /graphify nativo desplegado por agente (Claude/Codex/Gemini/Antigravity).
 #   - Superficies y hooks multi-LLM auto-instalados (Claude, Codex, Gemini,
 #     Grok, Antigravity, generica) sin flag --target.
 #   - Capa opcional de subagentes (lider/implementer/reviewer, harness.py).
@@ -13,6 +14,11 @@ IFS=$'\n\t'
 
 # Subagentes, graphify y Antigravity quedan activos por defecto.
 INSTALL_GRAPHIFY=1
+# Despliega el comando /graphify nativo por agente (Claude/Codex/Gemini/Antigravity)
+# via `graphify install --platform <agente>`. Asi el rebuild semantico deja de ser
+# exclusivo de Claude. Se instala a nivel usuario (HOME); usa --no-graphify-skills
+# para asegurar solo el binario sin tocar la config global de cada agente.
+INSTALL_GRAPHIFY_SKILLS=1
 INSTALL_ANTIGRAVITY=1
 WITH_SUBAGENTS=1
 FORCE=0
@@ -29,6 +35,8 @@ Uso: ./setup_harness.sh [opciones]
 Opciones:
   --no-subagents       Omite la capa lider/implementer/reviewer (se instala por defecto).
   --no-graphify        No asegura graphify (por defecto se asegura, instalandolo si falta).
+  --no-graphify-skills No despliega el comando /graphify por agente (Claude/Codex/
+                       Gemini/Antigravity); deja solo el CLI graphify.
   --with-subagents     Ya es el default; se mantiene por compatibilidad.
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
   --install-antigravity Ya es el default; asegura Antigravity CLI si falta.
@@ -56,6 +64,7 @@ while [ "$#" -gt 0 ]; do
         --install-antigravity) INSTALL_ANTIGRAVITY=1 ;;
         --no-subagents) WITH_SUBAGENTS=0 ;;
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
+        --no-graphify-skills) INSTALL_GRAPHIFY_SKILLS=0 ;;
         --no-antigravity) INSTALL_ANTIGRAVITY=0 ;;
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
@@ -193,12 +202,17 @@ Servicios transversales:
 
 ## graphify
 
+- El instalador deja el comando `/graphify` nativo en cada agente soportado
+  (Claude, Codex, Gemini, Antigravity) via `graphify install --platform <agente>`.
+  Grok no tiene plataforma propia: usa el CLI (`graphify update .`,
+  `graphify query "..."`) o lee la skill de Claude si tu build lo permite.
 - El hook `post-commit` de cada microservicio corre `graphify update` en segundo
   plano cuando hay grafo existente y marca `graphify-out/.graphify_stale` si
   detecta cambios que requieren rebuild semantico.
-- Primera construccion o rebuild semantico: usa `/graphify` o
-  `/graphify --update` si tu agente lo soporta. Si solo tienes CLI, usa el
-  comando `graphify` disponible en tu entorno.
+- Primera construccion o rebuild semantico: usa `/graphify` (o `/graphify
+  --update`). Sin el comando nativo: `graphify update .` (estructural, sin LLM) o
+  `graphify extract .` (headless AST + semantico). `graphify query "..."` consulta
+  el grafo en cualquier agente.
 - Despues del rebuild, borra `graphify-out/.graphify_stale` y refresca el hub:
   `python3 "__HREL__graph_memory.py" vincular-grafo`
 
@@ -627,6 +641,7 @@ echo "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-rep
 echo "   superficies/hooks: Claude, Codex, Gemini, Grok, Antigravity, generica"
 echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
+echo "   /graphify por agente: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo "Claude/Codex/Gemini/Antigravity" || echo no)"
 echo "   antigravity:$([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo " asegurar" || echo " no")"
 
 if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
@@ -2165,6 +2180,29 @@ else
     echo "   -> graphify no instalado (--no-graphify activo). Quita ese flag para asegurarlo."
 fi
 
+# Despliega el comando /graphify nativo en cada agente que graphify soporta, para
+# que el rebuild semantico no sea exclusivo de Claude. Se corre desde un directorio
+# AISLADO con scope global (HOME): las skills quedan en ~/.claude, ~/.agents (Codex),
+# ~/.gemini y ~/.gemini/config (Antigravity); los archivos que `graphify install`
+# escribe en el cwd (GEMINI.md, .gemini/settings.json) caen en el tmp descartable y
+# NO pisan la superficie del arnes.
+if [ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && command -v graphify >/dev/null 2>&1; then
+    echo "Desplegando el comando /graphify por agente..."
+    gx_tmp="$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}/harness-graphify.$$")"
+    mkdir -p "$gx_tmp"
+    for gx_plat in claude codex gemini antigravity; do
+        if ( cd "$gx_tmp" && graphify install --platform "$gx_plat" ) >/dev/null 2>&1; then
+            echo "   -> /graphify disponible en $gx_plat."
+        else
+            echo "   -> aviso: no se pudo desplegar /graphify en $gx_plat."
+        fi
+    done
+    rm -rf "$gx_tmp"
+    echo "   -> Grok: sin plataforma propia; usa el CLI ('graphify update .' / 'graphify query')."
+elif [ "$INSTALL_GRAPHIFY_SKILLS" -eq 0 ]; then
+    echo "   -> Comando /graphify por agente omitido (--no-graphify-skills)."
+fi
+
 ensure_antigravity_cli
 
 echo ""
@@ -2198,6 +2236,8 @@ echo "  bin/harness-codex"
 echo "  bin/harness-gemini"
 echo "  bin/harness-grok"
 echo "  bin/harness-antigravity"
+echo "  /graphify           (comando nativo en Claude/Codex/Gemini/Antigravity)"
+echo "  graphify query \"...\"  (CLI; funciona en cualquier agente, incl. Grok)"
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     echo ""
     echo "Modo subagentes activo:"
