@@ -168,9 +168,13 @@ orden:
    ciegas: `graphify query "<pregunta de la task>"`
 4. Trabaja dentro del microservicio correspondiente; no programes en la raiz
    multi-repo salvo que la tarea sea del arnes.
-5. Valida los servicios afectados y deja evidencia en `__HREL__progress/`.
-6. Al cerrar, ejecuta:
-   `bash "__HREL__harness_check.sh"`
+5. Valida los servicios afectados. Los documentos durables (plan, investigacion,
+   evidencia de implementacion/review) se guardan en `docs/` de la RAIZ del
+   proyecto, no en chat ni en `__HREL__progress/` (solo estado vivo).
+6. Al cerrar la feature usa
+   `python3 "__HREL__harness.py" close --feature <id> --status <estado>`: mueve la
+   task y las memorias juntas (registra el hub y refresca graphify). Luego corre
+   `bash "__HREL__harness_check.sh"`.
 
 Los comandos anteriores usan rutas relativas a la raiz multi-repo. Si estas
 dentro de un microservicio, vuelve a la raiz o usa la ruta absoluta del arnes.
@@ -232,11 +236,11 @@ Mapa completo y diagrama: `__HREL__roles/README.md`. Tres roles leidos como
 mapa progresivo (lee solo lo necesario para la tarea actual):
 
 1. **Lider** (`__HREL__roles/leader.md`): fija alcance e impacto y escribe el
-   plan en `__HREL__progress/current.md`. No implementa codigo.
+   plan en `docs/` de la raiz. No implementa codigo.
 2. **Implementer** (`__HREL__roles/implementer.md`): modifica una unidad
-   concreta y deja evidencia en `__HREL__progress/`.
+   concreta y deja evidencia durable en `docs/` de la raiz.
 3. **Reviewer** (`__HREL__roles/reviewer.md`): verifica tests, impacto,
-   checkpoints y estado Git; veredicto en `__HREL__progress/`.
+   checkpoints y estado Git; veredicto en `docs/` de la raiz.
 
 Orquestacion (mismos roles, formato nativo por herramienta):
 
@@ -252,13 +256,17 @@ Archivos principales:
 
 - `__HREL__CHECKPOINTS.md`: criterios de cierre.
 - `__HREL__feature_list.json`: backlog ejecutable.
-- `__HREL__progress/current.md`: estado vivo de la tarea.
+- `docs/` (RAIZ del proyecto): planes, investigaciones y evidencia durable
+  (`plan-feature-<f>.md`, `impl-<f>.md`, `review-<f>.md`), junto a los docs del
+  equipo.
+- `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
 - `__HREL__progress/history.md`: bitacora append-only.
 - `__HREL__docs/architecture.md`: mapa de arquitectura.
 - `__HREL__docs/conventions.md`: convenciones del equipo.
 - `__HREL__docs/verification.md`: comandos de validacion.
 
-Todo hallazgo relevante se escribe en `__HREL__progress/`. Una respuesta corta
+Los documentos durables (plan, investigacion, evidencia) se escriben en `docs/`
+de la raiz; `__HREL__progress/` guarda solo el estado vivo. Una respuesta corta
 en chat no reemplaza evidencia persistida.
 SURFACE_EOF
 
@@ -678,9 +686,6 @@ generated=(
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     generated+=(
         "CHECKPOINTS.md"
-        "feature_list.json"
-        "progress/current.md"
-        "progress/history.md"
         "docs/architecture.md"
         "docs/conventions.md"
         "docs/verification.md"
@@ -689,6 +694,9 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "roles/implementer.md"
         "roles/reviewer.md"
     )
+    # feature_list.json, progress/current.md e history.md NO se listan aqui: son
+    # estado vivo (backlog, bitacora, tarea en curso), no plantillas. Se crean
+    # solo si faltan (mas abajo) para no pisarlos al reinstalar.
 fi
 
 for f in "${generated[@]}"; do
@@ -1642,6 +1650,10 @@ cat <<'HARNESS_PY_EOF' > harness.py
 import argparse
 import json
 import os
+import re
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -1649,6 +1661,27 @@ FEATURES = os.path.join(ROOT, "feature_list.json")
 PROGRESS = os.path.join(ROOT, "progress")
 CURRENT = os.path.join(PROGRESS, "current.md")
 HISTORY = os.path.join(PROGRESS, "history.md")
+GRAPH_MEM = os.path.join(ROOT, "graph_memory.py")
+
+
+def _repo_root():
+    """Raiz multi-repo: en layout 'subdir' es el padre del arnes (igual criterio
+    que graph_memory.py). docs/ y graphify-out viven en esa raiz."""
+    layout = os.path.join(ROOT, ".harness_layout")
+    try:
+        with open(layout, "r", encoding="utf-8") as fh:
+            if fh.read().strip() == "subdir":
+                return os.path.dirname(ROOT)
+    except OSError:
+        pass
+    return ROOT
+
+
+REPO_ROOT = _repo_root()
+# Los planes (y demas docs durables del proyecto) viven en el docs/ de la RAIZ
+# multi-repo, junto a los PLAN-*.md / RUNBOOK del equipo, NO en la subcarpeta del
+# arnes. progress/ queda solo para el estado vivo (current.md + history.md).
+PLANS = os.path.join(REPO_ROOT, "docs")
 
 
 def load_features():
@@ -1677,6 +1710,111 @@ def find_feature(data, fid):
         if str(feature.get("id")) == str(fid):
             return feature
     raise SystemExit(f"Feature no encontrada: {fid}")
+
+
+def slugify(text):
+    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return (s or "feature")[:48]
+
+
+def plan_path(feature):
+    return os.path.join(PLANS, f"plan-feature-{feature.get('id')}-{slugify(feature.get('name', ''))}.md")
+
+
+def plan_template(feature):
+    services = feature.get("microservicios", []) or ["(sin servicios)"]
+    lines = [
+        f"# Plan - Feature #{feature.get('id')}: {feature.get('name')}",
+        "",
+        "Estado: in_progress",
+        "Microservicios:",
+    ]
+    lines += [f"- {s}" for s in services]
+    lines += [
+        "",
+        "## Alcance",
+        "",
+        "## Impacto entre microservicios",
+        "<!-- python3 graph_memory.py impacto --microservicio <proyecto>/<servicio> -->",
+        "",
+        "## Consulta al grafo (graphify)",
+        '<!-- graphify query "<pregunta de la task>" -->',
+        "",
+        "## Delegacion (implementer)",
+        "- ",
+        "",
+        "## Criterios de cierre (reviewer)",
+        "- ",
+        "",
+        "## Riesgos",
+        "- ",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_plan(feature):
+    """Persiste el plan en el docs/ de la RAIZ multi-repo (archivo permanente por
+    feature). No pisa un plan ya escrito por el lider."""
+    os.makedirs(PLANS, exist_ok=True)
+    path = plan_path(feature)
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(plan_template(feature))
+    return path
+
+
+def _graphify_refresh():
+    """Refresca graphify si esta instalado y hay grafo. Best-effort, bajo el
+    mismo lock que el hook post-commit para no duplicar ni corromper la salida."""
+    graph_json = os.path.join(REPO_ROOT, "graphify-out", "graph.json")
+    if not (shutil.which("graphify") and os.path.exists(graph_json)):
+        return
+    lock = os.path.join(REPO_ROOT, "graphify-out", ".update.lock")
+    try:
+        os.mkdir(lock)
+    except OSError:
+        return  # ya hay un update en curso (p.ej. el hook); no dupliques
+    stale = os.path.join(REPO_ROOT, "graphify-out", ".graphify_stale")
+    try:
+        rc = subprocess.run(
+            ["graphify", "update", REPO_ROOT],
+            check=False, timeout=300,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode
+        if rc == 0:
+            try:
+                os.remove(stale)  # grafo fresco: limpia el marcador
+            except OSError:
+                pass
+        else:
+            open(stale, "a").close()  # update fallo: marca stale
+    except Exception:
+        try:
+            open(stale, "a").close()  # timeout u otro error: marca stale
+        except OSError:
+            pass
+    finally:
+        try:
+            os.rmdir(lock)
+        except OSError:
+            pass
+
+
+def update_memories(accion, estado, artefacto, meta="", refresh_graphify=False):
+    """Mueve las memorias junto con la task: registra el evento en el hub y, en
+    cierres, refresca graphify. Best-effort: nunca aborta la operacion de task."""
+    try:
+        subprocess.run(
+            [sys.executable, GRAPH_MEM, "registrar",
+             "--accion", accion, "--estado", estado,
+             "--artefacto", artefacto, "--meta", meta, "--agente", "harness.py"],
+            check=False,
+        )
+    except Exception as exc:
+        print(f"[memoria] hub no actualizado: {exc}")
+    if refresh_graphify:
+        _graphify_refresh()
 
 
 def cmd_status(_args):
@@ -1716,30 +1854,40 @@ def cmd_start(args):
     feature["status"] = "in_progress"
     feature["started_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     save_features(data)
+    plan = write_plan(feature)
+    rel_plan = os.path.relpath(plan, REPO_ROOT)
     os.makedirs(PROGRESS, exist_ok=True)
     with open(CURRENT, "w", encoding="utf-8") as f:
         f.write(f"# Feature #{feature.get('id')}: {feature.get('name')}\n\n")
-        f.write(f"Estado: in_progress\n\n")
+        f.write("Estado: in_progress\n")
+        f.write(f"Plan: {rel_plan}\n\n")
         f.write("Microservicios:\n")
         for service in feature.get("microservicios", []):
             f.write(f"- {service}\n")
         f.write("\nEvidencia:\n- \n")
     log(f"start feature #{feature.get('id')} {feature.get('name')}")
-    print(f"Feature #{feature.get('id')} iniciada.")
+    update_memories("start", "in_progress", f"feature-{feature.get('id')}", feature.get("name", ""))
+    print(f"Feature #{feature.get('id')} iniciada. Plan: {rel_plan}")
 
 
 def cmd_close(args):
     data = load_features()
     feature = find_feature(data, args.feature)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     feature["status"] = args.status
-    feature["closed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    feature["closed_at"] = stamp
     if args.note:
         feature["note"] = args.note
     save_features(data)
+    plan = plan_path(feature)
+    if os.path.exists(plan):
+        with open(plan, "a", encoding="utf-8") as f:
+            f.write(f"\n---\nCerrado: {stamp} - status={args.status} - {args.note or ''}\n")
     os.makedirs(PROGRESS, exist_ok=True)
     with open(CURRENT, "w", encoding="utf-8") as f:
         f.write("# Estado Actual\n\nSin feature activa.\n\n## Evidencia\n\n-\n")
     log(f"close feature #{feature.get('id')} status={args.status} note={args.note or ''}")
+    update_memories("close", args.status, f"feature-{feature.get('id')}", args.note or "", refresh_graphify=True)
     print(f"Feature #{feature.get('id')} cerrada como {args.status}.")
 
 
@@ -1838,8 +1986,11 @@ al implementer: tu salida es el plan, no el diff.
    `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
 4. Si existe `graphify-out/graph.json`, consulta el grafo antes de leer a ciegas:
    `graphify query "<pregunta de la task>"`
-5. Escribe el plan en `__HREL__progress/current.md`: alcance, microservicios
+5. Persiste el plan en `docs/plan-feature-<id>-<slug>.md` (en el `docs/` de la
+   RAIZ del proyecto, junto a los PLAN-*.md del equipo): alcance, microservicios
    afectados, riesgos y delegacion concreta (que archivos y en que orden).
+   `__HREL__progress/current.md` queda como puntero vivo; `harness.py start`
+   siembra ambos.
 
 ## Entregable
 
@@ -1852,7 +2003,7 @@ al implementer: tu salida es el plan, no el diff.
 
 - No edites codigo fuente. Si hay que tocar contratos compartidos, registralo
   como impacto antes de delegar.
-- Una respuesta corta en chat no reemplaza el plan persistido en `progress/`.
+- Una respuesta corta en chat no reemplaza el plan persistido en `docs/`.
 LEADER_ROLE_EOF
 
     cat <<'IMPLEMENTER_ROLE_EOF' > roles/implementer.md
@@ -1862,16 +2013,17 @@ Implementas UNA unidad concreta del plan del lider.
 
 ## Protocolo
 
-1. Lee el plan en `__HREL__progress/current.md` y, si lo necesitas, tu rol en
+1. Lee el plan en `docs/plan-feature-<id>-<slug>.md` (apuntado desde
+   `__HREL__progress/current.md`) y, si lo necesitas, tu rol en
    `__HREL__roles/implementer.md`.
 2. Trabaja solo en los microservicios asignados. No cambies contratos
    compartidos sin registrar impacto:
    `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
 3. Haz cambios pequenos y verificables. Ejecuta los tests cercanos al cambio
    (ver `__HREL__docs/verification.md`).
-4. Deja evidencia en `__HREL__progress/impl_<feature>.md`.
+4. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ).
 
-## Reporte minimo (progress/impl_<feature>.md)
+## Reporte minimo (docs/impl-<feature>.md)
 
 - Archivos modificados.
 - Decisiones tomadas.
@@ -1896,11 +2048,15 @@ Verificas calidad, impacto y criterios de cierre. NO implementas.
 - Tests relevantes ejecutados y en verde (ver `__HREL__docs/verification.md`).
 - Frontends validados cuando aplique: `bash "__HREL__validate_ui.sh" <url>`.
 - `graphify query` usado, o justificacion si no hay grafo.
+- Plan archivado en `docs/` de la raiz y al dia con lo implementado.
+- Task y memorias en sync: cierra con
+  `python3 "__HREL__harness.py" close --feature <id> --status <estado>`, que
+  registra el hub y refresca graphify automaticamente.
 - Checkpoints completos (`__HREL__CHECKPOINTS.md`).
 - Repos afectados limpios o commiteados segun politica.
 - `bash "__HREL__harness_check.sh"` limpio.
 
-## Veredicto (progress/review_<feature>.md)
+## Veredicto (docs/review-<feature>.md)
 
 - `approved`
 - `changes_requested` (con lista accionable)
@@ -1924,7 +2080,7 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
             |
             v
    +-----------+    plan en        +--------------+   evidencia en   +------------+
-   |  LIDER    |--> current.md  --> | IMPLEMENTER  |--> impl_<f>.md -->| REVIEWER   |
+   |  LIDER    |--> docs/plan-* --> | IMPLEMENTER  |--> docs/impl-* -->| REVIEWER   |
    | (planner) |                    | (1 unidad)   |                  | (verifica) |
    +-----------+                    +--------------+                  +------------+
         ^                                                                   |
@@ -1938,11 +2094,11 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
 
 ## Roles
 
-| Rol         | Cuando usarlo                             | Tools (Claude)          | Escribe en             |
-|-------------|-------------------------------------------|-------------------------|------------------------|
-| leader      | Al iniciar: alcance, impacto, plan        | Read, Grep, Glob, Bash  | progress/current.md    |
-| implementer | Escribir o modificar una unidad de codigo | Read, Edit, Write, Bash | progress/impl_<f>.md   |
-| reviewer    | Antes de cerrar: tests, impacto, gates    | Read, Grep, Glob, Bash  | progress/review_<f>.md |
+| Rol         | Cuando usarlo                             | Tools (Claude)          | Escribe en                |
+|-------------|-------------------------------------------|-------------------------|---------------------------|
+| leader      | Al iniciar: alcance, impacto, plan        | Read, Grep, Glob, Bash  | docs/plan-feature-<f>.md  |
+| implementer | Escribir o modificar una unidad de codigo | Read, Edit, Write, Bash | docs/impl-<f>.md          |
+| reviewer    | Antes de cerrar: tests, impacto, gates    | Read, Grep, Glob, Bash  | docs/review-<f>.md        |
 
 Definicion completa: `__HREL__roles/leader.md`, `__HREL__roles/implementer.md`,
 `__HREL__roles/reviewer.md`.
@@ -1991,8 +2147,9 @@ subagente `leader`.
 
 ## Regla anti perdida de contexto
 
-Todo hallazgo relevante se escribe en `progress/`. Una respuesta corta en chat
-no reemplaza evidencia persistida.
+Los documentos durables se escriben en `docs/` de la raiz; `progress/` guarda
+solo el estado vivo. Una respuesta corta en chat no reemplaza evidencia
+persistida.
 AGENTMAP_EOF
 
     subst_hrel_inplace roles/leader.md
@@ -2034,9 +2191,9 @@ AGENTMAP_EOF
     }
 
     # Descripciones compartidas por las tres superficies de subagentes nativos.
-    desc_leader="Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en progress/current.md. No implementa codigo."
-    desc_impl="Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia en progress/. Usalo para escribir o modificar codigo."
-    desc_rev="Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en progress/. Solo lectura; no implementa."
+    desc_leader="Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en docs/ de la raiz. No implementa codigo."
+    desc_impl="Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia durable en docs/ de la raiz. Usalo para escribir o modificar codigo."
+    desc_rev="Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en docs/ de la raiz. Solo lectura; no implementa."
 
     # --- Claude Code: .claude/agents/*.md (frontmatter + cuerpo de rol) ----------
     build_claude_agent leader      leader      claude-opus-4-8   max "Read, Grep, Glob, Bash"              "$desc_leader"
@@ -2063,18 +2220,25 @@ AGENTMAP_EOF
 Antes de cerrar una tarea:
 
 - [ ] La feature activa en `feature_list.json` refleja el estado real.
-- [ ] `progress/current.md` contiene alcance, servicios afectados y evidencia.
+- [ ] El plan vive en `docs/plan-feature-<feature>.md` (raiz) y refleja lo hecho.
+- [ ] `progress/current.md` apunta al plan y contiene evidencia al dia.
 - [ ] Se ejecuto impacto para los microservicios modificados:
       `python3 graph_memory.py impacto --microservicio <proyecto>/<servicio>`
 - [ ] Si existe `graphify-out/graph.json`, se consulto `graphify query`.
 - [ ] Tests relevantes ejecutados por cada microservicio afectado.
 - [ ] Frontends validados con `validate_ui.sh <url>` cuando aplique.
-- [ ] `progress/review_<feature>.md` contiene veredicto del reviewer.
+- [ ] `docs/review-<feature>.md` contiene veredicto del reviewer.
 - [ ] Repos afectados limpios o commiteados segun politica.
+- [ ] Task y memorias en sync: cierre via
+      `python3 harness.py close --feature <id> --status <estado>` (registra el hub
+      y refresca graphify).
 - [ ] `harness_check.sh` pasa o el bloqueo queda documentado.
 CHECKPOINTS_EOF
 
-    cat <<FEATURES_EOF > feature_list.json
+    # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
+    # features ya cargadas.
+    if [ ! -f feature_list.json ]; then
+        cat <<FEATURES_EOF > feature_list.json
 {
   "project": "$PROJECT_NAME",
   "rules": {
@@ -2085,8 +2249,12 @@ CHECKPOINTS_EOF
   "features": []
 }
 FEATURES_EOF
+    fi
 
-    cat <<'CURRENT_EOF' > progress/current.md
+    # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
+    # en curso ni la bitacora ya escrita.
+    if [ ! -f progress/current.md ]; then
+        cat <<'CURRENT_EOF' > progress/current.md
 # Estado Actual
 
 Sin feature activa.
@@ -2095,10 +2263,13 @@ Sin feature activa.
 
 -
 CURRENT_EOF
+    fi
 
-    cat <<'HISTORY_EOF' > progress/history.md
+    if [ ! -f progress/history.md ]; then
+        cat <<'HISTORY_EOF' > progress/history.md
 # Historial
 HISTORY_EOF
+    fi
 
     cat <<'ARCH_EOF' > docs/architecture.md
 # Arquitectura
