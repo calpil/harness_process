@@ -13,6 +13,11 @@ IFS=$'\n\t'
 INSTALL_GRAPHIFY=1
 WITH_SUBAGENTS=1
 FORCE=0
+# Layout: 'root' = el arnes vive en la raiz multi-repo (default, hermano de los
+# microservicios). 'subdir' = el arnes vive en una subcarpeta y orquesta el
+# directorio PADRE; la superficie (CLAUDE.md + .claude/settings.json) se escribe
+# en el padre y los scripts resuelven el padre como raiz multi-repo.
+LAYOUT=root
 
 usage() {
     cat <<'USAGE'
@@ -23,6 +28,10 @@ Opciones:
   --no-graphify        No asegura graphify (por defecto se asegura, instalandolo si falta).
   --with-subagents     Ya es el default; se mantiene por compatibilidad.
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
+  --subdir             El arnes vive en esta subcarpeta y orquesta el directorio
+                       PADRE: escribe CLAUDE.md y .claude/settings.json en el
+                       padre (raiz multi-repo) y mantiene aqui los scripts.
+                       Correlo desde dentro de la subcarpeta del arnes.
   --force              Sobrescribe archivos sin crear backup.
   -h, --help           Muestra esta ayuda.
 
@@ -37,6 +46,7 @@ while [ "$#" -gt 0 ]; do
         --install-graphify) INSTALL_GRAPHIFY=1 ;;
         --no-subagents) WITH_SUBAGENTS=0 ;;
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
+        --subdir) LAYOUT=subdir ;;
         --force) FORCE=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
@@ -87,22 +97,54 @@ write_file_notice() {
     echo "   -> $1"
 }
 
-PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$(pwd)")}"
+# --- Resolucion de layout -----------------------------------------------------
+# HARNESS_DIR : carpeta donde viven los scripts del arnes (= cwd del instalador).
+# REPO_ROOT   : raiz multi-repo (donde estan los microservicios). En 'subdir' es
+#               el padre; en 'root' es el propio HARNESS_DIR.
+# SURFACE_DIR : donde van CLAUDE.md y .claude/settings.json (= REPO_ROOT).
+# HARNESS_EXEC: prefijo para invocar scripts desde CLAUDE.md (sin llaves).
+# HOOK_BASE   : prefijo para las rutas en .claude/settings.json (con llaves).
+# HREL        : prefijo relativo de archivos del arnes vistos desde REPO_ROOT.
+HARNESS_DIR="$(pwd -P)"
+if [ "$LAYOUT" = "subdir" ]; then
+    REPO_ROOT="$(dirname "$HARNESS_DIR")"
+    HARNESS_SUBDIR="$(basename "$HARNESS_DIR")"
+    HARNESS_EXEC='$CLAUDE_PROJECT_DIR/'"$HARNESS_SUBDIR"
+    HOOK_BASE='${CLAUDE_PROJECT_DIR}/'"$HARNESS_SUBDIR"
+    HREL="$HARNESS_SUBDIR/"
+else
+    REPO_ROOT="$HARNESS_DIR"
+    HARNESS_SUBDIR=""
+    HARNESS_EXEC='$CLAUDE_PROJECT_DIR'
+    HOOK_BASE='${CLAUDE_PROJECT_DIR}'
+    HREL=""
+fi
+SURFACE_DIR="$REPO_ROOT"
+PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 
-echo "== Instalando Harness Process en: $(pwd) =="
-echo "   proyecto: $PROJECT_NAME"
+echo "== Instalando Harness Process en: $HARNESS_DIR =="
+echo "   proyecto:   $PROJECT_NAME"
+echo "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
 echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
 
+if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
+    echo "[!] --subdir requiere correr el instalador DESDE la subcarpeta del arnes," >&2
+    echo "    de modo que su padre sea la raiz multi-repo. Aborto." >&2
+    exit 2
+fi
+
 mkdir -p .claude
 [ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p .claude/agents docs progress
+[ "$LAYOUT" = "subdir" ] && mkdir -p "$SURFACE_DIR/.claude"
+
+# Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
+printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"
 
 generated=(
-    "CLAUDE.md"
-    ".claude/settings.json"
     "graph_memory.py"
     "init.sh"
     "validate_ui.sh"
@@ -131,9 +173,12 @@ fi
 for f in "${generated[@]}"; do
     backup_file "$f"
 done
+# La superficie (CLAUDE.md + settings.json) puede vivir en el padre (subdir).
+backup_file "$SURFACE_DIR/CLAUDE.md"
+backup_file "$SURFACE_DIR/.claude/settings.json"
 
-echo "Generando CLAUDE.md..."
-cat <<'CLAUDE_MD_EOF' > CLAUDE.md
+echo "Generando CLAUDE.md (en $SURFACE_DIR)..."
+cat <<'CLAUDE_MD_EOF' > "$SURFACE_DIR/CLAUDE.md"
 # Harness Process
 
 Estas operando en la raiz de un arnes multi-repo que coordina microservicios,
@@ -142,15 +187,18 @@ memoria transversal compartida (hub), un grafo de conocimiento del codigo
 
 ## Protocolo obligatorio
 
+> Los scripts del arnes se invocan con la ruta que aparece en cada comando
+> (basada en `$CLAUDE_PROJECT_DIR`), asi funcionan desde cualquier carpeta.
+
 Antes de tocar codigo, arquitectura o dependencias entre servicios, en ESTE
 orden (no son opcionales):
 
 1. Revisa el mapa del hub que `init.sh` imprime en cada `SessionStart`, o:
-   `python3 graph_memory.py mapa`
+   `python3 "__HARNESS__/graph_memory.py" mapa`
 2. Si vas a modificar un servicio, revisa su radio de impacto:
-   `python3 graph_memory.py impacto --microservicio <proyecto>/<servicio>`
-3. Si existe `graphify-out/graph.json`, consulta el grafo ANTES de leer a
-   ciegas: `graphify query "<pregunta de la task>"`
+   `python3 "__HARNESS__/graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+3. Si existe `graphify-out/graph.json` (en la raiz), consulta el grafo ANTES de
+   leer a ciegas: `graphify query "<pregunta de la task>"`
 4. Trabaja dentro del microservicio correspondiente; NUNCA programes en la raiz
    (`cd <microservicio>` y al terminar vuelve con `cd ..`).
 5. Valida los servicios afectados y deja evidencia.
@@ -175,15 +223,15 @@ Son sistemas SEPARADOS: graphify NO usa el hub y el hub NO usa graphify.
 - `impacto` ve dependencias de TODOS los proyectos del hub. Para un servicio de
   otro proyecto usa el id calificado `<proyecto>/<servicio>`.
 - Declarar que un servicio depende de otro:
-  `python3 graph_memory.py vincular --microservicio <consumidor> --destino <proyecto>/<servicio>`.
+  `python3 "__HARNESS__/graph_memory.py" vincular --microservicio <consumidor> --destino <proyecto>/<servicio>`.
   Agrega `--transversal` SOLO si el destino es un servicio nucleo/compartido
   consumido por varios proyectos. Para quitar la marca:
-  `python3 graph_memory.py desmarcar --microservicio <servicio>`.
+  `python3 "__HARNESS__/graph_memory.py" desmarcar --microservicio <servicio>`.
 - Registrar/consultar progreso de un artefacto en el hub:
-  `python3 graph_memory.py registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
-  y `python3 graph_memory.py consultar --artefacto <nombre> [--microservicio <servicio>]`.
+  `python3 "__HARNESS__/graph_memory.py" registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
+  y `python3 "__HARNESS__/graph_memory.py" consultar --artefacto <nombre> [--microservicio <servicio>]`.
 - Tras commitear, valida los proyectos afectados (tests unitarios; para
-  frontends `"$CLAUDE_PROJECT_DIR/validate_ui.sh" <url-dev-server>`,
+  frontends `"__HARNESS__/validate_ui.sh" <url-dev-server>`,
   se auto-localiza desde cualquier carpeta).
 
 ## graphify: ciclo de actualizacion
@@ -196,7 +244,7 @@ Son sistemas SEPARADOS: graphify NO usa el hub y el hub NO usa graphify.
 - **Rebuild semantico tras commits:** si existe `graphify-out/.graphify_stale`,
   ejecuta `/graphify --update`, borra el marcador
   (`rm -f graphify-out/.graphify_stale`) y refresca el hub con
-  `python3 graph_memory.py vincular-grafo`.
+  `python3 "__HARNESS__/graph_memory.py" vincular-grafo`.
 
 ## Commits
 
@@ -209,21 +257,25 @@ Son sistemas SEPARADOS: graphify NO usa el hub y el hub NO usa graphify.
 
 ## Subagentes
 
-Si existe `AGENTS.md`, usalo como mapa progresivo. Si existen agentes en
-`.claude/agents/`, aplica este flujo:
+Si existe `__HREL__AGENTS.md`, usalo como mapa progresivo. Si existen agentes en
+`__HREL__.claude/agents/`, aplica este flujo:
 
 - Lider: decide alcance, impacto y delegacion.
-- Implementer: modifica una unidad concreta y escribe reporte en `progress/`.
+- Implementer: modifica una unidad concreta y escribe reporte en `__HREL__progress/`.
 - Reviewer: verifica tests, impacto, checkpoints y estado del repo.
 
-Los subagentes deben persistir resultados en archivos de `progress/`; las
+Los subagentes deben persistir resultados en archivos de `__HREL__progress/`; las
 respuestas cortas en chat no reemplazan la evidencia.
 CLAUDE_MD_EOF
-write_file_notice "CLAUDE.md"
+# Sustituye los placeholders de ruta segun el layout.
+claude_tmp="$SURFACE_DIR/CLAUDE.md.harness.tmp"
+sed -e "s|__HARNESS__|$HARNESS_EXEC|g" -e "s|__HREL__|$HREL|g" \
+    "$SURFACE_DIR/CLAUDE.md" > "$claude_tmp" && mv "$claude_tmp" "$SURFACE_DIR/CLAUDE.md"
+write_file_notice "CLAUDE.md ($SURFACE_DIR)"
 
 echo "Generando .claude/settings.json..."
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
-    cat <<'SETTINGS_EOF' > .claude/settings.json
+    cat <<'SETTINGS_EOF' > "$SURFACE_DIR/.claude/settings.json"
 {
   "attribution": {
     "commit": "",
@@ -265,7 +317,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
 }
 SETTINGS_EOF
 else
-    cat <<'SETTINGS_EOF' > .claude/settings.json
+    cat <<'SETTINGS_EOF' > "$SURFACE_DIR/.claude/settings.json"
 {
   "attribution": {
     "commit": "",
@@ -296,7 +348,13 @@ else
 }
 SETTINGS_EOF
 fi
-write_file_notice ".claude/settings.json"
+# Inserta el prefijo del subdir en las rutas de hooks segun el layout
+# (en 'root' HOOK_BASE == ${CLAUDE_PROJECT_DIR}, asi que es un no-op).
+settings_tmp="$SURFACE_DIR/.claude/settings.json.harness.tmp"
+sed "s|\${CLAUDE_PROJECT_DIR}|$HOOK_BASE|g" \
+    "$SURFACE_DIR/.claude/settings.json" > "$settings_tmp" \
+    && mv "$settings_tmp" "$SURFACE_DIR/.claude/settings.json"
+write_file_notice ".claude/settings.json ($SURFACE_DIR)"
 
 echo "Generando graph_memory.py..."
 cat <<'GM_PY_EOF' > graph_memory.py
@@ -320,7 +378,24 @@ except ImportError:
     HAVE_FCNTL = False
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT = os.environ.get("HARNESS_PROJECT") or os.path.basename(BASE_DIR)
+
+
+def _repo_root():
+    """Raiz multi-repo: en layout 'subdir' es el padre de BASE_DIR."""
+    env = os.environ.get("HARNESS_REPO_ROOT")
+    if env:
+        return os.path.abspath(env)
+    try:
+        with open(os.path.join(BASE_DIR, ".harness_layout"), encoding="utf-8") as fh:
+            if fh.read().strip() == "subdir":
+                return os.path.dirname(BASE_DIR)
+    except OSError:
+        pass
+    return BASE_DIR
+
+
+REPO_ROOT = _repo_root()
+PROJECT = os.environ.get("HARNESS_PROJECT") or os.path.basename(REPO_ROOT)
 HUB_DIR = os.environ.get("HARNESS_HUB") or os.path.join(os.path.expanduser("~"), ".harness-hub")
 GRAPH_DB_FILE = os.path.join(HUB_DIR, "graph_db.json")
 PROGRESS_DIR = os.path.join(HUB_DIR, "progress")
@@ -413,13 +488,15 @@ class GraphMemoryManager:
         found = []
         with hub_lock():
             self.load()
-            project_props = {"_id": PROJECT, "path": BASE_DIR}
-            graphify_out = os.path.join(BASE_DIR, "graphify-out")
+            project_props = {"_id": PROJECT, "path": REPO_ROOT}
+            graphify_out = os.path.join(REPO_ROOT, "graphify-out")
             if os.path.exists(os.path.join(graphify_out, "graph.json")):
                 project_props["graphify_out"] = graphify_out
             self.graph.add_node("Proyecto", project_props)
-            for entry in sorted(os.listdir(BASE_DIR)):
-                path = os.path.join(BASE_DIR, entry)
+            for entry in sorted(os.listdir(REPO_ROOT)):
+                path = os.path.join(REPO_ROOT, entry)
+                if os.path.realpath(path) == os.path.realpath(BASE_DIR):
+                    continue  # el propio arnes no es un microservicio
                 if os.path.isdir(path) and is_repo_root(path):
                     qid = f"{PROJECT}/{entry}"
                     self.graph.add_node("Microservicio", {"_id": qid, "proyecto": PROJECT, "servicio": entry, "path": path})
@@ -520,7 +597,7 @@ class GraphMemoryManager:
 
     def derive_from_graphify(self, graph_path=None):
         import re
-        graph_path = graph_path or os.path.join(BASE_DIR, "graphify-out", "graph.json")
+        graph_path = graph_path or os.path.join(REPO_ROOT, "graphify-out", "graph.json")
         if not os.path.exists(graph_path):
             print(f"[graphify->hub] No existe {graph_path}; nada que derivar.")
             return
@@ -539,7 +616,7 @@ class GraphMemoryManager:
         # semantica: contratos compartidos JWT/audit/infra leidos como deps).
         # Una linea "a->b" por par a suprimir; '#' para comentarios.
         denylist = set()
-        deny_path = os.path.join(BASE_DIR, "harness_deps_deny.txt")
+        deny_path = os.path.join(REPO_ROOT, "harness_deps_deny.txt")
         if os.path.exists(deny_path):
             with open(deny_path, "r", encoding="utf-8") as fh:
                 for line in fh:
@@ -698,13 +775,24 @@ cat <<'INIT_SH_EOF' > init.sh
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-ROOT="$(cd "$(dirname "$0")" && pwd -P)"
-cd "$ROOT"
+HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+# REPO_ROOT: raiz multi-repo. Prioriza override explicito y CLAUDE_PROJECT_DIR
+# (que en layout subdir apunta al padre, donde vive .claude); en runs manuales
+# usa el marcador .harness_layout.
+REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+if [ -z "$REPO_ROOT" ]; then
+    if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
+        REPO_ROOT="$(dirname "$HARNESS_DIR")"
+    else
+        REPO_ROOT="$HARNESS_DIR"
+    fi
+fi
+cd "$REPO_ROOT"
 
 # Carpeta donde se archivan los respaldos *.bak.* generados por el harness.
-BKP_DIR="${HARNESS_BKP_DIR:-bkp}"
+BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
 
-echo "== Inicializando Harness Process en $ROOT =="
+echo "== Inicializando Harness Process: arnes=$HARNESS_DIR raiz=$REPO_ROOT =="
 
 if ! command -v git >/dev/null 2>&1; then
     echo "[!] git no esta disponible." >&2
@@ -731,6 +819,7 @@ for repo in */; do
         continue
     fi
     REPO_ABS="$(cd "$REPO_DIR" && pwd -P)"
+    [ "$REPO_ABS" = "$HARNESS_DIR" ] && continue  # el propio arnes no es microservicio
     GIT_TOP="$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
     [ "$GIT_TOP" = "$REPO_ABS" ] || continue
 
@@ -764,26 +853,27 @@ for repo in */; do
 
     cat > "$POST_COMMIT" <<HOOKEOF
 #!/bin/bash
-# harness-managed-hook v6
+# harness-managed-hook v7
 set -u
-HARNESS_ROOT="$ROOT"
+HARNESS_DIR="$HARNESS_DIR"
+REPO_ROOT="$REPO_ROOT"
 MICROSERVICIO=\$(basename "\$(git rev-parse --show-toplevel)")
 COMMIT_HASH=\$(git rev-parse HEAD)
 ARCHIVOS=\$(git diff-tree --no-commit-id --name-only -r --root "\$COMMIT_HASH" | paste -sd "," -)
-python3 "\$HARNESS_ROOT/graph_memory.py" sync_git --artefacto "\$COMMIT_HASH" --meta "\$ARCHIVOS" --microservicio "\$MICROSERVICIO" \
+python3 "\$HARNESS_DIR/graph_memory.py" sync_git --artefacto "\$COMMIT_HASH" --meta "\$ARCHIVOS" --microservicio "\$MICROSERVICIO" \
   || echo "[Harness] Aviso: no se pudo sincronizar memoria para \$MICROSERVICIO." >&2
 
 export PATH="\$HOME/.local/bin:\$PATH"
-if command -v graphify >/dev/null 2>&1 && [ -f "\$HARNESS_ROOT/graphify-out/graph.json" ]; then
-    if mkdir "\$HARNESS_ROOT/graphify-out/.update.lock" 2>/dev/null; then
+if command -v graphify >/dev/null 2>&1 && [ -f "\$REPO_ROOT/graphify-out/graph.json" ]; then
+    if mkdir "\$REPO_ROOT/graphify-out/.update.lock" 2>/dev/null; then
         (
-            trap 'rmdir "\$HARNESS_ROOT/graphify-out/.update.lock" 2>/dev/null || true' EXIT
-            cd "\$HARNESS_ROOT" || exit 0
-            graphify update "\$HARNESS_ROOT" >/dev/null 2>&1 || true
+            trap 'rmdir "\$REPO_ROOT/graphify-out/.update.lock" 2>/dev/null || true' EXIT
+            cd "\$REPO_ROOT" || exit 0
+            graphify update "\$REPO_ROOT" >/dev/null 2>&1 || true
             if printf '%s' "\$ARCHIVOS" | grep -qiE '(^|,)(README|AGENTS|[^,]+[.]md)(,|\$)'; then
-                touch "\$HARNESS_ROOT/graphify-out/.graphify_stale" 2>/dev/null || true
+                touch "\$REPO_ROOT/graphify-out/.graphify_stale" 2>/dev/null || true
             fi
-            python3 "\$HARNESS_ROOT/graph_memory.py" vincular-grafo >/dev/null 2>&1 || true
+            python3 "\$HARNESS_DIR/graph_memory.py" vincular-grafo >/dev/null 2>&1 || true
         ) &
     fi
 fi
@@ -803,11 +893,11 @@ CMEOF
     echo "   -> [Ok] $REPO_DIR conectado"
 done
 
-python3 "$ROOT/graph_memory.py" descubrir
+python3 "$HARNESS_DIR/graph_memory.py" descubrir
 
-if [ -f "$ROOT/graphify-out/graph.json" ]; then
-    python3 "$ROOT/graph_memory.py" vincular-grafo || true
-    if [ -f "$ROOT/graphify-out/.graphify_stale" ]; then
+if [ -f "$REPO_ROOT/graphify-out/graph.json" ]; then
+    python3 "$HARNESS_DIR/graph_memory.py" vincular-grafo || true
+    if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
         echo "[graphify] Grafo desactualizado: corre '/graphify --update' y luego borra graphify-out/.graphify_stale."
     else
         echo "[graphify] Grafo de conocimiento al dia."
@@ -817,7 +907,7 @@ else
 fi
 
 echo ""
-python3 "$ROOT/graph_memory.py" mapa
+python3 "$HARNESS_DIR/graph_memory.py" mapa
 echo ""
 echo "== [Ok] Harness listo =="
 INIT_SH_EOF
@@ -924,17 +1014,24 @@ cat <<'STATUS_EOF' > harness_status.sh
 #!/bin/bash
 set -Eeuo pipefail
 
-ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")" && pwd -P)}"
+HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+if [ -z "$REPO_ROOT" ]; then
+    if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
+        REPO_ROOT="$(dirname "$HARNESS_DIR")"
+    else
+        REPO_ROOT="$HARNESS_DIR"
+    fi
+fi
 BRIEF=0
 [ "${1:-}" = "--brief" ] && BRIEF=1
 
-cd "$ROOT"
-
 dirty=""
-for repo in "$ROOT"/*; do
+for repo in "$REPO_ROOT"/*; do
     [ -d "$repo" ] || continue
-    git -C "$repo" rev-parse --show-toplevel >/dev/null 2>&1 || continue
     repo_abs="$(cd "$repo" && pwd -P)"
+    [ "$repo_abs" = "$HARNESS_DIR" ] && continue
+    git -C "$repo" rev-parse --show-toplevel >/dev/null 2>&1 || continue
     git_top="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)"
     [ "$git_top" = "$repo_abs" ] || continue
     if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
@@ -948,15 +1045,15 @@ if [ "$BRIEF" -eq 1 ]; then
 fi
 
 echo "== Harness Status =="
-if [ -f feature_list.json ]; then
-    python3 harness.py status || true
+if [ -f "$HARNESS_DIR/feature_list.json" ]; then
+    python3 "$HARNESS_DIR/harness.py" status || true
 fi
 if [ -n "$dirty" ]; then
     echo "Repos con cambios:$dirty"
 else
     echo "Repos con cambios: ninguno"
 fi
-python3 graph_memory.py mapa || true
+python3 "$HARNESS_DIR/graph_memory.py" mapa || true
 STATUS_EOF
 chmod +x harness_status.sh
 
@@ -971,12 +1068,21 @@ MODE="${HARNESS_COMMIT_GUARD_MODE:-block}" # block | warn | off
 STOP_HOOK_ACTIVE=0
 printf '%s' "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && STOP_HOOK_ACTIVE=1
 
-ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+HARNESS_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+if [ -z "$REPO_ROOT" ]; then
+    if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
+        REPO_ROOT=$(dirname "$HARNESS_DIR")
+    else
+        REPO_ROOT="$HARNESS_DIR"
+    fi
+fi
 DIRTY=""
-for repo in "$ROOT"/*; do
+for repo in "$REPO_ROOT"/*; do
     [ -d "$repo" ] || continue
-    git -C "$repo" rev-parse --show-toplevel >/dev/null 2>&1 || continue
     repo_abs=$(cd "$repo" && pwd -P)
+    [ "$repo_abs" = "$HARNESS_DIR" ] && continue
+    git -C "$repo" rev-parse --show-toplevel >/dev/null 2>&1 || continue
     git_top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
     [ "$git_top" = "$repo_abs" ] || continue
     if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
@@ -1000,8 +1106,15 @@ cat <<'CHECK_SH_EOF' > harness_check.sh
 #!/bin/bash
 set -Eeuo pipefail
 
-ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")" && pwd -P)}"
-cd "$ROOT"
+HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_ROOT="${HARNESS_REPO_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+if [ -z "$REPO_ROOT" ]; then
+    if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
+        REPO_ROOT="$(dirname "$HARNESS_DIR")"
+    else
+        REPO_ROOT="$HARNESS_DIR"
+    fi
+fi
 
 MODE="${HARNESS_CHECK_MODE:-block}" # block | warn | off
 [ "$MODE" = "off" ] && exit 0
@@ -1010,21 +1123,21 @@ failures=0
 
 echo "== Harness Check =="
 
-if [ -f feature_list.json ]; then
-    python3 harness.py status || failures=$((failures + 1))
+if [ -f "$HARNESS_DIR/feature_list.json" ]; then
+    python3 "$HARNESS_DIR/harness.py" status || failures=$((failures + 1))
 fi
 
-if [ -f CHECKPOINTS.md ] && [ ! -s progress/current.md ]; then
+if [ -f "$HARNESS_DIR/CHECKPOINTS.md" ] && [ ! -s "$HARNESS_DIR/progress/current.md" ]; then
     echo "[!] progress/current.md esta vacio; registra estado antes de cerrar." >&2
     failures=$((failures + 1))
 fi
 
-if [ -f graphify-out/.graphify_stale ]; then
+if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
     echo "[!] graphify-out/.graphify_stale existe; corre /graphify --update cuando aplique." >&2
     failures=$((failures + 1))
 fi
 
-if ! bash "$ROOT/commit_guard.sh"; then
+if ! bash "$HARNESS_DIR/commit_guard.sh"; then
     failures=$((failures + 1))
 fi
 
@@ -1403,7 +1516,16 @@ fi
 
 echo ""
 echo "========================================================"
-echo "Harness Process instalado exitosamente."
+echo "Harness Process instalado exitosamente (layout: $LAYOUT)."
+if [ "$LAYOUT" = "subdir" ]; then
+    echo ""
+    echo "Superficie (auto-descubierta por Claude Code) escrita en la raiz:"
+    echo "  $SURFACE_DIR/CLAUDE.md"
+    echo "  $SURFACE_DIR/.claude/settings.json"
+    echo "Scripts del arnes en: $HARNESS_DIR"
+    echo "IMPORTANTE: lanza Claude Code DESDE la raiz ($REPO_ROOT) para que"
+    echo "los hooks y el protocolo se activen."
+fi
 echo ""
 echo "Comandos utiles:"
 echo "  bash init.sh"
