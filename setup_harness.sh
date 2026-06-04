@@ -224,14 +224,15 @@ mapa progresivo (lee solo lo necesario para la tarea actual):
 3. **Reviewer** (`__HREL__roles/reviewer.md`): verifica tests, impacto,
    checkpoints y estado Git; veredicto en `__HREL__progress/`.
 
-Orquestacion:
+Orquestacion (mismos roles, formato nativo por herramienta):
 
-- **Claude Code**: los roles estan como subagentes nativos en `.claude/agents/`
-  y se registran solos (frontmatter `name`/`description`/`tools`/`model`). El
-  hilo principal orquesta e invoca cada subagente; no hay subagentes anidados
-  (el `leader` planifica, no delega por si mismo).
-- **Codex / Gemini / Grok / Antigravity**: aplica `__HREL__roles/*.md` como
-  fases secuenciales dentro de una sola sesion.
+- **Claude Code**: subagentes nativos en `.claude/agents/`.
+- **Codex CLI**: subagentes nativos en `.codex/agents/*.toml`.
+- **Gemini CLI**: subagentes nativos en `.gemini/agents/`.
+- **Grok Build**: lee `.claude/agents/` por compatibilidad con Claude Code.
+- **Antigravity y otros**: aplica `__HREL__roles/*.md` como fases secuenciales.
+
+Detalle por herramienta (formatos, modelos, effort): `__HREL__roles/README.md`.
 
 Archivos principales:
 
@@ -620,7 +621,7 @@ mkdir -p .claude
 mkdir -p "$SURFACE_DIR/.claude" "$SURFACE_DIR/.codex" "$SURFACE_DIR/.gemini" "$SURFACE_DIR/.grok" "$SURFACE_DIR/bin"
 # Los subagentes nativos de Claude Code se registran desde la raiz (SURFACE_DIR),
 # no desde la subcarpeta del arnes; por eso viven junto a .claude/settings.json.
-[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p "$SURFACE_DIR/.claude/agents"
+[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p "$SURFACE_DIR/.claude/agents" "$SURFACE_DIR/.codex/agents" "$SURFACE_DIR/.gemini/agents"
 
 # Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
 printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
@@ -668,6 +669,12 @@ backup_file "$SURFACE_DIR/.claude/settings.json"
 backup_file "$SURFACE_DIR/.claude/agents/leader.md"
 backup_file "$SURFACE_DIR/.claude/agents/implementer.md"
 backup_file "$SURFACE_DIR/.claude/agents/reviewer.md"
+backup_file "$SURFACE_DIR/.codex/agents/leader.toml"
+backup_file "$SURFACE_DIR/.codex/agents/implementer.toml"
+backup_file "$SURFACE_DIR/.codex/agents/reviewer.toml"
+backup_file "$SURFACE_DIR/.gemini/agents/leader.md"
+backup_file "$SURFACE_DIR/.gemini/agents/implementer.md"
+backup_file "$SURFACE_DIR/.gemini/agents/reviewer.md"
 backup_file "$SURFACE_DIR/.codex/hooks.json"
 backup_file "$SURFACE_DIR/.gemini/settings.json"
 backup_file "$SURFACE_DIR/.gemini/commands/harness/check.toml"
@@ -1571,6 +1578,16 @@ if [ -d "$HARNESS_DIR/roles" ]; then
                 failures=$((failures + 1))
             fi
         fi
+        codex_toml="$REPO_ROOT/.codex/agents/$role.toml"
+        if [ -f "$codex_toml" ] && ! grep -q '^developer_instructions' "$codex_toml"; then
+            echo "[!] .codex/agents/$role.toml sin developer_instructions." >&2
+            failures=$((failures + 1))
+        fi
+        gemini_md="$REPO_ROOT/.gemini/agents/$role.md"
+        if [ -f "$gemini_md" ] && [ "$(head -n1 "$gemini_md")" != "---" ]; then
+            echo "[!] .gemini/agents/$role.md sin frontmatter YAML." >&2
+            failures=$((failures + 1))
+        fi
     done
 fi
 
@@ -1896,30 +1913,47 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
 Definicion completa: `__HREL__roles/leader.md`, `__HREL__roles/implementer.md`,
 `__HREL__roles/reviewer.md`.
 
-## Como se orquesta
+## Como se orquesta por herramienta
 
-- **Claude Code**: los roles estan como subagentes nativos en
-  `.claude/agents/{leader,implementer,reviewer}.md` (frontmatter `name`,
-  `description`, `tools`, `model`). El hilo principal actua de orquestador e
-  invoca cada subagente en orden. Claude Code no permite subagentes anidados:
-  delega el hilo principal, no el subagente `leader`.
-- **Codex / Gemini / Grok / Antigravity y otros**: aplica `__HREL__roles/*.md`
-  como fases secuenciales dentro de una sola sesion (lider -> implementer ->
-  reviewer).
+Mismos tres roles; cada CLI los recibe en su formato nativo (auto-registrados):
+
+- **Claude Code**: `.claude/agents/*.md` (frontmatter `name`/`description`/
+  `tools`/`model`/`effort`; cuerpo = system prompt). El hilo principal delega.
+- **Codex CLI**: `.codex/agents/*.toml` (`name`, `description`,
+  `developer_instructions`, `sandbox_mode`, `model_reasoning_effort`).
+  Delegacion explicita (`/agent` o pidiendolo). No hay allowlist de tools: la
+  capacidad se acota con `sandbox_mode`.
+- **Gemini CLI**: `.gemini/agents/*.md` (frontmatter + cuerpo). Invocar con
+  `@<rol>`; auto-delega segun `description`.
+- **Grok Build (xAI)**: sin formato propio, pero LEE `.claude/agents/*.md` por
+  compatibilidad con Claude Code (sin archivos extra). Puede ignorar un `model:`
+  de Claude y caer al modelo por defecto de Grok.
+
+Sin archivo de definicion soportado (aplican `__HREL__roles/*.md` como fases
+secuenciales lider -> implementer -> reviewer en una sola sesion):
+
+- **Antigravity**: crea sus subagentes dinamicamente en runtime; lee tambien
+  `AGENTS.md` / `.agents/rules/`.
+- **Cualquier otro CLI** sin subagentes nativos.
+
+Claude Code no permite subagentes anidados: delega el hilo principal, no el
+subagente `leader`.
 
 ## Modelos, effort y tools por rol (tunable)
 
-`leader` y `reviewer` usan `claude-opus-4-8` (Opus 4.8); `implementer` usa
-`claude-sonnet-4-6` (Sonnet 4.6). Los tres corren con `effort: max`. Ajusta
-`model:`, `effort:` y `tools:` en `.claude/agents/*.md` a tu gusto:
-
-- `model:`: un ID fijo (`claude-opus-4-8`, `claude-sonnet-4-6`) o un alias que
-  sigue siempre a la ultima version del proveedor (`opus`, `sonnet`, `haiku`,
-  `inherit`).
-- `effort:`: `low`, `medium`, `high`, `xhigh` (solo Opus 4.7+) o `max`.
-
-Nota: `effort:` del frontmatter NO sobreescribe la variable de entorno
-`CLAUDE_CODE_EFFORT_LEVEL` si esta definida.
+- **Claude** (`.claude/agents/*.md`): `leader` y `reviewer` con
+  `model: claude-opus-4-8` (Opus 4.8); `implementer` con
+  `model: claude-sonnet-4-6` (Sonnet 4.6); los tres con `effort: max`. `model:`
+  acepta ID fijo o alias auto-ultima-version (`opus`, `sonnet`, `haiku`,
+  `inherit`); `effort:` es `low|medium|high|xhigh|max` (`xhigh` solo Opus 4.7+).
+  El `effort:` del frontmatter NO sobreescribe la env var
+  `CLAUDE_CODE_EFFORT_LEVEL`.
+- **Codex** (`.codex/agents/*.toml`): `model` se hereda de la sesion;
+  `model_reasoning_effort = high` (tope de Codex). Read-only via
+  `sandbox_mode = read-only`; el implementer usa `workspace-write`.
+- **Gemini** (`.gemini/agents/*.md`): `model` y `tools` se heredan de la sesion
+  (omitidos para no fijar IDs/nombres que cambian por version). Agregalos por
+  rol cuando confirmes los nombres de tools/model de tu version instalada.
 
 ## Regla anti perdida de contexto
 
@@ -1932,13 +1966,62 @@ AGENTMAP_EOF
     subst_hrel_inplace roles/reviewer.md
     subst_hrel_inplace roles/README.md
 
-    # --- Subagentes nativos de Claude Code (frontmatter + cuerpo de rol) --------
-    build_claude_agent leader leader claude-opus-4-8 max "Read, Grep, Glob, Bash" \
-        "Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en progress/current.md. No implementa codigo."
-    build_claude_agent implementer implementer claude-sonnet-4-6 max "Read, Edit, Write, Bash, Grep, Glob" \
-        "Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia en progress/. Usalo para escribir o modificar codigo."
-    build_claude_agent reviewer reviewer claude-opus-4-8 max "Read, Grep, Glob, Bash" \
-        "Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en progress/. Solo lectura; no implementa."
+    # Codex CLI: subagentes nativos en .codex/agents/*.toml (auto-registrados).
+    # No hay allowlist de tools; la capacidad se acota con sandbox_mode.
+    # Args: role sandbox_mode reasoning_effort description.
+    build_codex_agent() {
+        local role="$1" asandbox="$2" aeffort="$3" adesc="$4"
+        local out="$SURFACE_DIR/.codex/agents/$role.toml"
+        {
+            printf 'name = "%s"\n' "$role"
+            printf 'description = "%s"\n' "$adesc"
+            printf 'sandbox_mode = "%s"\n' "$asandbox"
+            printf 'model_reasoning_effort = "%s"\n' "$aeffort"
+            printf 'developer_instructions = %s\n' "'''"
+            cat "roles/$role.md"
+            printf '%s\n' "'''"
+        } > "$out"
+    }
+
+    # Gemini CLI: subagentes nativos en .gemini/agents/*.md (Markdown+frontmatter,
+    # cuerpo = system prompt; auto-descubiertos). tools/model se omiten -> hereda
+    # de la sesion (evita fijar nombres de tools/model que varian por version).
+    # Args: role description.
+    build_gemini_agent() {
+        local role="$1" adesc="$2"
+        local out="$SURFACE_DIR/.gemini/agents/$role.md"
+        {
+            printf -- '---\n'
+            printf 'name: %s\n' "$role"
+            printf 'description: %s\n' "$adesc"
+            printf -- '---\n\n'
+        } > "$out"
+        cat "roles/$role.md" >> "$out"
+    }
+
+    # Descripciones compartidas por las tres superficies de subagentes nativos.
+    desc_leader="Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en progress/current.md. No implementa codigo."
+    desc_impl="Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia en progress/. Usalo para escribir o modificar codigo."
+    desc_rev="Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en progress/. Solo lectura; no implementa."
+
+    # --- Claude Code: .claude/agents/*.md (frontmatter + cuerpo de rol) ----------
+    build_claude_agent leader      leader      claude-opus-4-8   max "Read, Grep, Glob, Bash"              "$desc_leader"
+    build_claude_agent implementer implementer claude-sonnet-4-6 max "Read, Edit, Write, Bash, Grep, Glob" "$desc_impl"
+    build_claude_agent reviewer    reviewer    claude-opus-4-8   max "Read, Grep, Glob, Bash"              "$desc_rev"
+
+    # --- Codex CLI: .codex/agents/*.toml (sandbox por rol; effort high = tope) ---
+    build_codex_agent leader      read-only       high "$desc_leader"
+    build_codex_agent implementer workspace-write high "$desc_impl"
+    build_codex_agent reviewer    read-only       high "$desc_rev"
+
+    # --- Gemini CLI: .gemini/agents/*.md (hereda tools/model de la sesion) -------
+    build_gemini_agent leader      "$desc_leader"
+    build_gemini_agent implementer "$desc_impl"
+    build_gemini_agent reviewer    "$desc_rev"
+
+    # Grok Build (xAI) lee .claude/agents/*.md por compatibilidad con Claude Code;
+    # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
+    # archivo de definicion soportado): usa roles/*.md como fases secuenciales.
 
     cat <<'CHECKPOINTS_EOF' > CHECKPOINTS.md
 # Checkpoints
@@ -2020,7 +2103,7 @@ bash validate_ui.sh http://localhost:5173
 ```
 VERIF_EOF
 
-    write_file_notice "roles/ (README + leader/implementer/reviewer) / .claude/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
+    write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
 
 echo "Generando superficies multi-LLM..."
@@ -2101,9 +2184,10 @@ echo "  bin/harness-antigravity"
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     echo ""
     echo "Modo subagentes activo:"
-    echo "  Mapa de agentes:        ${HREL}roles/README.md"
-    echo "  Subagentes Claude Code: $SURFACE_DIR/.claude/agents/{leader,implementer,reviewer}.md"
-    echo "  Roles para otros CLI:   ${HREL}roles/{leader,implementer,reviewer}.md"
+    echo "  Mapa de agentes:    ${HREL}roles/README.md"
+    echo "  Subagentes nativos: .claude/agents/*.md, .codex/agents/*.toml, .gemini/agents/*.md"
+    echo "  Grok Build:         lee .claude/agents/*.md (compat Claude Code)"
+    echo "  Antigravity/otros:  ${HREL}roles/*.md como fases secuenciales"
     echo "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
     echo "  python3 ${HREL}harness.py start --feature 1"
     echo "  python3 ${HREL}harness.py close --feature 1 --status done"
