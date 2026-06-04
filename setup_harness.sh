@@ -214,13 +214,24 @@ Servicios transversales:
 
 ## Mapa de agentes
 
-Si existe `__HREL__AGENTS.md`, usalo como mapa progresivo. Si tu herramienta no
-soporta subagentes nativos, aplica los roles como fases manuales:
+Mapa completo y diagrama: `__HREL__roles/README.md`. Tres roles leidos como
+mapa progresivo (lee solo lo necesario para la tarea actual):
 
-1. Lider: decide alcance, impacto y delegacion.
-2. Implementer: modifica una unidad concreta y escribe evidencia en
-   `__HREL__progress/`.
-3. Reviewer: verifica tests, impacto, checkpoints y estado Git.
+1. **Lider** (`__HREL__roles/leader.md`): fija alcance e impacto y escribe el
+   plan en `__HREL__progress/current.md`. No implementa codigo.
+2. **Implementer** (`__HREL__roles/implementer.md`): modifica una unidad
+   concreta y deja evidencia en `__HREL__progress/`.
+3. **Reviewer** (`__HREL__roles/reviewer.md`): verifica tests, impacto,
+   checkpoints y estado Git; veredicto en `__HREL__progress/`.
+
+Orquestacion:
+
+- **Claude Code**: los roles estan como subagentes nativos en `.claude/agents/`
+  y se registran solos (frontmatter `name`/`description`/`tools`/`model`). El
+  hilo principal orquesta e invoca cada subagente; no hay subagentes anidados
+  (el `leader` planifica, no delega por si mismo).
+- **Codex / Gemini / Grok / Antigravity**: aplica `__HREL__roles/*.md` como
+  fases secuenciales dentro de una sola sesion.
 
 Archivos principales:
 
@@ -231,12 +242,6 @@ Archivos principales:
 - `__HREL__docs/architecture.md`: mapa de arquitectura.
 - `__HREL__docs/conventions.md`: convenciones del equipo.
 - `__HREL__docs/verification.md`: comandos de validacion.
-- `__HREL__.claude/agents/`: roles nativos para Claude Code cuando existan.
-- `.codex/hooks.json`: hooks nativos para Codex.
-- `.gemini/settings.json`: hooks nativos para Gemini CLI.
-- `.grok/hooks/`: hooks nativos para Grok Build.
-- `ANTIGRAVITY.md`: superficie para Antigravity CLI.
-- `bin/harness-*`: launchers con preflight del harness.
 
 Todo hallazgo relevante se escribe en `__HREL__progress/`. Una respuesta corta
 en chat no reemplaza evidencia persistida.
@@ -611,8 +616,11 @@ if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
 fi
 
 mkdir -p .claude
-[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p .claude/agents docs progress
+[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p roles docs progress
 mkdir -p "$SURFACE_DIR/.claude" "$SURFACE_DIR/.codex" "$SURFACE_DIR/.gemini" "$SURFACE_DIR/.grok" "$SURFACE_DIR/bin"
+# Los subagentes nativos de Claude Code se registran desde la raiz (SURFACE_DIR),
+# no desde la subcarpeta del arnes; por eso viven junto a .claude/settings.json.
+[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p "$SURFACE_DIR/.claude/agents"
 
 # Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
 printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
@@ -632,7 +640,6 @@ generated=(
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     generated+=(
-        "AGENTS.md"
         "CHECKPOINTS.md"
         "feature_list.json"
         "progress/current.md"
@@ -640,9 +647,10 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "docs/architecture.md"
         "docs/conventions.md"
         "docs/verification.md"
-        ".claude/agents/leader.md"
-        ".claude/agents/implementer.md"
-        ".claude/agents/reviewer.md"
+        "roles/README.md"
+        "roles/leader.md"
+        "roles/implementer.md"
+        "roles/reviewer.md"
     )
 fi
 
@@ -657,6 +665,9 @@ backup_file "$SURFACE_DIR/GROK.md"
 backup_file "$SURFACE_DIR/ANTIGRAVITY.md"
 backup_file "$SURFACE_DIR/LLM.md"
 backup_file "$SURFACE_DIR/.claude/settings.json"
+backup_file "$SURFACE_DIR/.claude/agents/leader.md"
+backup_file "$SURFACE_DIR/.claude/agents/implementer.md"
+backup_file "$SURFACE_DIR/.claude/agents/reviewer.md"
 backup_file "$SURFACE_DIR/.codex/hooks.json"
 backup_file "$SURFACE_DIR/.gemini/settings.json"
 backup_file "$SURFACE_DIR/.gemini/commands/harness/check.toml"
@@ -1541,6 +1552,28 @@ if ! bash "$HARNESS_DIR/commit_guard.sh"; then
     failures=$((failures + 1))
 fi
 
+# Integridad del mapa de agentes (solo si la capa de subagentes esta instalada).
+# roles/ vive junto a los scripts; los subagentes nativos de Claude viven en la
+# raiz multi-repo (REPO_ROOT/.claude/agents) para que Claude Code los registre.
+if [ -d "$HARNESS_DIR/roles" ]; then
+    for role in leader implementer reviewer; do
+        if [ ! -f "$HARNESS_DIR/roles/$role.md" ]; then
+            echo "[!] Falta roles/$role.md; el mapa de agentes esta incompleto." >&2
+            failures=$((failures + 1))
+        fi
+        agent_md="$REPO_ROOT/.claude/agents/$role.md"
+        if [ -f "$agent_md" ]; then
+            if [ "$(head -n1 "$agent_md")" != "---" ]; then
+                echo "[!] .claude/agents/$role.md sin frontmatter YAML; Claude Code no lo registrara como subagente." >&2
+                failures=$((failures + 1))
+            elif ! grep -q '^name:' "$agent_md" || ! grep -q '^description:' "$agent_md"; then
+                echo "[!] .claude/agents/$role.md: frontmatter sin name: o description:." >&2
+                failures=$((failures + 1))
+            fi
+        fi
+    done
+fi
+
 if [ "$failures" -gt 0 ]; then
     echo "[Harness] Check fallo con $failures problema(s)." >&2
     [ "$MODE" = "warn" ] && exit 0
@@ -1709,40 +1742,203 @@ chmod +x harness.py
 write_file_notice "harness.py"
 
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
-    echo "Generando capa de subagentes..."
+    echo "Generando capa de subagentes (mapa de agentes)..."
 
-    cat <<'AGENTS_EOF' > AGENTS.md
+    # Sustituye el placeholder __HREL__ por el prefijo real del arnes, in-place.
+    subst_hrel_inplace() {
+        local f="$1" tmp
+        tmp="$f.harness.tmp"
+        sed -e "s|__HREL__|$HREL|g" "$f" > "$tmp" && mv "$tmp" "$f"
+    }
+
+    # Ensambla un subagente nativo de Claude Code = frontmatter YAML + cuerpo del
+    # rol (fuente unica en roles/). Args: role name model effort tools description.
+    # Se escribe en SURFACE_DIR/.claude/agents para que Claude Code lo registre
+    # desde la raiz multi-repo (no desde la subcarpeta del arnes).
+    build_claude_agent() {
+        local role="$1" aname="$2" amodel="$3" aeffort="$4" atools="$5" adesc="$6"
+        local out="$SURFACE_DIR/.claude/agents/$role.md"
+        {
+            printf -- '---\n'
+            printf 'name: %s\n' "$aname"
+            printf 'description: %s\n' "$adesc"
+            printf 'tools: %s\n' "$atools"
+            printf 'model: %s\n' "$amodel"
+            printf 'effort: %s\n' "$aeffort"
+            printf -- '---\n\n'
+        } > "$out"
+        cat "roles/$role.md" >> "$out"
+        subst_hrel_inplace "$out"
+    }
+
+    # --- Fuente unica de roles (legible por cualquier CLI) ----------------------
+    cat <<'LEADER_ROLE_EOF' > roles/leader.md
+# Lider (planner)
+
+Define alcance, impacto y delegacion. NO implementas codigo si puedes delegarlo
+al implementer: tu salida es el plan, no el diff.
+
+## Protocolo
+
+1. Lee `__HREL__roles/README.md`, `__HREL__feature_list.json` y
+   `__HREL__progress/current.md`.
+2. Revisa el mapa del hub: `python3 "__HREL__graph_memory.py" mapa`.
+3. Para cada servicio candidato, calcula su radio de impacto:
+   `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+4. Si existe `graphify-out/graph.json`, consulta el grafo antes de leer a ciegas:
+   `graphify query "<pregunta de la task>"`
+5. Escribe el plan en `__HREL__progress/current.md`: alcance, microservicios
+   afectados, riesgos y delegacion concreta (que archivos y en que orden).
+
+## Entregable
+
+- Feature activa identificada (una sola a la vez).
+- Microservicios afectados, con su radio de impacto.
+- Riesgos conocidos.
+- Delegacion concreta para el implementer y criterios de cierre para el reviewer.
+
+## Reglas
+
+- No edites codigo fuente. Si hay que tocar contratos compartidos, registralo
+  como impacto antes de delegar.
+- Una respuesta corta en chat no reemplaza el plan persistido en `progress/`.
+LEADER_ROLE_EOF
+
+    cat <<'IMPLEMENTER_ROLE_EOF' > roles/implementer.md
+# Implementer
+
+Implementas UNA unidad concreta del plan del lider.
+
+## Protocolo
+
+1. Lee el plan en `__HREL__progress/current.md` y, si lo necesitas, tu rol en
+   `__HREL__roles/implementer.md`.
+2. Trabaja solo en los microservicios asignados. No cambies contratos
+   compartidos sin registrar impacto:
+   `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+3. Haz cambios pequenos y verificables. Ejecuta los tests cercanos al cambio
+   (ver `__HREL__docs/verification.md`).
+4. Deja evidencia en `__HREL__progress/impl_<feature>.md`.
+
+## Reporte minimo (progress/impl_<feature>.md)
+
+- Archivos modificados.
+- Decisiones tomadas.
+- Comandos ejecutados y su resultado.
+- Riesgos pendientes para el reviewer.
+
+## Reglas
+
+- No cierres la feature: eso es del reviewer mas los checkpoints.
+- Sin firmas de IA en commits; `commit_guard.sh` las bloquea.
+IMPLEMENTER_ROLE_EOF
+
+    cat <<'REVIEWER_ROLE_EOF' > roles/reviewer.md
+# Reviewer
+
+Verificas calidad, impacto y criterios de cierre. NO implementas.
+
+## Verifica
+
+- Impacto ejecutado para cada servicio modificado:
+  `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+- Tests relevantes ejecutados y en verde (ver `__HREL__docs/verification.md`).
+- Frontends validados cuando aplique: `bash "__HREL__validate_ui.sh" <url>`.
+- `graphify query` usado, o justificacion si no hay grafo.
+- Checkpoints completos (`__HREL__CHECKPOINTS.md`).
+- Repos afectados limpios o commiteados segun politica.
+- `bash "__HREL__harness_check.sh"` limpio.
+
+## Veredicto (progress/review_<feature>.md)
+
+- `approved`
+- `changes_requested` (con lista accionable)
+- `blocked` (con causa y desbloqueo propuesto)
+
+## Reglas
+
+- Solo lectura mas ejecucion de validaciones. No edites codigo fuente.
+REVIEWER_ROLE_EOF
+
+    cat <<'AGENTMAP_EOF' > roles/README.md
 # Mapa de Agentes
 
-Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
+Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
+(mapa progresivo): primero el plan, luego el rol, luego el codigo.
 
-## Orden de trabajo
+## Flujo
 
-1. Lider revisa `feature_list.json`, `progress/current.md`, hub e impacto.
-2. Implementer trabaja en una unidad concreta y escribe evidencia en `progress/`.
-3. Reviewer verifica impacto, tests, checkpoints y estado Git.
-4. El cierre requiere `harness_check.sh` limpio o decision explicita de bloqueo.
+```
+  __HREL__feature_list.json
+            |
+            v
+   +-----------+    plan en        +--------------+   evidencia en   +------------+
+   |  LIDER    |--> current.md  --> | IMPLEMENTER  |--> impl_<f>.md -->| REVIEWER   |
+   | (planner) |                    | (1 unidad)   |                  | (verifica) |
+   +-----------+                    +--------------+                  +------------+
+        ^                                                                   |
+        |                       changes_requested                           |
+        +-------------------------------------------------------------------+
+                                       |
+                             approved + checkpoints OK
+                                       v
+                        harness_check.sh limpio  ->  cierre
+```
 
-## Archivos principales
+## Roles
 
-- `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `GROK.md`, `ANTIGRAVITY.md`,
-  `LLM.md`: superficies raiz para distintos agentes.
-- `CHECKPOINTS.md`: criterios de cierre.
-- `feature_list.json`: backlog ejecutable.
-- `progress/current.md`: estado vivo de la tarea.
-- `progress/history.md`: bitacora append-only.
-- `docs/architecture.md`: mapa de arquitectura.
-- `docs/conventions.md`: convenciones del equipo.
-- `docs/verification.md`: comandos de validacion.
-- `.claude/agents/leader.md`: rol lider.
-- `.claude/agents/implementer.md`: rol implementador.
-- `.claude/agents/reviewer.md`: rol revisor.
+| Rol         | Cuando usarlo                             | Tools (Claude)          | Escribe en             |
+|-------------|-------------------------------------------|-------------------------|------------------------|
+| leader      | Al iniciar: alcance, impacto, plan        | Read, Grep, Glob, Bash  | progress/current.md    |
+| implementer | Escribir o modificar una unidad de codigo | Read, Edit, Write, Bash | progress/impl_<f>.md   |
+| reviewer    | Antes de cerrar: tests, impacto, gates    | Read, Grep, Glob, Bash  | progress/review_<f>.md |
+
+Definicion completa: `__HREL__roles/leader.md`, `__HREL__roles/implementer.md`,
+`__HREL__roles/reviewer.md`.
+
+## Como se orquesta
+
+- **Claude Code**: los roles estan como subagentes nativos en
+  `.claude/agents/{leader,implementer,reviewer}.md` (frontmatter `name`,
+  `description`, `tools`, `model`). El hilo principal actua de orquestador e
+  invoca cada subagente en orden. Claude Code no permite subagentes anidados:
+  delega el hilo principal, no el subagente `leader`.
+- **Codex / Gemini / Grok / Antigravity y otros**: aplica `__HREL__roles/*.md`
+  como fases secuenciales dentro de una sola sesion (lider -> implementer ->
+  reviewer).
+
+## Modelos, effort y tools por rol (tunable)
+
+`leader` y `reviewer` usan `claude-opus-4-8` (Opus 4.8); `implementer` usa
+`claude-sonnet-4-6` (Sonnet 4.6). Los tres corren con `effort: max`. Ajusta
+`model:`, `effort:` y `tools:` en `.claude/agents/*.md` a tu gusto:
+
+- `model:`: un ID fijo (`claude-opus-4-8`, `claude-sonnet-4-6`) o un alias que
+  sigue siempre a la ultima version del proveedor (`opus`, `sonnet`, `haiku`,
+  `inherit`).
+- `effort:`: `low`, `medium`, `high`, `xhigh` (solo Opus 4.7+) o `max`.
+
+Nota: `effort:` del frontmatter NO sobreescribe la variable de entorno
+`CLAUDE_CODE_EFFORT_LEVEL` si esta definida.
 
 ## Regla anti perdida de contexto
 
 Todo hallazgo relevante se escribe en `progress/`. Una respuesta corta en chat
 no reemplaza evidencia persistida.
-AGENTS_EOF
+AGENTMAP_EOF
+
+    subst_hrel_inplace roles/leader.md
+    subst_hrel_inplace roles/implementer.md
+    subst_hrel_inplace roles/reviewer.md
+    subst_hrel_inplace roles/README.md
+
+    # --- Subagentes nativos de Claude Code (frontmatter + cuerpo de rol) --------
+    build_claude_agent leader leader claude-opus-4-8 max "Read, Grep, Glob, Bash" \
+        "Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en progress/current.md. No implementa codigo."
+    build_claude_agent implementer implementer claude-sonnet-4-6 max "Read, Edit, Write, Bash, Grep, Glob" \
+        "Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia en progress/. Usalo para escribir o modificar codigo."
+    build_claude_agent reviewer reviewer claude-opus-4-8 max "Read, Grep, Glob, Bash" \
+        "Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en progress/. Solo lectura; no implementa."
 
     cat <<'CHECKPOINTS_EOF' > CHECKPOINTS.md
 # Checkpoints
@@ -1824,70 +2020,7 @@ bash validate_ui.sh http://localhost:5173
 ```
 VERIF_EOF
 
-    cat <<'LEADER_EOF' > .claude/agents/leader.md
-# Lider
-
-Responsabilidad: definir alcance, impacto y delegacion. No implementes codigo
-si puedes delegarlo a implementer.
-
-Antes de delegar:
-
-1. Lee `AGENTS.md`, `feature_list.json` y `progress/current.md`.
-2. Ejecuta `python3 graph_memory.py mapa`.
-3. Para cada servicio afectado, ejecuta impacto.
-4. Si existe graphify, consulta el grafo.
-5. Escribe plan corto y archivos esperados en `progress/current.md`.
-
-Salida esperada:
-
-- Feature activa.
-- Servicios afectados.
-- Riesgos.
-- Delegacion concreta para implementer.
-LEADER_EOF
-
-    cat <<'IMPLEMENTER_EOF' > .claude/agents/implementer.md
-# Implementer
-
-Responsabilidad: implementar una unidad concreta.
-
-Reglas:
-
-- Trabaja solo en los microservicios asignados.
-- No cambies contratos compartidos sin registrar impacto.
-- Ejecuta tests cercanos al cambio.
-- Escribe reporte en `progress/impl_<feature>.md`.
-
-Reporte minimo:
-
-- Archivos modificados.
-- Decisiones tomadas.
-- Comandos ejecutados.
-- Riesgos pendientes.
-IMPLEMENTER_EOF
-
-    cat <<'REVIEWER_EOF' > .claude/agents/reviewer.md
-# Reviewer
-
-Responsabilidad: revisar calidad, impacto y cierre.
-
-Debes verificar:
-
-- `graph_memory.py impacto` ejecutado para servicios modificados.
-- Tests relevantes ejecutados.
-- `validate_ui.sh` ejecutado para frontends cuando aplique.
-- `graphify query` usado o justificacion si no existe grafo.
-- Checkpoints completos.
-- Repos limpios o commits hechos.
-
-Escribe veredicto en `progress/review_<feature>.md`:
-
-- `approved`
-- `changes_requested`
-- `blocked`
-REVIEWER_EOF
-
-    write_file_notice "AGENTS.md / CHECKPOINTS.md / docs / progress / .claude/agents"
+    write_file_notice "roles/ (README + leader/implementer/reviewer) / .claude/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
 
 echo "Generando superficies multi-LLM..."
@@ -1968,6 +2101,9 @@ echo "  bin/harness-antigravity"
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     echo ""
     echo "Modo subagentes activo:"
+    echo "  Mapa de agentes:        ${HREL}roles/README.md"
+    echo "  Subagentes Claude Code: $SURFACE_DIR/.claude/agents/{leader,implementer,reviewer}.md"
+    echo "  Roles para otros CLI:   ${HREL}roles/{leader,implementer,reviewer}.md"
     echo "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
     echo "  python3 ${HREL}harness.py start --feature 1"
     echo "  python3 ${HREL}harness.py close --feature 1 --status done"
