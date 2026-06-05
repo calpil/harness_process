@@ -311,6 +311,9 @@ run_session_start() {
 }
 
 run_post_tool() {
+    # Aviso (no bloqueante) si no hay feature activa: empuja a registrar el trabajo
+    # (harness.py start) para que el ciclo plan+autocheck no se salte. A stderr.
+    HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" nudge || true
     HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_status.sh" --brief
 }
 
@@ -766,7 +769,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/harness_status.sh\" --brief"
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/harness.py\" nudge || true; bash \"${CLAUDE_PROJECT_DIR}/harness_status.sh\" --brief"
           }
         ]
       }
@@ -1695,6 +1698,8 @@ REPO_ROOT = os.environ.get("HARNESS_REPO_ROOT") or _repo_root()
 PLANS = os.path.join(REPO_ROOT, "docs")
 # Linea base del checkpoint automatico (mtime = ultimo autocheck del hook).
 AUTOCHECK_STAMP = os.path.join(PROGRESS, ".last_autocheck")
+# Debounce del aviso "sin feature activa" (mtime = ultimo nudge emitido).
+NUDGE_STAMP = os.path.join(PROGRESS, ".last_nudge")
 
 
 def load_features():
@@ -2032,6 +2037,30 @@ def cmd_autocheck(args):
         print(f"[autocheck] omitido: {exc}")
 
 
+def cmd_nudge(_args):
+    """Aviso (no bloqueante) para los hooks post-tool: si NO hay feature
+    in_progress, recuerda registrar el trabajo antes de seguir editando, para que
+    se active el ciclo (plan en docs/ + autocheck, que duerme sin feature activa).
+    Debounced (~10 min) y best-effort: escribe a stderr y nunca falla."""
+    try:
+        data = load_features()
+        if any(f.get("status") == "in_progress" for f in data.get("features", [])):
+            return  # hay feature activa: nada que recordar
+        last = os.path.getmtime(NUDGE_STAMP) if os.path.exists(NUDGE_STAMP) else 0.0
+        if datetime.now(timezone.utc).timestamp() - last < 600:
+            return  # ya avisamos hace poco
+        os.makedirs(PROGRESS, exist_ok=True)
+        open(NUDGE_STAMP, "w").close()
+        sys.stderr.write(
+            "[harness] Sin feature activa: el avance NO se esta capturando "
+            "(autocheck duerme sin una feature in_progress). Antes de seguir, "
+            "consulta graphify, corre impacto y registra el trabajo con "
+            "'harness.py add' + 'harness.py start'.\n"
+        )
+    except Exception:
+        pass
+
+
 def cmd_add(args):
     data = load_features()
     ids = [int(f.get("id", 0)) for f in data.get("features", []) if str(f.get("id", "")).isdigit()]
@@ -2074,6 +2103,8 @@ def main():
     autochk = sub.add_parser("autocheck")
     autochk.add_argument("--no-graphify", action="store_true")
     autochk.set_defaults(func=cmd_autocheck)
+
+    sub.add_parser("nudge").set_defaults(func=cmd_nudge)
 
     add = sub.add_parser("add")
     add.add_argument("--name", required=True)
