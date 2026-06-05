@@ -1948,15 +1948,34 @@ def cmd_close(args):
         with open(plan, "a", encoding="utf-8") as f:
             f.write(f"\n---\nCerrado: {stamp} - status={args.status} - {args.note or ''}\n")
     os.makedirs(PROGRESS, exist_ok=True)
-    with open(CURRENT, "w", encoding="utf-8") as f:
-        f.write("# Estado Actual\n\nSin feature activa.\n\n## Evidencia\n\n-\n")
+    # No-destructivo: si current.md tiene estado real escrito a mano, archivalo en
+    # docs/ ANTES de resetear -- antes este paso lo borraba y se perdia.
+    archived_rel = None
+    if os.path.exists(CURRENT):
+        with open(CURRENT, "r", encoding="utf-8") as fh:
+            content = fh.read()
+        if content.strip() and "Sin feature activa" not in content:
+            os.makedirs(PLANS, exist_ok=True)
+            archived = os.path.join(PLANS, f"estado-feature-{feature.get('id')}-{slugify(feature.get('name', ''))}.md")
+            with open(archived, "w", encoding="utf-8") as fh:
+                fh.write(f"# Estado archivado - Feature #{feature.get('id')}: {feature.get('name')}\n")
+                fh.write(f"Cerrada: {stamp} - status={args.status} - {args.note or ''}\n\n---\n\n")
+                fh.write(content)
+            archived_rel = os.path.relpath(archived, REPO_ROOT)
+    with open(CURRENT, "w", encoding="utf-8") as fh:
+        fh.write("# Estado Actual\n\nSin feature activa.\n\n## Evidencia\n\n-\n")
+        if archived_rel:
+            fh.write(f"\n_Estado de la feature #{feature.get('id')} archivado en `{archived_rel}`._\n")
     log(f"close feature #{feature.get('id')} status={args.status} note={args.note or ''}")
     update_memories("close", args.status, f"feature-{feature.get('id')}", args.note or "", refresh_graphify=True)
     try:
         os.remove(AUTOCHECK_STAMP)  # cierra el ciclo de checkpoints automaticos
     except OSError:
         pass
-    print(f"Feature #{feature.get('id')} cerrada como {args.status}.")
+    msg = f"Feature #{feature.get('id')} cerrada como {args.status}."
+    if archived_rel:
+        msg += f" Estado archivado en {archived_rel}."
+    print(msg)
 
 
 def active_feature(data, fid=None):
@@ -2003,9 +2022,9 @@ def cmd_advance(args):
 
 def cmd_autocheck(args):
     """Checkpoint automatico para los hooks (fin de turno, multi-LLM): si hay UNA
-    feature in_progress y su plan/evidencia cambio desde el ultimo checkpoint,
-    registra un avance auto (hub + graphify en segundo plano + history.md).
-    Silencioso, idempotente y best-effort: jamas debe romper un turno."""
+    feature in_progress y cambio current.md o algun doc del proyecto (docs/*.md)
+    desde el ultimo checkpoint, registra un avance auto (hub + graphify en segundo
+    plano + history.md). Silencioso, idempotente y best-effort."""
     try:
         data = load_features()
         active = [f for f in data.get("features", []) if f.get("status") == "in_progress"]
@@ -2014,13 +2033,15 @@ def cmd_autocheck(args):
         feature = active[0]
         fid = feature.get("id")
         last = os.path.getmtime(AUTOCHECK_STAMP) if os.path.exists(AUTOCHECK_STAMP) else 0.0
+        # Vigila lo que el agente REALMENTE mantiene: el estado vivo (current.md)
+        # y CUALQUIER doc del proyecto (docs/*.md) -- plan auto, PLAN-*.md a mano,
+        # impl_*/impl-*/review*, runbooks. Asi captura el flujo sin imponer nombres.
         watched = []
-        plan = plan_path(feature)
-        if os.path.exists(plan):
-            watched.append(plan)
+        if os.path.exists(CURRENT):
+            watched.append(CURRENT)
         if os.path.isdir(PLANS):
             for name in os.listdir(PLANS):
-                if name.endswith(".md") and name.startswith(("impl-", "review-")):
+                if name.endswith(".md"):
                     watched.append(os.path.join(PLANS, name))
         changed = sorted({os.path.basename(p) for p in watched if os.path.getmtime(p) > last})
         if not changed:
