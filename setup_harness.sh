@@ -676,6 +676,11 @@ fi
 SURFACE_DIR="$REPO_ROOT"
 PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 
+# Mover el contexto de ejecucion al root del microservicio (REPO_ROOT)
+# para que todas las rutas relativas (roles/, docs/, etc.) se escriban en
+# el proyecto padre en caso de usar layout 'subdir'.
+cd "$REPO_ROOT"
+
 echo "== Instalando Harness Process en: $HARNESS_DIR =="
 echo "   proyecto:   $PROJECT_NAME"
 echo "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
