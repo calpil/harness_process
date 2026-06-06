@@ -878,14 +878,12 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         subst_hrel_inplace "$out"
     }
 
-    # --- Fuente unica de roles (legible por cualquier CLI) ----------------------
-    cp "$HARNESS_DIR/roles/leader.md" "roles/leader.md"
-
-    cp "$HARNESS_DIR/roles/implementer.md" "roles/implementer.md"
-
-    cp "$HARNESS_DIR/roles/reviewer.md" "roles/reviewer.md"
-
-    cp "$HARNESS_DIR/roles/README.md" "roles/README.md"
+    if [ "$HARNESS_DIR" != "$ROOT" ]; then
+        cp "$HARNESS_DIR/roles/leader.md" "roles/leader.md"
+        cp "$HARNESS_DIR/roles/implementer.md" "roles/implementer.md"
+        cp "$HARNESS_DIR/roles/reviewer.md" "roles/reviewer.md"
+        cp "$HARNESS_DIR/roles/README.md" "roles/README.md"
+    fi
 
     subst_hrel_inplace roles/leader.md
     subst_hrel_inplace roles/implementer.md
@@ -949,29 +947,29 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
     # archivo de definicion soportado): usa roles/*.md como fases secuenciales.
 
-    cp "$HARNESS_DIR/CHECKPOINTS.md" "CHECKPOINTS.md"
+    if [ "$HARNESS_DIR" != "$ROOT" ]; then
+        cp "$HARNESS_DIR/CHECKPOINTS.md" "CHECKPOINTS.md"
 
-    # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
-    # features ya cargadas.
-    if [ ! -f feature_list.json ]; then
-        cp "$HARNESS_DIR/feature_list.json" "feature_list.json"
+        # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
+        # features ya cargadas.
+        if [ ! -f feature_list.json ]; then
+            cp "$HARNESS_DIR/feature_list.json" "feature_list.json"
+        fi
+
+        # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
+        # en curso ni la bitacora ya escrita.
+        if [ ! -f progress/current.md ]; then
+            cp "$HARNESS_DIR/progress/current.md" "progress/current.md"
+        fi
+
+        if [ ! -f progress/history.md ]; then
+            cp "$HARNESS_DIR/progress/history.md" "progress/history.md"
+        fi
+
+        cp "$HARNESS_DIR/docs/architecture.md" "docs/architecture.md"
+        cp "$HARNESS_DIR/docs/conventions.md" "docs/conventions.md"
+        cp "$HARNESS_DIR/docs/verification.md" "docs/verification.md"
     fi
-
-    # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
-    # en curso ni la bitacora ya escrita.
-    if [ ! -f progress/current.md ]; then
-        cp "$HARNESS_DIR/progress/current.md" "progress/current.md"
-    fi
-
-    if [ ! -f progress/history.md ]; then
-        cp "$HARNESS_DIR/progress/history.md" "progress/history.md"
-    fi
-
-    cp "$HARNESS_DIR/docs/architecture.md" "docs/architecture.md"
-
-    cp "$HARNESS_DIR/docs/conventions.md" "docs/conventions.md"
-
-    cp "$HARNESS_DIR/docs/verification.md" "docs/verification.md"
 
     write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
