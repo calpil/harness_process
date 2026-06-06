@@ -840,42 +840,17 @@ SETTINGS_EOF
 fi
 write_file_notice ".claude/settings.json ($SURFACE_DIR)"
 
-echo "Generando graph_memory.py..."
-cp "$HARNESS_DIR/graph_memory.py" "graph_memory.py"
-chmod +x graph_memory.py
-write_file_notice "graph_memory.py"
+echo "Asegurando permisos de ejecucion en HARNESS_DIR..."
+chmod +x "$HARNESS_DIR/graph_memory.py"
+chmod +x "$HARNESS_DIR/init.sh"
+chmod +x "$HARNESS_DIR/validate_ui.sh"
+chmod +x "$HARNESS_DIR/harness_status.sh"
+chmod +x "$HARNESS_DIR/commit_guard.sh"
+chmod +x "$HARNESS_DIR/harness_check.sh"
+chmod +x "$HARNESS_DIR/harness.py"
 
-echo "Generando init.sh..."
-cp "$HARNESS_DIR/init.sh" "init.sh"
-chmod +x init.sh
-write_file_notice "init.sh"
-
-echo "Generando validate_ui.sh y debug_ui.js..."
-cp "$HARNESS_DIR/validate_ui.sh" "validate_ui.sh"
-chmod +x validate_ui.sh
-
-cp "$HARNESS_DIR/debug_ui.js" "debug_ui.js"
-write_file_notice "validate_ui.sh / debug_ui.js"
-
-echo "Generando guardas y estado..."
-cp "$HARNESS_DIR/harness_status.sh" "harness_status.sh"
-chmod +x harness_status.sh
-
-cp "$HARNESS_DIR/commit_guard.sh" "commit_guard.sh"
-chmod +x commit_guard.sh
-
-cp "$HARNESS_DIR/harness_check.sh" "harness_check.sh"
-chmod +x harness_check.sh
-write_file_notice "harness_status.sh / commit_guard.sh / harness_check.sh"
-
-echo "Generando harness.py..."
-cp "$HARNESS_DIR/harness.py" "harness.py"
-chmod +x harness.py
-write_file_notice "harness.py"
-
+echo "Generando capa de subagentes (mapa de agentes)..."
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
-    echo "Generando capa de subagentes (mapa de agentes)..."
-
     # Sustituye el placeholder __HREL__ por el prefijo real del arnes, in-place.
     subst_hrel_inplace() {
         local f="$1" tmp
