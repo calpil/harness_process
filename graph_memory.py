@@ -65,28 +65,13 @@ except ImportError:
     HAVE_PSYCOPG2 = False
 
 class PgGraphStore:
-    def __init__(self, dsn, base_dsn, db_name):
+    def __init__(self, dsn):
         self.dsn = dsn
-        self.base_dsn = base_dsn
-        self.db_name = db_name
         self.nodes = {}
         self.edges = []
         self._init_db()
 
     def _init_db(self):
-        try:
-            conn = psycopg2.connect(self.dsn)
-            conn.close()
-        except psycopg2.OperationalError as e:
-            if 'does not exist' in str(e) or 'no existe' in str(e).lower():
-                conn = psycopg2.connect(self.base_dsn)
-                conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-                with conn.cursor() as cur:
-                    cur.execute(f'CREATE DATABASE "{self.db_name}"')
-                conn.close()
-            else:
-                raise
-                
         with psycopg2.connect(self.dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute('''
@@ -243,9 +228,8 @@ class GraphMemoryManager:
         self.use_postgres = HAVE_PSYCOPG2 and bool(os.environ.get("USE_POSTGRES", True))
         
         if self.use_postgres:
-            base_dsn = f"dbname=postgres user={db_user} password={db_pass} host={db_host} port={db_port}"
             self.dsn = f"dbname={db_name} user={db_user} password={db_pass} host={db_host} port={db_port}"
-            self.graph = PgGraphStore(self.dsn, base_dsn, db_name)
+            self.graph = PgGraphStore(self.dsn)
         else:
             self.graph = GraphStore()
             
