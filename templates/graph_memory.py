@@ -55,6 +55,107 @@ def hub_lock():
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
+
+try:
+    import psycopg2
+    from psycopg2.extras import Json
+    HAVE_PSYCOPG2 = True
+except ImportError:
+    HAVE_PSYCOPG2 = False
+
+class PgGraphStore:
+    def __init__(self, dsn):
+        self.dsn = dsn
+        self.nodes = {}
+        self.edges = []
+        self._init_db()
+
+    def _init_db(self):
+        with psycopg2.connect(self.dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS graph_nodes (
+                        id VARCHAR PRIMARY KEY,
+                        label VARCHAR,
+                        props JSONB
+                    );
+                ''')
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS graph_edges (
+                        source VARCHAR,
+                        target VARCHAR,
+                        type VARCHAR,
+                        props JSONB,
+                        PRIMARY KEY (source, target, type)
+                    );
+                ''')
+            conn.commit()
+
+    def add_node(self, label, props):
+        nid = props["_id"]
+        node = self.nodes.get(nid, {})
+        node.update(props)
+        node["_label"] = label
+        self.nodes[nid] = node
+
+    def add_edge(self, etype, source, target, **props):
+        edge = {"type": etype, "source": source, "target": target}
+        edge.update(props)
+        if edge not in self.edges:
+            self.edges.append(edge)
+
+    def load(self, data=None):
+        self.nodes = {}
+        self.edges = []
+        with psycopg2.connect(self.dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, label, props FROM graph_nodes;")
+                for row in cur.fetchall():
+                    props = row[2] or {}
+                    props["_label"] = row[1]
+                    self.nodes[row[0]] = props
+                    
+                cur.execute("SELECT source, target, type, props FROM graph_edges;")
+                for row in cur.fetchall():
+                    edge = {"source": row[0], "target": row[1], "type": row[2]}
+                    if row[3]:
+                        edge.update(row[3])
+                    self.edges.append(edge)
+
+    def to_dict(self):
+        return {"nodes": self.nodes, "edges": self.edges}
+
+    def save(self):
+        with psycopg2.connect(self.dsn) as conn:
+            with conn.cursor() as cur:
+                for nid, props in self.nodes.items():
+                    label = props.get("_label", "Unknown")
+                    p = dict(props)
+                    p.pop("_label", None)
+                    cur.execute('''
+                        INSERT INTO graph_nodes (id, label, props)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET
+                        label = EXCLUDED.label,
+                        props = graph_nodes.props || EXCLUDED.props;
+                    ''', (nid, label, Json(p)))
+                
+                for edge in self.edges:
+                    source = edge["source"]
+                    target = edge["target"]
+                    etype = edge["type"]
+                    p = dict(edge)
+                    p.pop("source", None)
+                    p.pop("target", None)
+                    p.pop("type", None)
+                    cur.execute('''
+                        INSERT INTO graph_edges (source, target, type, props)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (source, target, type) DO UPDATE SET
+                        props = COALESCE(graph_edges.props, '{}'::jsonb) || EXCLUDED.props;
+                    ''', (source, target, etype, Json(p)))
+            conn.commit()
+
 class GraphStore:
     def __init__(self):
         self.nodes = {}
@@ -106,23 +207,48 @@ def is_repo_root(path):
 
 
 class GraphMemoryManager:
+
     def __init__(self):
-        self.graph = GraphStore()
+        db_host = os.environ.get("DB_HOST", "postgres.lancal.org")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_user = os.environ.get("DB_USER", "postgres")
+        db_pass = os.environ.get("DB_PASSWORD", "Po$tgr3s2025$%")
+        db_name = os.environ.get("DB_NAME", "postgres")
+        
+        self.use_postgres = HAVE_PSYCOPG2 and bool(os.environ.get("USE_POSTGRES", True))
+        
+        if self.use_postgres:
+            self.dsn = f"dbname={db_name} user={db_user} password={db_pass} host={db_host} port={db_port}"
+            self.graph = PgGraphStore(self.dsn)
+        else:
+            self.graph = GraphStore()
+            
         os.makedirs(HUB_DIR, exist_ok=True)
         os.makedirs(PROGRESS_DIR, exist_ok=True)
 
+
+
     def load(self):
-        if os.path.exists(GRAPH_DB_FILE):
-            with open(GRAPH_DB_FILE, "r", encoding="utf-8") as f:
-                self.graph.load(json.load(f))
+        if self.use_postgres:
+            self.graph.load()
         else:
-            self.graph = GraphStore()
+            if os.path.exists(GRAPH_DB_FILE):
+                with open(GRAPH_DB_FILE, "r", encoding="utf-8") as f:
+                    self.graph.load(json.load(f))
+            else:
+                self.graph = GraphStore()
+
+
 
     def save(self):
-        tmp = GRAPH_DB_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.graph.to_dict(), f, indent=2, ensure_ascii=False)
-        os.replace(tmp, GRAPH_DB_FILE)
+        if self.use_postgres:
+            self.graph.save()
+        else:
+            tmp = GRAPH_DB_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.graph.to_dict(), f, indent=2, ensure_ascii=False)
+            os.replace(tmp, GRAPH_DB_FILE)
+
 
     def discover(self):
         found = []
