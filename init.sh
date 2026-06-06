@@ -95,7 +95,7 @@ MICROSERVICIO=\$(basename "\$(git rev-parse --show-toplevel)")
 COMMIT_HASH=\$(git rev-parse HEAD)
 ARCHIVOS=\$(git diff-tree --no-commit-id --name-only -r --root "\$COMMIT_HASH" | paste -sd "," -)
 COMMIT_MSG_BODY=\$(git log -1 --format=%B "\$COMMIT_HASH")
-python3 "\$HARNESS_DIR/templates/graph_memory.py" sync_git --artefacto "\$COMMIT_HASH" --meta "\$ARCHIVOS" --microservicio "\$MICROSERVICIO" \
+python3 "\$HARNESS_DIR/graph_memory.py" sync_git --artefacto "\$COMMIT_HASH" --meta "\$ARCHIVOS" --microservicio "\$MICROSERVICIO" \
   || echo "[Harness] Aviso: no se pudo sincronizar memoria para \$MICROSERVICIO." >&2
 
 export PATH="\$HOME/.local/bin:\$PATH"
@@ -148,7 +148,7 @@ if command -v graphify >/dev/null 2>&1 && [ -f "\$REPO_ROOT/graphify-out/graph.j
                     echo "Skip rebuild semantico (debounce activo)."
                 fi
             fi
-            python3 "\$HARNESS_DIR/templates/graph_memory.py" vincular-grafo || true
+            python3 "\$HARNESS_DIR/graph_memory.py" vincular-grafo || true
             echo "Actualizacion en segundo plano finalizada."
         ) &
     fi
@@ -176,10 +176,10 @@ CMEOF
     echo "   -> [Ok] $REPO_DIR conectado"
 done
 
-python3 "$HARNESS_DIR/templates/graph_memory.py" descubrir
+python3 "$HARNESS_DIR/graph_memory.py" descubrir
 
 if [ -f "$REPO_ROOT/graphify-out/graph.json" ]; then
-    python3 "$HARNESS_DIR/templates/graph_memory.py" vincular-grafo || true
+    python3 "$HARNESS_DIR/graph_memory.py" vincular-grafo || true
     if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
         echo "[graphify] Grafo desactualizado: corre '/graphify --update' y luego borra graphify-out/.graphify_stale."
     else
@@ -190,6 +190,6 @@ else
 fi
 
 echo ""
-python3 "$HARNESS_DIR/templates/graph_memory.py" mapa
+python3 "$HARNESS_DIR/graph_memory.py" mapa
 echo ""
 echo "== [Ok] Harness listo =="
