@@ -90,6 +90,30 @@ Ejemplo dry-run:
 ./setup_harness.sh --dry-run --json
 ```
 
+## Actualizacion (proceso explicito)
+
+El Harness Process se actualiza **re-correndo el instalador**. Esto es intencional y explicito:
+
+- Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se generan desde los heredocs del instalador.
+- Los scripts (`harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+
+Para recibir mejoras (nuevo protocolo de `check-plan`, recordatorios de planes actualizados por otros LLMs, fixes, nuevas opciones, etc.):
+
+```bash
+# Ve a la carpeta del harness_process (la fuente)
+cd /ruta/al/harness_process
+
+# Actualizacion normal (hace backups de lo anterior)
+./setup_harness.sh
+
+# O para una reinstalacion limpia de las superficies:
+./setup_harness.sh --reset
+```
+
+El instalador respalda archivos existentes en `bkp/` (a menos que uses `--force`).
+
+No existe (ni se recomienda) un comando magico `harness.py upgrade` dentro del proyecto. La forma correcta y explícita de actualizar es volver a ejecutar el instalador desde la carpeta fuente de `harness_process`.
+
 ## Verificacion
 
 ```bash

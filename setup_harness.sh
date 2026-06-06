@@ -523,6 +523,12 @@ Commitea por microservicio con Conventional Commits. El cierre ejecuta
 
 Launchers disponibles: `bin/harness-claude`, `bin/harness-codex`,
 `bin/harness-gemini`, `bin/harness-grok` y `bin/harness-antigravity`.
+
+## Actualizacion
+
+Para actualizar el harness (protocolo + herramientas) vuelve a la carpeta
+fuente `harness_process` y ejecuta `./setup_harness.sh` (o con `--reset`).
+Las superficies y scripts se regeneran desde la fuente.
 SURFACE_EOF
 
     surface_tmp="$target.harness.tmp"
@@ -676,6 +682,22 @@ Servicios transversales:
 - Commitea cada microservicio afectado antes de cerrar la task, salvo decision
   explicita de bloqueo documentada en `__HREL__progress/`.
 - La politica de cierre se controla con `HARNESS_COMMIT_GUARD_MODE=block|warn|off`.
+
+## Actualizacion del Harness Process
+
+Este protocolo y las herramientas (`harness.py`, `check-plan`, roles, hooks, etc.)
+viven en la carpeta `harness_process` (la fuente).
+
+Para traer mejoras (nuevos recordatorios de planes actualizados por otros LLMs,
+cambios en el protocolo, fixes, etc.):
+
+1. Ve a la carpeta del harness_process.
+2. Ejecuta `./setup_harness.sh` (o `./setup_harness.sh --reset` para limpiar antes).
+3. Los archivos de instrucciones (CLAUDE.md, AGENTS.md, subagentes, etc.) y los
+   scripts se regeneran automaticamente con la version actualizada.
+
+No uses comandos magicos dentro del proyecto para actualizar. El proceso es
+explicito: re-correr el instalador desde la fuente.
 
 ## Mapa de agentes
 
@@ -1910,5 +1932,13 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     log_info "  python3 ${HREL}harness.py check-plan     # verifica si otro LLM actualizo el plan"
     log_info "  python3 ${HREL}harness.py close --feature 1 --status done"
 fi
+
+log_info ""
+log_info "Actualizacion futura:"
+log_info "  Para traer mejoras (nuevo protocolo, recordatorios de planes actualizados por otros LLMs,"
+log_info "  nuevos comandos, etc.) vuelve a ejecutar este instalador desde la carpeta fuente:"
+log_info "    cd /ruta/al/harness_process"
+log_info "    ./setup_harness.sh"
+log_info "  O usa --reset para una reinstalacion limpia de las superficies."
 
 print_final_report
