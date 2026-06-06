@@ -835,35 +835,35 @@ fi
 write_file_notice ".claude/settings.json ($SURFACE_DIR)"
 
 echo "Generando graph_memory.py..."
-cp "$HARNESS_DIR/graph_memory.py" "graph_memory.py"
+cp "$HARNESS_DIR/templates/graph_memory.py" "graph_memory.py"
 chmod +x graph_memory.py
 write_file_notice "graph_memory.py"
 
 echo "Generando init.sh..."
-cp "$HARNESS_DIR/init.sh" "init.sh"
+cp "$HARNESS_DIR/templates/init.sh" "init.sh"
 chmod +x init.sh
 write_file_notice "init.sh"
 
 echo "Generando validate_ui.sh y debug_ui.js..."
-cp "$HARNESS_DIR/validate_ui.sh" "validate_ui.sh"
+cp "$HARNESS_DIR/templates/validate_ui.sh" "validate_ui.sh"
 chmod +x validate_ui.sh
 
-cp "$HARNESS_DIR/debug_ui.js" "debug_ui.js"
+cp "$HARNESS_DIR/templates/debug_ui.js" "debug_ui.js"
 write_file_notice "validate_ui.sh / debug_ui.js"
 
 echo "Generando guardas y estado..."
-cp "$HARNESS_DIR/harness_status.sh" "harness_status.sh"
+cp "$HARNESS_DIR/templates/harness_status.sh" "harness_status.sh"
 chmod +x harness_status.sh
 
-cp "$HARNESS_DIR/commit_guard.sh" "commit_guard.sh"
+cp "$HARNESS_DIR/templates/commit_guard.sh" "commit_guard.sh"
 chmod +x commit_guard.sh
 
-cp "$HARNESS_DIR/harness_check.sh" "harness_check.sh"
+cp "$HARNESS_DIR/templates/harness_check.sh" "harness_check.sh"
 chmod +x harness_check.sh
 write_file_notice "harness_status.sh / commit_guard.sh / harness_check.sh"
 
 echo "Generando harness.py..."
-cp "$HARNESS_DIR/harness.py" "harness.py"
+cp "$HARNESS_DIR/templates/harness.py" "harness.py"
 chmod +x harness.py
 write_file_notice "harness.py"
 
@@ -898,13 +898,13 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     }
 
     # --- Fuente unica de roles (legible por cualquier CLI) ----------------------
-    cp "$HARNESS_DIR/roles/leader.md" "roles/leader.md"
+    cp "$HARNESS_DIR/templates/roles/leader.md" "roles/leader.md"
 
-    cp "$HARNESS_DIR/roles/implementer.md" "roles/implementer.md"
+    cp "$HARNESS_DIR/templates/roles/implementer.md" "roles/implementer.md"
 
-    cp "$HARNESS_DIR/roles/reviewer.md" "roles/reviewer.md"
+    cp "$HARNESS_DIR/templates/roles/reviewer.md" "roles/reviewer.md"
 
-    cp "$HARNESS_DIR/roles/README.md" "roles/README.md"
+    cp "$HARNESS_DIR/templates/roles/README.md" "roles/README.md"
 
     subst_hrel_inplace roles/leader.md
     subst_hrel_inplace roles/implementer.md
@@ -968,29 +968,29 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
     # archivo de definicion soportado): usa roles/*.md como fases secuenciales.
 
-    cp "$HARNESS_DIR/CHECKPOINTS.md" "CHECKPOINTS.md"
+    cp "$HARNESS_DIR/templates/CHECKPOINTS.md" "CHECKPOINTS.md"
 
     # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
     # features ya cargadas.
     if [ ! -f feature_list.json ]; then
-        cp "$HARNESS_DIR/feature_list.json" "feature_list.json"
+        cp "$HARNESS_DIR/templates/feature_list.json" "feature_list.json"
     fi
 
     # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
     # en curso ni la bitacora ya escrita.
     if [ ! -f progress/current.md ]; then
-        cp "$HARNESS_DIR/progress/current.md" "progress/current.md"
+        cp "$HARNESS_DIR/templates/progress/current.md" "progress/current.md"
     fi
 
     if [ ! -f progress/history.md ]; then
-        cp "$HARNESS_DIR/progress/history.md" "progress/history.md"
+        cp "$HARNESS_DIR/templates/progress/history.md" "progress/history.md"
     fi
 
-    cp "$HARNESS_DIR/docs/architecture.md" "docs/architecture.md"
+    cp "$HARNESS_DIR/templates/docs/architecture.md" "docs/architecture.md"
 
-    cp "$HARNESS_DIR/docs/conventions.md" "docs/conventions.md"
+    cp "$HARNESS_DIR/templates/docs/conventions.md" "docs/conventions.md"
 
-    cp "$HARNESS_DIR/docs/verification.md" "docs/verification.md"
+    cp "$HARNESS_DIR/templates/docs/verification.md" "docs/verification.md"
 
     write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
