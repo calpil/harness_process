@@ -20,7 +20,6 @@ INSTALL_GRAPHIFY=1
 # para asegurar solo el binario sin tocar la config global de cada agente.
 INSTALL_GRAPHIFY_SKILLS=1
 INSTALL_ANTIGRAVITY=1
-INSTALL_POSTGRES=1
 WITH_SUBAGENTS=1
 FORCE=0
 # Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
@@ -42,8 +41,7 @@ Opciones:
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
   --install-antigravity Ya es el default; asegura Antigravity CLI si falta.
   --no-antigravity     No instala Antigravity CLI.
-  --with-postgres      PostgreSQL ya es el default; se mantiene por compatibilidad.
-  --json-hub           Usa el Hub JSON local y no instala ni verifica PostgreSQL.
+  --with-postgres      PostgreSQL es obligatorio; se mantiene por compatibilidad.
   --subdir             (DEFAULT) El arnes vive en esta subcarpeta y orquesta el
                        directorio PADRE: escribe superficies multi-LLM en el
                        padre (raiz multi-repo) y mantiene aqui los scripts.
@@ -69,8 +67,7 @@ while [ "$#" -gt 0 ]; do
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
         --no-graphify-skills) INSTALL_GRAPHIFY_SKILLS=0 ;;
         --no-antigravity) INSTALL_ANTIGRAVITY=0 ;;
-        --with-postgres) INSTALL_POSTGRES=1 ;;
-        --json-hub) INSTALL_POSTGRES=0 ;;
+        --with-postgres) ;;
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
         --force) FORCE=1 ;;
@@ -153,8 +150,8 @@ Antes de modificar codigo:
 3. Si existe `graphify-out/graph.json`, consulta `graphify query "<pregunta>"`.
 4. Trabaja y valida dentro del microservicio afectado.
 
-El Hub usa PostgreSQL por defecto (`--json-hub` selecciona JSON local) y
-graphify mantiene el grafo del codigo. Para declarar dependencias usa:
+El Hub usa exclusivamente PostgreSQL y graphify mantiene el grafo del codigo.
+Para declarar dependencias usa:
 
 ```bash
 python3 "__HREL__graph_memory.py" vincular \
@@ -244,10 +241,9 @@ dentro de un microservicio, vuelve a la raiz o usa la ruta absoluta del arnes.
 
 Son sistemas separados:
 
-- **Hub** (PostgreSQL por defecto; `HARNESS_HUB/.env` guarda su configuracion):
+- **Hub** (solo PostgreSQL; `HARNESS_HUB/.env` guarda su configuracion):
   rastrea proyectos, microservicios, commits y dependencias entre servicios.
-  Los ids se namespacean como `<proyecto>/<servicio>`. Con `--json-hub` usa
-  `~/.harness-hub/graph_db.json`.
+  Los ids se namespacean como `<proyecto>/<servicio>`.
 - **graphify** (`graphify-out/`): grafo del contenido del codigo. Para preguntas
   de arquitectura o "como funciona X", consulta primero `graphify query`.
 
@@ -801,8 +797,7 @@ for command_name in bash cp git python3 sed; do
     fi
 done
 
-if [ "$INSTALL_POSTGRES" -eq 1 ]; then
-    python3 - <<'EOF'
+python3 - <<'EOF'
 import os
 import sys
 
@@ -824,12 +819,11 @@ if missing:
     print(
         "[!] PostgreSQL es el Hub predeterminado. Faltan variables: "
         + ", ".join(missing)
-        + ". Configuralas o usa --json-hub.",
+        + ". Configuralas en el entorno o en $HARNESS_HUB/.env.",
         file=sys.stderr,
     )
     sys.exit(2)
 EOF
-fi
 
 echo "== Instalando Harness Process en: $HARNESS_DIR =="
 echo "   proyecto:   $PROJECT_NAME"
@@ -839,7 +833,7 @@ echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
 echo "   /graphify por agente: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo "Claude/Codex/Gemini/Antigravity" || echo no)"
 echo "   antigravity:$([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo " asegurar" || echo " no")"
-echo "   hub:        $([ "$INSTALL_POSTGRES" -eq 1 ] && echo "PostgreSQL" || echo "JSON local (--json-hub)")"
+echo "   hub:        PostgreSQL (obligatorio)"
 
 if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
     echo "[!] --subdir requiere correr el instalador DESDE la subcarpeta del arnes," >&2
@@ -856,11 +850,7 @@ mkdir -p "$SURFACE_DIR/.claude" "$SURFACE_DIR/.codex" "$SURFACE_DIR/.gemini" "$S
 
 # Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
 printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
-if [ "$INSTALL_POSTGRES" -eq 1 ]; then
-    printf 'postgres\n' > "$HARNESS_DIR/.harness_backend"
-else
-    printf 'json\n' > "$HARNESS_DIR/.harness_backend"
-fi
+printf 'postgres\n' > "$HARNESS_DIR/.harness_backend"
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"
@@ -1182,86 +1172,203 @@ else
     echo "   -> graphify no instalado (--no-graphify activo). Quita ese flag para asegurarlo."
 fi
 
-if [ "$INSTALL_POSTGRES" -eq 1 ]; then
-    echo "Asegurando psycopg2 para el Hub en PostgreSQL..."
-    if python3 -c "import psycopg2" >/dev/null 2>&1; then
-        echo "   -> psycopg2 ya esta disponible."
-    else
-        python3 -m pip install --user psycopg2-binary >/dev/null 2>&1 \
-            && echo "   -> psycopg2-binary instalado via pip --user." \
-            || {
-                echo "[!] No se pudo instalar psycopg2-binary." >&2
-                exit 1
-            }
-    fi
+echo "Asegurando psycopg2 para el Hub en PostgreSQL..."
+if python3 -c "import psycopg2" >/dev/null 2>&1; then
+    echo "   -> psycopg2 ya esta disponible."
+else
+    python3 -m pip install --user psycopg2-binary >/dev/null 2>&1 \
+        && echo "   -> psycopg2-binary instalado via pip --user." \
+        || {
+            echo "[!] No se pudo instalar psycopg2-binary." >&2
+            exit 1
+        }
+fi
 
-    echo "Verificando base de datos PostgreSQL del Hub..."
-    python3 - << 'EOF'
-import os, sys
+echo "Verificando y migrando el Memory Hub PostgreSQL..."
+python3 - << 'EOF'
+import json
+import os
+import sys
+from pathlib import Path
+
 try:
     import psycopg2
     import psycopg2.extensions
     from psycopg2 import sql
+    from psycopg2.extras import Json
 except ImportError:
     print("[!] psycopg2 no esta disponible.", file=sys.stderr)
     sys.exit(1)
 
-HUB_DIR = os.environ.get('HARNESS_HUB') or os.path.join(os.path.expanduser('~'), '.harness-hub')
-env_file = os.path.join(HUB_DIR, '.env')
-if os.path.exists(env_file):
-    with open(env_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, _, val = line.partition('=')
-                os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+hub_dir = Path(
+    os.environ.get("HARNESS_HUB")
+    or os.path.join(os.path.expanduser("~"), ".harness-hub")
+)
+env_file = hub_dir / ".env"
+if env_file.exists():
+    with env_file.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
-required = ('DB_HOST', 'DB_USER', 'DB_PASSWORD')
+required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
 missing = [key for key in required if not os.environ.get(key)]
 if missing:
     print("[!] PostgreSQL requiere: " + ", ".join(missing), file=sys.stderr)
     sys.exit(2)
 
-db_host = os.environ['DB_HOST']
-db_port = os.environ.get('DB_PORT', '5432')
-db_user = os.environ['DB_USER']
-db_pass = os.environ['DB_PASSWORD']
-db_name = os.environ.get('DB_NAME', 'postgres')
-db_ssl_mode = os.environ.get('DB_SSL_MODE', 'require')
-
+db_name = os.environ.get("DB_NAME", "postgres")
 connection = {
-    'user': db_user,
-    'password': db_pass,
-    'host': db_host,
-    'port': db_port,
-    'sslmode': db_ssl_mode,
-    'connect_timeout': 10,
+    "user": os.environ["DB_USER"],
+    "password": os.environ["DB_PASSWORD"],
+    "host": os.environ["DB_HOST"],
+    "port": os.environ.get("DB_PORT", "5432"),
+    "sslmode": os.environ.get("DB_SSL_MODE", "require"),
+    "connect_timeout": 10,
 }
 
 try:
     conn = psycopg2.connect(dbname=db_name, **connection)
-    conn.close()
-    print("   -> Base de datos " + db_name + " lista.")
-except psycopg2.OperationalError as e:
-    if 'does not exist' in str(e) or 'no existe' in str(e).lower():
-        try:
-            print("   -> Creando base de datos " + db_name + "...")
-            conn = psycopg2.connect(dbname='postgres', **connection)
-            conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-            with conn.cursor() as cur:
-                cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
-            conn.close()
-            print("   -> Base de datos creada exitosamente.")
-        except Exception as e2:
-            print("[!] Fallo al crear base de datos: " + str(e2), file=sys.stderr)
-            sys.exit(1)
-    else:
-        print("[!] Fallo de conexion PostgreSQL: " + str(e).strip(), file=sys.stderr)
+except psycopg2.OperationalError as exc:
+    if "does not exist" not in str(exc) and "no existe" not in str(exc).lower():
+        print("[!] Fallo de conexion PostgreSQL: " + str(exc).strip(), file=sys.stderr)
         sys.exit(1)
+    try:
+        print("   -> Creando base de datos " + db_name + "...")
+        admin = psycopg2.connect(dbname="postgres", **connection)
+        admin.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        with admin.cursor() as cur:
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+        admin.close()
+        conn = psycopg2.connect(dbname=db_name, **connection)
+    except Exception as create_exc:
+        print("[!] Fallo al crear base de datos: " + str(create_exc), file=sys.stderr)
+        sys.exit(1)
+
+legacy_nodes = {}
+legacy_edges = []
+graph_file = hub_dir / "graph_db.json"
+if graph_file.exists():
+    try:
+        data = json.loads(graph_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print("[!] No se puede migrar graph_db.json: " + str(exc), file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+    if not isinstance(data, dict):
+        print("[!] graph_db.json no contiene un objeto JSON valido.", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+    legacy_nodes.update(data.get("nodes") or {})
+    legacy_edges.extend(data.get("edges") or [])
+
+progress_dir = hub_dir / "progress"
+if progress_dir.exists():
+    for progress_file in progress_dir.rglob("*.json"):
+        try:
+            node = json.loads(progress_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(
+                "[!] No se puede migrar " + str(progress_file) + ": " + str(exc),
+                file=sys.stderr,
+            )
+            conn.close()
+            sys.exit(1)
+        if not isinstance(node, dict) or not node.get("_id"):
+            continue
+        node_id = node["_id"]
+        merged = dict(node)
+        merged.update(legacy_nodes.get(node_id) or {})
+        legacy_nodes[node_id] = merged
+
+with conn:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                props JSONB NOT NULL DEFAULT '{}'::jsonb
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                source TEXT NOT NULL,
+                target TEXT NOT NULL,
+                type TEXT NOT NULL,
+                props JSONB NOT NULL DEFAULT '{}'::jsonb,
+                PRIMARY KEY (source, target, type)
+            );
+            """
+        )
+        for node_id, raw_props in legacy_nodes.items():
+            props = dict(raw_props or {})
+            label = props.pop("_label", "Artefacto")
+            props.setdefault("_id", node_id)
+            cur.execute(
+                """
+                INSERT INTO graph_nodes (id, label, props)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    label = EXCLUDED.label,
+                    props = graph_nodes.props || EXCLUDED.props;
+                """,
+                (node_id, label, Json(props)),
+            )
+        for edge in legacy_edges:
+            props = dict(edge)
+            source = props.pop("source")
+            target = props.pop("target")
+            edge_type = props.pop("type")
+            cur.execute(
+                """
+                INSERT INTO graph_edges (source, target, type, props)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (source, target, type) DO UPDATE SET
+                    props = graph_edges.props || EXCLUDED.props;
+                """,
+                (source, target, edge_type, Json(props)),
+            )
+
+conn.close()
+print("   -> Base de datos " + db_name + " lista.")
+if legacy_nodes or legacy_edges:
+    print(
+        "   -> Memoria local migrada: "
+        + str(len(legacy_nodes))
+        + " nodos, "
+        + str(len(legacy_edges))
+        + " relaciones."
+    )
 EOF
-else
-    echo "Hub PostgreSQL omitido; se usara JSON local (--json-hub)."
-fi
+
+archive_local_hub_memory() {
+    hub_dir="${HARNESS_HUB:-$HOME/.harness-hub}"
+    graph_file="$hub_dir/graph_db.json"
+    progress_dir="$hub_dir/progress"
+    if [ ! -f "$graph_file" ] && [ ! -d "$progress_dir" ]; then
+        return
+    fi
+
+    memory_backup="$BKP_DIR/memory-hub/$(timestamp)-$$"
+    mkdir -p "$memory_backup"
+    if [ -f "$graph_file" ]; then
+        cp -p "$graph_file" "$memory_backup/graph_db.json"
+    fi
+    if [ -d "$progress_dir" ]; then
+        cp -R "$progress_dir" "$memory_backup/progress"
+    fi
+
+    rm -f "$graph_file"
+    rm -rf "$progress_dir"
+    echo "[Harness] Memoria local respaldada en $memory_backup y eliminada del Hub activo."
+}
+
+archive_local_hub_memory
 
 # Despliega el comando /graphify nativo en cada agente que graphify soporta, para
 # que el rebuild semantico no sea exclusivo de Claude. Se corre desde un directorio

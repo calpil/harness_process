@@ -30,17 +30,16 @@ Para instalar el arnes directamente en la raiz multi-repo:
 ./setup_harness.sh --root
 ```
 
-Instalacion offline, sin descargas ni cambios globales:
+Instalacion sin graphify ni cambios globales adicionales:
 
 ```bash
 ./setup_harness.sh \
   --no-graphify \
   --no-graphify-skills \
-  --no-antigravity \
-  --json-hub
+  --no-antigravity
 ```
 
-El Hub usa PostgreSQL por defecto. Configura la conexion en el entorno:
+El Memory Hub usa exclusivamente PostgreSQL. Configura la conexion en el entorno:
 
 ```bash
 export DB_HOST=localhost
@@ -53,8 +52,10 @@ export DB_SSL_MODE=require
 
 Tambien se pueden guardar esas variables en `$HARNESS_HUB/.env`.
 `DB_SSL_MODE` usa `require` por defecto.
-Para una instalacion local sin PostgreSQL usa `--json-hub`; ese modo guarda el
-grafo en `~/.harness-hub/graph_db.json`.
+
+Al actualizar una instalacion antigua, `graph_db.json` y `progress/` se migran
+a PostgreSQL. Luego se respaldan bajo `bkp/memory-hub/` y se eliminan del Hub
+activo. Las consultas posteriores se realizan solo en PostgreSQL.
 
 ## Opciones
 
@@ -65,7 +66,6 @@ Ejecuta `./setup_harness.sh --help` para ver todas las opciones. Las mas utiles:
 - `--no-graphify`: no instala el CLI de graphify.
 - `--no-graphify-skills`: no modifica skills globales de agentes.
 - `--no-antigravity`: no instala Antigravity CLI.
-- `--json-hub`: usa almacenamiento JSON local en vez de PostgreSQL.
 - `--force`: sobrescribe sin crear backups.
 
 Los backups se guardan en `bkp/`. Usa `HARNESS_BKP_DIR` para cambiar la ruta.

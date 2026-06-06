@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Memoria distribuida del Harness Process.
 
-Mantiene un hub compartido en PostgreSQL por defecto. El modo JSON local usa
-~/.harness-hub/graph_db.json.
+Mantiene un hub compartido exclusivamente en PostgreSQL.
 Ids de microservicio: <proyecto>/<servicio>.
 """
 import argparse
@@ -38,8 +37,6 @@ def _repo_root():
 REPO_ROOT = _repo_root()
 PROJECT = os.environ.get("HARNESS_PROJECT") or os.path.basename(REPO_ROOT)
 HUB_DIR = os.environ.get("HARNESS_HUB") or os.path.join(os.path.expanduser("~"), ".harness-hub")
-GRAPH_DB_FILE = os.path.join(HUB_DIR, "graph_db.json")
-PROGRESS_DIR = os.path.join(HUB_DIR, "progress")
 LOCK_FILE = os.path.join(HUB_DIR, ".lock")
 
 
@@ -77,17 +74,17 @@ class PgGraphStore:
             with conn.cursor() as cur:
                 cur.execute('''
                     CREATE TABLE IF NOT EXISTS graph_nodes (
-                        id VARCHAR PRIMARY KEY,
-                        label VARCHAR,
-                        props JSONB
+                        id TEXT PRIMARY KEY,
+                        label TEXT NOT NULL,
+                        props JSONB NOT NULL DEFAULT '{}'::jsonb
                     );
                 ''')
                 cur.execute('''
                     CREATE TABLE IF NOT EXISTS graph_edges (
-                        source VARCHAR,
-                        target VARCHAR,
-                        type VARCHAR,
-                        props JSONB,
+                        source TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        props JSONB NOT NULL DEFAULT '{}'::jsonb,
                         PRIMARY KEY (source, target, type)
                     );
                 ''')
@@ -127,6 +124,20 @@ class PgGraphStore:
     def to_dict(self):
         return {"nodes": self.nodes, "edges": self.edges}
 
+    def get_node(self, nid):
+        with psycopg2.connect(**self.connection) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT label, props FROM graph_nodes WHERE id = %s;",
+                    (nid,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        props = row[1] or {}
+        props["_label"] = row[0]
+        return props
+
     def save(self):
         with psycopg2.connect(**self.connection) as conn:
             with conn.cursor() as cur:
@@ -157,31 +168,6 @@ class PgGraphStore:
                         props = COALESCE(graph_edges.props, '{}'::jsonb) || EXCLUDED.props;
                     ''', (source, target, etype, Json(p)))
             conn.commit()
-
-class GraphStore:
-    def __init__(self):
-        self.nodes = {}
-        self.edges = []
-
-    def add_node(self, label, props):
-        nid = props["_id"]
-        node = self.nodes.get(nid, {})
-        node.update(props)
-        node["_label"] = label
-        self.nodes[nid] = node
-
-    def add_edge(self, etype, source, target, **props):
-        edge = {"type": etype, "source": source, "target": target}
-        edge.update(props)
-        if edge not in self.edges:
-            self.edges.append(edge)
-
-    def load(self, data):
-        self.nodes = data.get("nodes", {})
-        self.edges = data.get("edges", [])
-
-    def to_dict(self):
-        return {"nodes": self.nodes, "edges": self.edges}
 
 
 def qualify(name):
@@ -220,71 +206,38 @@ class GraphMemoryManager:
                         key, _, val = line.partition("=")
                         os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-        backend_file = os.path.join(BASE_DIR, ".harness_backend")
-        backend_default = "postgres"
-        try:
-            with open(backend_file, encoding="utf-8") as fh:
-                backend_default = fh.read().strip() or backend_default
-        except OSError:
-            pass
-        use_postgres = os.environ.get(
-            "USE_POSTGRES", "1" if backend_default == "postgres" else "0"
-        ).strip().lower()
-        postgres_requested = use_postgres not in {"0", "false", "no", "off"}
-        if postgres_requested and not HAVE_PSYCOPG2:
+        if not HAVE_PSYCOPG2:
             raise SystemExit(
-                "USE_POSTGRES esta activo pero psycopg2 no esta instalado. "
+                "El Memory Hub requiere PostgreSQL pero psycopg2 no esta instalado. "
                 "Vuelve a ejecutar setup_harness.sh para instalarlo."
             )
-        self.use_postgres = postgres_requested
 
-        if self.use_postgres:
-            required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
-            missing = [name for name in required if not os.environ.get(name)]
-            if missing:
-                raise SystemExit(
-                    "USE_POSTGRES esta activo pero faltan variables: "
-                    + ", ".join(missing)
-                )
-            connection = {
-                "dbname": os.environ.get("DB_NAME", "postgres"),
-                "user": os.environ["DB_USER"],
-                "password": os.environ["DB_PASSWORD"],
-                "host": os.environ["DB_HOST"],
-                "port": os.environ.get("DB_PORT", "5432"),
-                "sslmode": os.environ.get("DB_SSL_MODE", "require"),
-                "connect_timeout": 10,
-            }
-            self.graph = PgGraphStore(connection)
-        else:
-            self.graph = GraphStore()
-            
+        required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
+        missing = [name for name in required if not os.environ.get(name)]
+        if missing:
+            raise SystemExit(
+                "El Memory Hub PostgreSQL requiere: " + ", ".join(missing)
+            )
+        connection = {
+            "dbname": os.environ.get("DB_NAME", "postgres"),
+            "user": os.environ["DB_USER"],
+            "password": os.environ["DB_PASSWORD"],
+            "host": os.environ["DB_HOST"],
+            "port": os.environ.get("DB_PORT", "5432"),
+            "sslmode": os.environ.get("DB_SSL_MODE", "require"),
+            "connect_timeout": 10,
+        }
+        self.graph = PgGraphStore(connection)
+        self.hub_location = (
+            f"{connection['dbname']}@{connection['host']}:{connection['port']}"
+        )
         os.makedirs(HUB_DIR, exist_ok=True)
-        os.makedirs(PROGRESS_DIR, exist_ok=True)
-
-
 
     def load(self):
-        if self.use_postgres:
-            self.graph.load()
-        else:
-            if os.path.exists(GRAPH_DB_FILE):
-                with open(GRAPH_DB_FILE, "r", encoding="utf-8") as f:
-                    self.graph.load(json.load(f))
-            else:
-                self.graph = GraphStore()
-
-
+        self.graph.load()
 
     def save(self):
-        if self.use_postgres:
-            self.graph.save()
-        else:
-            tmp = GRAPH_DB_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.graph.to_dict(), f, indent=2, ensure_ascii=False)
-            os.replace(tmp, GRAPH_DB_FILE)
-
+        self.graph.save()
 
     def discover(self):
         found = []
@@ -306,7 +259,10 @@ class GraphMemoryManager:
                     found.append(entry)
             self.save()
         listing = ", ".join(found) if found else "(ninguno)"
-        print(f"[Memoria] Proyecto '{PROJECT}' en {HUB_DIR}: {len(found)} microservicio(s): {listing}")
+        print(
+            f"[Memoria] Proyecto '{PROJECT}' en PostgreSQL "
+            f"({self.hub_location}): {len(found)} microservicio(s): {listing}"
+        )
 
     def sync_git(self, commit_hash, files, microservice):
         qserv = f"{PROJECT}/{microservice}"
@@ -315,8 +271,6 @@ class GraphMemoryManager:
             self.graph.add_node("Commit", {"_id": commit_hash, "proyecto": PROJECT, "microservicio": microservice})
             self.graph.add_node("Agente", {"_id": "Agente_Implementador"})
             self.graph.add_edge("REALIZO", "Agente_Implementador", commit_hash)
-            progress_path = os.path.join(PROGRESS_DIR, PROJECT, microservice)
-            os.makedirs(progress_path, exist_ok=True)
             for file_path in files:
                 if not file_path:
                     continue
@@ -327,8 +281,6 @@ class GraphMemoryManager:
                     {"_id": nid, "ruta": file_path, "estado": "MODIFICADO_GIT", "proyecto": PROJECT, "microservicio": microservice},
                 )
                 self.graph.add_edge("MODIFICO", commit_hash, nid)
-                with open(os.path.join(progress_path, f"{aid}.json"), "w", encoding="utf-8") as f:
-                    json.dump({"_id": nid, "ruta": file_path, "estado": "MODIFICADO_GIT", "commit": commit_hash}, f, indent=2, ensure_ascii=False)
             self.save()
         print(f"[Memoria] Commit {commit_hash[:7]} sincronizado para {qserv}")
 
@@ -379,21 +331,20 @@ class GraphMemoryManager:
                 node["metadata"] = metadata
             self.graph.add_node("Artefacto", node)
             self.graph.add_edge(action.upper(), agent, qart)
-            ruta = os.path.join(PROGRESS_DIR, PROJECT)
-            os.makedirs(ruta, exist_ok=True)
-            with open(os.path.join(ruta, f"{artefacto}.json"), "w", encoding="utf-8") as f:
-                json.dump(node, f, indent=2, ensure_ascii=False)
             self.save()
         print(f"[Memoria] {agent} --[{action}]--> {qart} ({estado})")
 
     def query_state(self, artefacto, microservice="raiz"):
         if microservice == "raiz":
-            ruta = os.path.join(PROGRESS_DIR, PROJECT, f"{artefacto}.json")
+            node_id = f"{PROJECT}/{artefacto}"
         else:
-            ruta = os.path.join(PROGRESS_DIR, PROJECT, microservice, f"{artefacto}.json")
-        if os.path.exists(ruta):
-            with open(ruta, "r", encoding="utf-8") as f:
-                print(f.read())
+            node_id = f"{qualify(microservice)}:{artefacto}"
+        node = self.graph.get_node(node_id)
+        if node:
+            result = dict(node)
+            result["_id"] = node_id
+            result.pop("_label", None)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
             print(f"Error: Artefacto '{artefacto}' no encontrado en {PROJECT}/{microservice}.")
 
@@ -491,7 +442,7 @@ class GraphMemoryManager:
             dependents.setdefault(edge["target"], []).append(edge["source"])
 
         commit_count = sum(1 for node in nodes.values() if node.get("_label") == "Commit")
-        print(f"== Mapa del Hub ({HUB_DIR}) ==")
+        print(f"== Mapa del Hub PostgreSQL ({self.hub_location}) ==")
         print(f"Proyectos: {len(projects)} | Microservicios: {len(micros)} | Dependencias: {len(deps)} | Commits: {commit_count}")
         print()
         for project in sorted(projects):
