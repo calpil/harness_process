@@ -79,10 +79,11 @@ class PgGraphStore:
             conn.close()
         except psycopg2.OperationalError as e:
             if 'does not exist' in str(e) or 'no existe' in str(e).lower():
-                with psycopg2.connect(self.base_dsn) as conn:
-                    conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-                    with conn.cursor() as cur:
-                        cur.execute(f'CREATE DATABASE "{self.db_name}"')
+                conn = psycopg2.connect(self.base_dsn)
+                conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+                with conn.cursor() as cur:
+                    cur.execute(f'CREATE DATABASE "{self.db_name}"')
+                conn.close()
             else:
                 raise
                 
