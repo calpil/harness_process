@@ -1035,6 +1035,17 @@ else
     echo "   -> graphify no instalado (--no-graphify activo). Quita ese flag para asegurarlo."
 fi
 
+echo "Asegurando psycopg2 para el Hub en Postgres..."
+if python3 -c "import psycopg2" >/dev/null 2>&1; then
+    echo "   -> psycopg2 ya esta disponible."
+else
+    set +e
+    python3 -m pip install --user psycopg2-binary >/dev/null 2>&1 \
+        && echo "   -> psycopg2-binary instalado via pip --user." \
+        || echo "   -> aviso: no se pudo instalar psycopg2-binary. Usa modo JSON fallback."
+    set -e
+fi
+
 # Despliega el comando /graphify nativo en cada agente que graphify soporta, para
 # que el rebuild semantico no sea exclusivo de Claude. Se corre desde un directorio
 # AISLADO con scope global (HOME): las skills quedan en ~/.claude (Claude),
