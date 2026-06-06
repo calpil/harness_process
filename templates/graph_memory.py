@@ -209,6 +209,15 @@ def is_repo_root(path):
 class GraphMemoryManager:
 
     def __init__(self):
+        env_file = os.path.join(HUB_DIR, ".env")
+        if os.path.exists(env_file):
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, val = line.partition("=")
+                        os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+
         db_host = os.environ.get("DB_HOST", "postgres.lancal.org")
         db_port = os.environ.get("DB_PORT", "5432")
         db_user = os.environ.get("DB_USER", "postgres")
