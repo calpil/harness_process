@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Memoria distribuida del Harness Process.
 
-Mantiene un hub compartido por defecto en ~/.harness-hub/graph_db.json.
+Mantiene un hub compartido en PostgreSQL por defecto. El modo JSON local usa
+~/.harness-hub/graph_db.json.
 Ids de microservicio: <proyecto>/<servicio>.
 """
 import argparse
@@ -65,14 +66,14 @@ except ImportError:
     HAVE_PSYCOPG2 = False
 
 class PgGraphStore:
-    def __init__(self, dsn):
-        self.dsn = dsn
+    def __init__(self, connection):
+        self.connection = connection
         self.nodes = {}
         self.edges = []
         self._init_db()
 
     def _init_db(self):
-        with psycopg2.connect(self.dsn) as conn:
+        with psycopg2.connect(**self.connection) as conn:
             with conn.cursor() as cur:
                 cur.execute('''
                     CREATE TABLE IF NOT EXISTS graph_nodes (
@@ -108,7 +109,7 @@ class PgGraphStore:
     def load(self, data=None):
         self.nodes = {}
         self.edges = []
-        with psycopg2.connect(self.dsn) as conn:
+        with psycopg2.connect(**self.connection) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id, label, props FROM graph_nodes;")
                 for row in cur.fetchall():
@@ -127,7 +128,7 @@ class PgGraphStore:
         return {"nodes": self.nodes, "edges": self.edges}
 
     def save(self):
-        with psycopg2.connect(self.dsn) as conn:
+        with psycopg2.connect(**self.connection) as conn:
             with conn.cursor() as cur:
                 for nid, props in self.nodes.items():
                     label = props.get("_label", "Unknown")
@@ -219,17 +220,42 @@ class GraphMemoryManager:
                         key, _, val = line.partition("=")
                         os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-        db_host = os.environ.get("DB_HOST", "postgres.lancal.org")
-        db_port = os.environ.get("DB_PORT", "5432")
-        db_user = os.environ.get("DB_USER", "postgres")
-        db_pass = os.environ.get("DB_PASSWORD", "Po$tgr3s2025$%")
-        db_name = os.environ.get("DB_NAME", "postgres")
-        
-        self.use_postgres = HAVE_PSYCOPG2 and bool(os.environ.get("USE_POSTGRES", True))
-        
+        backend_file = os.path.join(BASE_DIR, ".harness_backend")
+        backend_default = "postgres"
+        try:
+            with open(backend_file, encoding="utf-8") as fh:
+                backend_default = fh.read().strip() or backend_default
+        except OSError:
+            pass
+        use_postgres = os.environ.get(
+            "USE_POSTGRES", "1" if backend_default == "postgres" else "0"
+        ).strip().lower()
+        postgres_requested = use_postgres not in {"0", "false", "no", "off"}
+        if postgres_requested and not HAVE_PSYCOPG2:
+            raise SystemExit(
+                "USE_POSTGRES esta activo pero psycopg2 no esta instalado. "
+                "Vuelve a ejecutar setup_harness.sh para instalarlo."
+            )
+        self.use_postgres = postgres_requested
+
         if self.use_postgres:
-            self.dsn = f"dbname={db_name} user={db_user} password={db_pass} host={db_host} port={db_port}"
-            self.graph = PgGraphStore(self.dsn)
+            required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
+            missing = [name for name in required if not os.environ.get(name)]
+            if missing:
+                raise SystemExit(
+                    "USE_POSTGRES esta activo pero faltan variables: "
+                    + ", ".join(missing)
+                )
+            connection = {
+                "dbname": os.environ.get("DB_NAME", "postgres"),
+                "user": os.environ["DB_USER"],
+                "password": os.environ["DB_PASSWORD"],
+                "host": os.environ["DB_HOST"],
+                "port": os.environ.get("DB_PORT", "5432"),
+                "sslmode": os.environ.get("DB_SSL_MODE", "require"),
+                "connect_timeout": 10,
+            }
+            self.graph = PgGraphStore(connection)
         else:
             self.graph = GraphStore()
             

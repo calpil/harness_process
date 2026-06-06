@@ -20,6 +20,7 @@ INSTALL_GRAPHIFY=1
 # para asegurar solo el binario sin tocar la config global de cada agente.
 INSTALL_GRAPHIFY_SKILLS=1
 INSTALL_ANTIGRAVITY=1
+INSTALL_POSTGRES=1
 WITH_SUBAGENTS=1
 FORCE=0
 # Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
@@ -41,6 +42,8 @@ Opciones:
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
   --install-antigravity Ya es el default; asegura Antigravity CLI si falta.
   --no-antigravity     No instala Antigravity CLI.
+  --with-postgres      PostgreSQL ya es el default; se mantiene por compatibilidad.
+  --json-hub           Usa el Hub JSON local y no instala ni verifica PostgreSQL.
   --subdir             (DEFAULT) El arnes vive en esta subcarpeta y orquesta el
                        directorio PADRE: escribe superficies multi-LLM en el
                        padre (raiz multi-repo) y mantiene aqui los scripts.
@@ -66,6 +69,8 @@ while [ "$#" -gt 0 ]; do
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
         --no-graphify-skills) INSTALL_GRAPHIFY_SKILLS=0 ;;
         --no-antigravity) INSTALL_ANTIGRAVITY=0 ;;
+        --with-postgres) INSTALL_POSTGRES=1 ;;
+        --json-hub) INSTALL_POSTGRES=0 ;;
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
         --force) FORCE=1 ;;
@@ -83,13 +88,18 @@ timestamp() {
     date +%Y%m%d%H%M%S
 }
 
-BKP_DIR="bkp"
+BKP_DIR=""
 
 # Calcula la ruta del backup dentro de bkp/, preservando la estructura de
 # subcarpetas del archivo original para evitar colisiones de nombres.
 backup_path() {
     target="$1"
-    rel="${target#./}"
+    case "$target" in
+        "$HARNESS_DIR"/*) rel="${target#"$HARNESS_DIR"/}" ;;
+        "$SURFACE_DIR"/*) rel="surface/${target#"$SURFACE_DIR"/}" ;;
+        /*) rel="external/${target#/}" ;;
+        *) rel="${target#./}" ;;
+    esac
     dest="$BKP_DIR/${rel}.bak.$(timestamp)"
     mkdir -p "$(dirname "$dest")"
     echo "$dest"
@@ -118,8 +128,59 @@ write_file_notice() {
     echo "   -> $1"
 }
 
+json_value() {
+    python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+
+write_basic_agent_surface() {
+    target="$1"
+    mkdir -p "$(dirname "$target")"
+    cat <<'SURFACE_EOF' > "$target"
+# Harness Process
+
+Estas operando en la raiz de un arnes multi-repo. Los hooks y launchers
+inicializan el mapa compartido antes de trabajar:
+
+```bash
+bash "__HREL__init.sh"
+bash "__HREL__harness_status.sh"
+```
+
+Antes de modificar codigo:
+
+1. Revisa el mapa: `python3 "__HREL__graph_memory.py" mapa`.
+2. Revisa impacto: `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`.
+3. Si existe `graphify-out/graph.json`, consulta `graphify query "<pregunta>"`.
+4. Trabaja y valida dentro del microservicio afectado.
+
+El Hub usa PostgreSQL por defecto (`--json-hub` selecciona JSON local) y
+graphify mantiene el grafo del codigo. Para declarar dependencias usa:
+
+```bash
+python3 "__HREL__graph_memory.py" vincular \
+  --microservicio <consumidor> \
+  --destino <proyecto>/<servicio>
+```
+
+Commitea por microservicio con Conventional Commits. El cierre ejecuta
+`__HREL__commit_guard.sh`; controla su severidad con
+`HARNESS_COMMIT_GUARD_MODE=block|warn|off`.
+
+Launchers disponibles: `bin/harness-claude`, `bin/harness-codex`,
+`bin/harness-gemini`, `bin/harness-grok` y `bin/harness-antigravity`.
+SURFACE_EOF
+
+    surface_tmp="$target.harness.tmp"
+    sed -e "s|__HREL__|$HREL|g" "$target" > "$surface_tmp" && mv "$surface_tmp" "$target"
+    write_file_notice "$(basename "$target") ($SURFACE_DIR)"
+}
+
 write_agent_surface() {
     target="$1"
+    if [ "$WITH_SUBAGENTS" -eq 0 ]; then
+        write_basic_agent_surface "$target"
+        return
+    fi
     mkdir -p "$(dirname "$target")"
     cat <<'SURFACE_EOF' > "$target"
 # Harness Process
@@ -183,9 +244,10 @@ dentro de un microservicio, vuelve a la raiz o usa la ruta absoluta del arnes.
 
 Son sistemas separados:
 
-- **Hub** (`~/.harness-hub/graph_db.json`, configurable con `HARNESS_HUB`):
+- **Hub** (PostgreSQL por defecto; `HARNESS_HUB/.env` guarda su configuracion):
   rastrea proyectos, microservicios, commits y dependencias entre servicios.
-  Los ids se namespacean como `<proyecto>/<servicio>`.
+  Los ids se namespacean como `<proyecto>/<servicio>`. Con `--json-hub` usa
+  `~/.harness-hub/graph_db.json`.
 - **graphify** (`graphify-out/`): grafo del contenido del codigo. Para preguntas
   de arquitectura o "como funciona X", consulta primero `graphify query`.
 
@@ -300,6 +362,7 @@ set -Eeuo pipefail
 
 MODE="${1:-plain}"   # plain | gemini-json | codex-json
 EVENT="${2:-${GROK_HOOK_EVENT:-unknown}}"
+WITH_SUBAGENTS="__WITH_SUBAGENTS__"
 ROOT="${HARNESS_REPO_ROOT:-${GROK_WORKSPACE_ROOT:-}}"
 if [ -z "$ROOT" ]; then
     ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -318,19 +381,21 @@ run_session_start() {
 }
 
 run_post_tool() {
-    # Aviso (no bloqueante) si no hay feature activa: empuja a registrar el trabajo
-    # (harness.py start) para que el ciclo plan+autocheck no se salte. A stderr.
-    HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" nudge || true
+    if [ "$WITH_SUBAGENTS" -eq 1 ]; then
+        # Aviso no bloqueante si no hay feature activa.
+        HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" nudge || true
+    fi
     HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_status.sh" --brief
 }
 
 run_stop() {
-    # Checkpoint automatico de avance (multi-LLM: corre al cierre de turno en
-    # Claude/Codex/Gemini/Grok). Si el plan o la evidencia cambiaron, sincroniza
-    # hub + graphify. No-fatal y sin tocar el exit code: el gate sigue siendo
-    # harness_check (que manda en el resultado del hook).
-    HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" autocheck 1>&2 || true
-    HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh"
+    if [ "$WITH_SUBAGENTS" -eq 1 ]; then
+        # Checkpoint automatico de avance; harness_check conserva el exit code.
+        HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" autocheck 1>&2 || true
+        HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh"
+    else
+        HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/commit_guard.sh"
+    fi
 }
 
 run_event() {
@@ -400,13 +465,19 @@ HOOK_RUNTIME_EOF
     sed "s|__HREL_NOSLASH__|$(harness_rel_without_slash)|g" \
         "$SURFACE_DIR/bin/harness-hook" > "$hook_runtime_tmp" \
         && mv "$hook_runtime_tmp" "$SURFACE_DIR/bin/harness-hook"
+    sed "s|__WITH_SUBAGENTS__|$WITH_SUBAGENTS|g" \
+        "$SURFACE_DIR/bin/harness-hook" > "$hook_runtime_tmp" \
+        && mv "$hook_runtime_tmp" "$SURFACE_DIR/bin/harness-hook"
     chmod +x "$SURFACE_DIR/bin/harness-hook"
     write_file_notice "bin/harness-hook ($SURFACE_DIR)"
 }
 
 write_codex_hooks() {
     mkdir -p "$SURFACE_DIR/.codex"
-    cat <<'CODEX_HOOKS_EOF' > "$SURFACE_DIR/.codex/hooks.json"
+    codex_start_command="$(json_value "bash \"$SURFACE_DIR/bin/harness-hook\" codex-json session-start")"
+    codex_post_command="$(json_value "bash \"$SURFACE_DIR/bin/harness-hook\" codex-json post-tool")"
+    codex_stop_command="$(json_value "bash \"$SURFACE_DIR/bin/harness-hook\" codex-json stop")"
+    cat <<CODEX_HOOKS_EOF > "$SURFACE_DIR/.codex/hooks.json"
 {
   "hooks": {
     "SessionStart": [
@@ -415,7 +486,7 @@ write_codex_hooks() {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"bin/harness-hook\" codex-json session-start",
+            "command": $codex_start_command,
             "timeout": 120,
             "statusMessage": "Inicializando Harness"
           }
@@ -428,7 +499,7 @@ write_codex_hooks() {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"bin/harness-hook\" codex-json post-tool",
+            "command": $codex_post_command,
             "timeout": 30,
             "statusMessage": "Actualizando Harness"
           }
@@ -440,7 +511,7 @@ write_codex_hooks() {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"bin/harness-hook\" codex-json stop",
+            "command": $codex_stop_command,
             "timeout": 120,
             "statusMessage": "Verificando Harness"
           }
@@ -455,7 +526,10 @@ CODEX_HOOKS_EOF
 
 write_gemini_hooks() {
     mkdir -p "$SURFACE_DIR/.gemini/commands/harness"
-    cat <<'GEMINI_SETTINGS_EOF' > "$SURFACE_DIR/.gemini/settings.json"
+    gemini_start_command="$(json_value "bash \"$SURFACE_DIR/bin/harness-hook\" gemini-json session-start")"
+    gemini_post_command="$(json_value "bash \"$SURFACE_DIR/bin/harness-hook\" gemini-json post-tool")"
+    gemini_stop_command="$(json_value "bash \"$SURFACE_DIR/bin/harness-hook\" gemini-json stop")"
+    cat <<GEMINI_SETTINGS_EOF > "$SURFACE_DIR/.gemini/settings.json"
 {
   "hooksConfig": {
     "enabled": true,
@@ -469,7 +543,7 @@ write_gemini_hooks() {
             "type": "command",
             "name": "harness-session-start",
             "description": "Inicializa el Harness Process y muestra el mapa del hub.",
-            "command": "bash \"bin/harness-hook\" gemini-json session-start",
+            "command": $gemini_start_command,
             "timeout": 120000
           }
         ]
@@ -482,7 +556,7 @@ write_gemini_hooks() {
             "type": "command",
             "name": "harness-status",
             "description": "Muestra estado breve del harness despues de herramientas.",
-            "command": "bash \"bin/harness-hook\" gemini-json post-tool",
+            "command": $gemini_post_command,
             "timeout": 30000
           }
         ]
@@ -495,7 +569,7 @@ write_gemini_hooks() {
             "type": "command",
             "name": "harness-check",
             "description": "Verifica checkpoints y estado Git al terminar el turno.",
-            "command": "bash \"bin/harness-hook\" gemini-json stop",
+            "command": $gemini_stop_command,
             "timeout": 120000
           }
         ]
@@ -586,12 +660,6 @@ else
     HARNESS_DIR="$ROOT"
 fi
 
-if [ -d "$HARNESS_DIR/templates" ]; then
-    echo "Extrayendo plantillas a la raiz de harness_process..."
-    cp -r "$HARNESS_DIR/templates/"* "$HARNESS_DIR/" || true
-    rm -rf "$HARNESS_DIR/templates"
-fi
-
 export HARNESS_REPO_ROOT="$ROOT"
 export CLAUDE_PROJECT_DIR="$ROOT"
 export CODEX_PROJECT_DIR="$ROOT"
@@ -651,7 +719,7 @@ ensure_antigravity_cli() {
 }
 
 # --- Resolucion de layout -----------------------------------------------------
-# HARNESS_DIR : carpeta donde viven los scripts del arnes (= cwd del instalador).
+# HARNESS_DIR : carpeta donde vive setup_harness.sh.
 # REPO_ROOT   : raiz multi-repo (donde estan los microservicios). En 'subdir' es
 #               el padre; en 'root' es el propio HARNESS_DIR.
 # SURFACE_DIR : donde van CLAUDE.md, AGENTS.md, GEMINI.md, LLM.md y
@@ -659,7 +727,8 @@ ensure_antigravity_cli() {
 # HARNESS_EXEC: prefijo historico para superficies Claude (sin llaves).
 # HOOK_BASE   : prefijo para las rutas en .claude/settings.json (con llaves).
 # HREL        : prefijo relativo de archivos del arnes vistos desde REPO_ROOT.
-HARNESS_DIR="$(pwd -P)"
+HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+cd "$HARNESS_DIR"
 if [ "$LAYOUT" = "subdir" ]; then
     REPO_ROOT="$(dirname "$HARNESS_DIR")"
     HARNESS_SUBDIR="$(basename "$HARNESS_DIR")"
@@ -675,11 +744,76 @@ else
 fi
 SURFACE_DIR="$REPO_ROOT"
 PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
+BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
 
-# Mover el contexto de ejecucion al root del microservicio (REPO_ROOT)
-# para que todas las rutas relativas (roles/, docs/, etc.) se escriban en
-# el proyecto padre en caso de usar layout 'subdir'.
-cd "$REPO_ROOT"
+required_templates=(
+    "graph_memory.py"
+    "init.sh"
+    "validate_ui.sh"
+    "debug_ui.js"
+    "commit_guard.sh"
+    "harness_status.sh"
+    "harness_check.sh"
+    "harness.py"
+)
+if [ "$WITH_SUBAGENTS" -eq 1 ]; then
+    required_templates+=(
+        "CHECKPOINTS.md"
+        "feature_list.json"
+        "progress/current.md"
+        "progress/history.md"
+        "docs/architecture.md"
+        "docs/conventions.md"
+        "docs/verification.md"
+        "roles/README.md"
+        "roles/leader.md"
+        "roles/implementer.md"
+        "roles/reviewer.md"
+    )
+fi
+for template in "${required_templates[@]}"; do
+    if [ ! -f "$HARNESS_DIR/templates/$template" ]; then
+        echo "[!] Falta la plantilla requerida: templates/$template" >&2
+        exit 2
+    fi
+done
+
+for command_name in bash cp git python3 sed; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        echo "[!] Comando requerido no disponible: $command_name" >&2
+        exit 2
+    fi
+done
+
+if [ "$INSTALL_POSTGRES" -eq 1 ]; then
+    python3 - <<'EOF'
+import os
+import sys
+
+hub_dir = os.environ.get("HARNESS_HUB") or os.path.join(
+    os.path.expanduser("~"), ".harness-hub"
+)
+env_file = os.path.join(hub_dir, ".env")
+if os.path.exists(env_file):
+    with open(env_file, encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
+missing = [key for key in required if not os.environ.get(key)]
+if missing:
+    print(
+        "[!] PostgreSQL es el Hub predeterminado. Faltan variables: "
+        + ", ".join(missing)
+        + ". Configuralas o usa --json-hub.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+EOF
+fi
 
 echo "== Instalando Harness Process en: $HARNESS_DIR =="
 echo "   proyecto:   $PROJECT_NAME"
@@ -689,6 +823,7 @@ echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
 echo "   /graphify por agente: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo "Claude/Codex/Gemini/Antigravity" || echo no)"
 echo "   antigravity:$([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo " asegurar" || echo " no")"
+echo "   hub:        $([ "$INSTALL_POSTGRES" -eq 1 ] && echo "PostgreSQL" || echo "JSON local (--json-hub)")"
 
 if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
     echo "[!] --subdir requiere correr el instalador DESDE la subcarpeta del arnes," >&2
@@ -705,6 +840,11 @@ mkdir -p "$SURFACE_DIR/.claude" "$SURFACE_DIR/.codex" "$SURFACE_DIR/.gemini" "$S
 
 # Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
 printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
+if [ "$INSTALL_POSTGRES" -eq 1 ]; then
+    printf 'postgres\n' > "$HARNESS_DIR/.harness_backend"
+else
+    printf 'json\n' > "$HARNESS_DIR/.harness_backend"
+fi
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"
@@ -845,6 +985,17 @@ SETTINGS_EOF
 fi
 write_file_notice ".claude/settings.json ($SURFACE_DIR)"
 
+echo "Instalando scripts desde templates/..."
+cp "$HARNESS_DIR/templates/graph_memory.py" "$HARNESS_DIR/graph_memory.py"
+cp "$HARNESS_DIR/templates/init.sh" "$HARNESS_DIR/init.sh"
+cp "$HARNESS_DIR/templates/validate_ui.sh" "$HARNESS_DIR/validate_ui.sh"
+cp "$HARNESS_DIR/templates/debug_ui.js" "$HARNESS_DIR/debug_ui.js"
+cp "$HARNESS_DIR/templates/commit_guard.sh" "$HARNESS_DIR/commit_guard.sh"
+cp "$HARNESS_DIR/templates/harness_status.sh" "$HARNESS_DIR/harness_status.sh"
+cp "$HARNESS_DIR/templates/harness_check.sh" "$HARNESS_DIR/harness_check.sh"
+cp "$HARNESS_DIR/templates/harness.py" "$HARNESS_DIR/harness.py"
+write_file_notice "scripts base ($HARNESS_DIR)"
+
 echo "Asegurando permisos de ejecucion en HARNESS_DIR..."
 chmod +x "$HARNESS_DIR/graph_memory.py"
 chmod +x "$HARNESS_DIR/init.sh"
@@ -883,12 +1034,10 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         subst_hrel_inplace "$out"
     }
 
-    if [ "$HARNESS_DIR" != "$REPO_ROOT" ]; then
-        cp "$HARNESS_DIR/roles/leader.md" "roles/leader.md"
-        cp "$HARNESS_DIR/roles/implementer.md" "roles/implementer.md"
-        cp "$HARNESS_DIR/roles/reviewer.md" "roles/reviewer.md"
-        cp "$HARNESS_DIR/roles/README.md" "roles/README.md"
-    fi
+    cp "$HARNESS_DIR/templates/roles/leader.md" "roles/leader.md"
+    cp "$HARNESS_DIR/templates/roles/implementer.md" "roles/implementer.md"
+    cp "$HARNESS_DIR/templates/roles/reviewer.md" "roles/reviewer.md"
+    cp "$HARNESS_DIR/templates/roles/README.md" "roles/README.md"
 
     subst_hrel_inplace roles/leader.md
     subst_hrel_inplace roles/implementer.md
@@ -952,29 +1101,27 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
     # archivo de definicion soportado): usa roles/*.md como fases secuenciales.
 
-    if [ "$HARNESS_DIR" != "$REPO_ROOT" ]; then
-        cp "$HARNESS_DIR/CHECKPOINTS.md" "CHECKPOINTS.md"
+    cp "$HARNESS_DIR/templates/CHECKPOINTS.md" "CHECKPOINTS.md"
 
-        # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
-        # features ya cargadas.
-        if [ ! -f feature_list.json ]; then
-            cp "$HARNESS_DIR/feature_list.json" "feature_list.json"
-        fi
-
-        # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
-        # en curso ni la bitacora ya escrita.
-        if [ ! -f progress/current.md ]; then
-            cp "$HARNESS_DIR/progress/current.md" "progress/current.md"
-        fi
-
-        if [ ! -f progress/history.md ]; then
-            cp "$HARNESS_DIR/progress/history.md" "progress/history.md"
-        fi
-
-        cp "$HARNESS_DIR/docs/architecture.md" "docs/architecture.md"
-        cp "$HARNESS_DIR/docs/conventions.md" "docs/conventions.md"
-        cp "$HARNESS_DIR/docs/verification.md" "docs/verification.md"
+    # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
+    # features ya cargadas.
+    if [ ! -f feature_list.json ]; then
+        cp "$HARNESS_DIR/templates/feature_list.json" "feature_list.json"
     fi
+
+    # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
+    # en curso ni la bitacora ya escrita.
+    if [ ! -f progress/current.md ]; then
+        cp "$HARNESS_DIR/templates/progress/current.md" "progress/current.md"
+    fi
+
+    if [ ! -f progress/history.md ]; then
+        cp "$HARNESS_DIR/templates/progress/history.md" "progress/history.md"
+    fi
+
+    cp "$HARNESS_DIR/templates/docs/architecture.md" "docs/architecture.md"
+    cp "$HARNESS_DIR/templates/docs/conventions.md" "docs/conventions.md"
+    cp "$HARNESS_DIR/templates/docs/verification.md" "docs/verification.md"
 
     write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
@@ -1019,25 +1166,29 @@ else
     echo "   -> graphify no instalado (--no-graphify activo). Quita ese flag para asegurarlo."
 fi
 
-echo "Asegurando psycopg2 para el Hub en Postgres..."
-if python3 -c "import psycopg2" >/dev/null 2>&1; then
-    echo "   -> psycopg2 ya esta disponible."
-else
-    set +e
-    python3 -m pip install --user psycopg2-binary >/dev/null 2>&1 \
-        && echo "   -> psycopg2-binary instalado via pip --user." \
-        || echo "   -> aviso: no se pudo instalar psycopg2-binary. Usa modo JSON fallback."
-    set -e
-fi
+if [ "$INSTALL_POSTGRES" -eq 1 ]; then
+    echo "Asegurando psycopg2 para el Hub en PostgreSQL..."
+    if python3 -c "import psycopg2" >/dev/null 2>&1; then
+        echo "   -> psycopg2 ya esta disponible."
+    else
+        python3 -m pip install --user psycopg2-binary >/dev/null 2>&1 \
+            && echo "   -> psycopg2-binary instalado via pip --user." \
+            || {
+                echo "[!] No se pudo instalar psycopg2-binary." >&2
+                exit 1
+            }
+    fi
 
-echo "Verificando base de datos PostgreSQL del Hub..."
-python3 - << 'EOF'
+    echo "Verificando base de datos PostgreSQL del Hub..."
+    python3 - << 'EOF'
 import os, sys
 try:
     import psycopg2
     import psycopg2.extensions
+    from psycopg2 import sql
 except ImportError:
-    sys.exit(0)
+    print("[!] psycopg2 no esta disponible.", file=sys.stderr)
+    sys.exit(1)
 
 HUB_DIR = os.environ.get('HARNESS_HUB') or os.path.join(os.path.expanduser('~'), '.harness-hub')
 env_file = os.path.join(HUB_DIR, '.env')
@@ -1049,34 +1200,52 @@ if os.path.exists(env_file):
                 key, _, val = line.partition('=')
                 os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-db_host = os.environ.get('DB_HOST', 'postgres.lancal.org')
-db_port = os.environ.get('DB_PORT', '5432')
-db_user = os.environ.get('DB_USER', 'postgres')
-db_pass = os.environ.get('DB_PASSWORD', 'Po$tgr3s2025$%')
-db_name = os.environ.get('DB_NAME', 'postgres')
+required = ('DB_HOST', 'DB_USER', 'DB_PASSWORD')
+missing = [key for key in required if not os.environ.get(key)]
+if missing:
+    print("[!] PostgreSQL requiere: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(2)
 
-base_dsn = f"dbname=postgres user={db_user} password={db_pass} host={db_host} port={db_port}"
-target_dsn = f"dbname={db_name} user={db_user} password={db_pass} host={db_host} port={db_port}"
+db_host = os.environ['DB_HOST']
+db_port = os.environ.get('DB_PORT', '5432')
+db_user = os.environ['DB_USER']
+db_pass = os.environ['DB_PASSWORD']
+db_name = os.environ.get('DB_NAME', 'postgres')
+db_ssl_mode = os.environ.get('DB_SSL_MODE', 'require')
+
+connection = {
+    'user': db_user,
+    'password': db_pass,
+    'host': db_host,
+    'port': db_port,
+    'sslmode': db_ssl_mode,
+    'connect_timeout': 10,
+}
 
 try:
-    conn = psycopg2.connect(target_dsn)
+    conn = psycopg2.connect(dbname=db_name, **connection)
     conn.close()
     print("   -> Base de datos " + db_name + " lista.")
 except psycopg2.OperationalError as e:
     if 'does not exist' in str(e) or 'no existe' in str(e).lower():
         try:
             print("   -> Creando base de datos " + db_name + "...")
-            conn = psycopg2.connect(base_dsn)
+            conn = psycopg2.connect(dbname='postgres', **connection)
             conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             with conn.cursor() as cur:
-                cur.execute(f'CREATE DATABASE "{db_name}"')
+                cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
             conn.close()
             print("   -> Base de datos creada exitosamente.")
         except Exception as e2:
-            print("   -> aviso: fallo al crear base de datos: " + str(e2))
+            print("[!] Fallo al crear base de datos: " + str(e2), file=sys.stderr)
+            sys.exit(1)
     else:
-        print("   -> aviso: fallo de conexion postgres: " + str(e).strip())
+        print("[!] Fallo de conexion PostgreSQL: " + str(e).strip(), file=sys.stderr)
+        sys.exit(1)
 EOF
+else
+    echo "Hub PostgreSQL omitido; se usara JSON local (--json-hub)."
+fi
 
 # Despliega el comando /graphify nativo en cada agente que graphify soporta, para
 # que el rebuild semantico no sea exclusivo de Claude. Se corre desde un directorio
