@@ -42,3 +42,8 @@ else
     echo "Repos con cambios: ninguno"
 fi
 python3 "$HARNESS_DIR/graph_memory.py" mapa || true
+
+# Chequeo rapido de frescura de plan (multi-LLM) - no bloqueante aqui
+if [ -f "$HARNESS_DIR/feature_list.json" ]; then
+    python3 "$HARNESS_DIR/harness.py" check-plan 2>/dev/null || echo "[Harness] Plan puede estar desactualizado (ver 'harness.py check-plan')"
+fi

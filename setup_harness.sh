@@ -491,12 +491,22 @@ bash "__HREL__init.sh"
 bash "__HREL__harness_status.sh"
 ```
 
+**⚠️ ANTES DE IMPLEMENTAR CÓDIGO (multi-LLM):**
+
+0. Verifica frescura del plan (puede haber sido actualizado por Claude, Gemini,
+   Antigravity, Grok, etc.):
+   ```bash
+   python3 "__HREL__harness.py" check-plan
+   ```
+   Si está desactualizado, re-lee el plan en `docs/` y sincroniza con `advance`.
+
 Antes de modificar codigo:
 
 1. Revisa el mapa: `python3 "__HREL__graph_memory.py" mapa`.
 2. Revisa impacto: `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`.
 3. Si existe `graphify-out/graph.json`, consulta `graphify query "<pregunta>"`.
-4. Trabaja y valida dentro del microservicio afectado.
+4. Verifica plan: `python3 "__HREL__harness.py" check-plan`.
+5. Trabaja y valida dentro del microservicio afectado.
 
 El Hub usa exclusivamente PostgreSQL y graphify mantiene el grafo del codigo.
 Para declarar dependencias usa:
@@ -563,6 +573,18 @@ bash "__HREL__init.sh"
 bash "__HREL__harness_status.sh"
 ```
 
+**⚠️ ANTES DE IMPLEMENTAR CÓDIGO (multi-LLM):**
+
+0. Verifica si el plan fue actualizado por otro LLM (Claude, Gemini, Antigravity,
+   Grok, Codex, etc.):
+   ```bash
+   python3 "__HREL__harness.py" check-plan
+   ```
+   - Si reporta **PLAN ACTUALIZADO POR OTRO LLM** → **DETENTE**, re-lee
+     completamente el plan en `docs/plan-feature-*.md`.
+   - Luego sincroniza: `python3 "__HREL__harness.py" advance --nota "Re-sincronizado con plan actualizado por otro agente"`.
+   - Repite `check-plan` hasta que salga limpio.
+
 Antes de tocar codigo, arquitectura o dependencias entre servicios, en ESTE
 orden:
 
@@ -572,12 +594,14 @@ orden:
    `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
 3. Si existe `graphify-out/graph.json`, consulta el grafo antes de leer a
    ciegas: `graphify query "<pregunta de la task>"`
-4. Trabaja dentro del microservicio correspondiente; no programes en la raiz
+4. **Verifica frescura del plan** (obligatorio antes de implementar):
+   `python3 "__HREL__harness.py" check-plan`
+5. Trabaja dentro del microservicio correspondiente; no programes en la raiz
    multi-repo salvo que la tarea sea del arnes.
-5. Valida los servicios afectados. Los documentos durables (plan, investigacion,
+6. Valida los servicios afectados. Los documentos durables (plan, investigacion,
    evidencia de implementacion/review) se guardan en `docs/` de la RAIZ del
    proyecto, no en chat ni en `__HREL__progress/` (solo estado vivo).
-6. Al cerrar la feature usa
+7. Al cerrar la feature usa
    `python3 "__HREL__harness.py" close --feature <id> --status <estado>`: mueve la
    task y las memorias juntas (registra el hub y refresca graphify). Luego corre
    `bash "__HREL__harness_check.sh"`.
@@ -605,6 +629,10 @@ Servicios transversales:
   agrega `--transversal` al comando `vincular`.
 - Quitar marca transversal:
   `python3 "__HREL__graph_memory.py" desmarcar --microservicio <servicio>`
+- **Verificar si el plan fue actualizado por otro LLM** (Claude/Gemini/Antigravity/Grok/etc.):
+  `python3 "__HREL__harness.py" check-plan`
+  **Obligatorio antes de implementar cualquier tarea.** Si detecta cambios,
+  re-lee el plan en `docs/` y sincroniza con `advance`.
 - Registrar un avance de la feature activa (mueve hub + graphify + history.md +
   current.md de una vez):
   `python3 "__HREL__harness.py" advance --nota "<que avanzaste>"`
@@ -1863,6 +1891,7 @@ log_info "  bash ${HREL}harness_status.sh"
 log_info "  bash ${HREL}harness_check.sh"
 log_info "  python3 ${HREL}graph_memory.py mapa"
 log_info "  python3 ${HREL}harness.py status"
+log_info "  python3 ${HREL}harness.py check-plan     # <-- OBLIGATORIO antes de implementar (detecta planes actualizados por otros LLMs)"
 log_info "  bin/harness-codex"
 log_info "  bin/harness-gemini"
 log_info "  bin/harness-grok"
@@ -1878,6 +1907,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     log_info "  Antigravity/otros:  ${HREL}roles/*.md como fases secuenciales"
     log_info "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
     log_info "  python3 ${HREL}harness.py start --feature 1"
+    log_info "  python3 ${HREL}harness.py check-plan     # verifica si otro LLM actualizo el plan"
     log_info "  python3 ${HREL}harness.py close --feature 1 --status done"
 fi
 

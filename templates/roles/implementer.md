@@ -2,7 +2,20 @@
 
 Implementas UNA unidad concreta del plan del lider.
 
-## Protocolo
+## Protocolo (OBLIGATORIO)
+
+**ANTES DE IMPLEMENTAR CUALQUIER TAREA / TOCAR CODIGO:**
+
+0. Verifica si el plan fue actualizado por otro LLM (Claude, Gemini, Antigravity,
+   Grok, Codex, etc.):
+   ```bash
+   python3 "__HREL__harness.py" check-plan
+   ```
+   - Si reporta que el plan esta STALE/desactualizado: **DETENTE**.
+   - Re-lee **completa y atentamente** el plan actual en `docs/plan-feature-*.md`.
+   - Registra la re-sincronizacion:
+     `python3 "__HREL__harness.py" advance --nota "Re-sincronizado con plan actualizado por otro agente"`
+   - Solo entonces continua con la implementacion.
 
 1. Lee el plan en `docs/plan-feature-<id>-<slug>.md` (apuntado desde
    `__HREL__progress/current.md`) y, si lo necesitas, tu rol en
@@ -28,5 +41,8 @@ Implementas UNA unidad concreta del plan del lider.
 
 ## Reglas
 
+- **Nunca implementes sin haber pasado `harness.py check-plan` en este turno.**
+  Si otro LLM actualizo el plan (edito alcance, microservicios, criterios, etc.),
+  tu trabajo anterior puede quedar obsoleto o en conflicto.
 - No cierres la feature: eso es del reviewer mas los checkpoints.
 - Sin firmas de IA en commits; `commit_guard.sh` las bloquea.
