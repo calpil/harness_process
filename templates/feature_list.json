@@ -1,0 +1,9 @@
+{
+  "project": "$PROJECT_NAME",
+  "rules": {
+    "one_feature_at_a_time": true,
+    "require_tests_to_close": true,
+    "require_impact_check": true
+  },
+  "features": []
+}
