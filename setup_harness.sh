@@ -746,7 +746,13 @@ SURFACE_DIR="$REPO_ROOT"
 PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
 
-required_templates=(
+if [ -f "$HARNESS_DIR/templates/graph_memory.py" ]; then
+    ASSET_DIR="$HARNESS_DIR/templates"
+else
+    ASSET_DIR="$HARNESS_DIR"
+fi
+
+required_assets=(
     "graph_memory.py"
     "init.sh"
     "validate_ui.sh"
@@ -757,7 +763,7 @@ required_templates=(
     "harness.py"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
-    required_templates+=(
+    required_assets+=(
         "CHECKPOINTS.md"
         "feature_list.json"
         "progress/current.md"
@@ -771,12 +777,22 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "roles/reviewer.md"
     )
 fi
-for template in "${required_templates[@]}"; do
-    if [ ! -f "$HARNESS_DIR/templates/$template" ]; then
-        echo "[!] Falta la plantilla requerida: templates/$template" >&2
+for asset in "${required_assets[@]}"; do
+    if [ ! -f "$ASSET_DIR/$asset" ]; then
+        echo "[!] Falta el recurso requerido: $asset (buscado en $ASSET_DIR)" >&2
         exit 2
     fi
 done
+
+install_asset() {
+    asset="$1"
+    destination="${2:-$HARNESS_DIR/$asset}"
+    source="$ASSET_DIR/$asset"
+    mkdir -p "$(dirname "$destination")"
+    if [ "$source" != "$destination" ]; then
+        cp "$source" "$destination"
+    fi
+}
 
 for command_name in bash cp git python3 sed; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -985,15 +1001,15 @@ SETTINGS_EOF
 fi
 write_file_notice ".claude/settings.json ($SURFACE_DIR)"
 
-echo "Instalando scripts desde templates/..."
-cp "$HARNESS_DIR/templates/graph_memory.py" "$HARNESS_DIR/graph_memory.py"
-cp "$HARNESS_DIR/templates/init.sh" "$HARNESS_DIR/init.sh"
-cp "$HARNESS_DIR/templates/validate_ui.sh" "$HARNESS_DIR/validate_ui.sh"
-cp "$HARNESS_DIR/templates/debug_ui.js" "$HARNESS_DIR/debug_ui.js"
-cp "$HARNESS_DIR/templates/commit_guard.sh" "$HARNESS_DIR/commit_guard.sh"
-cp "$HARNESS_DIR/templates/harness_status.sh" "$HARNESS_DIR/harness_status.sh"
-cp "$HARNESS_DIR/templates/harness_check.sh" "$HARNESS_DIR/harness_check.sh"
-cp "$HARNESS_DIR/templates/harness.py" "$HARNESS_DIR/harness.py"
+echo "Instalando scripts desde: $ASSET_DIR"
+install_asset "graph_memory.py"
+install_asset "init.sh"
+install_asset "validate_ui.sh"
+install_asset "debug_ui.js"
+install_asset "commit_guard.sh"
+install_asset "harness_status.sh"
+install_asset "harness_check.sh"
+install_asset "harness.py"
 write_file_notice "scripts base ($HARNESS_DIR)"
 
 echo "Asegurando permisos de ejecucion en HARNESS_DIR..."
@@ -1034,10 +1050,10 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         subst_hrel_inplace "$out"
     }
 
-    cp "$HARNESS_DIR/templates/roles/leader.md" "roles/leader.md"
-    cp "$HARNESS_DIR/templates/roles/implementer.md" "roles/implementer.md"
-    cp "$HARNESS_DIR/templates/roles/reviewer.md" "roles/reviewer.md"
-    cp "$HARNESS_DIR/templates/roles/README.md" "roles/README.md"
+    install_asset "roles/leader.md"
+    install_asset "roles/implementer.md"
+    install_asset "roles/reviewer.md"
+    install_asset "roles/README.md"
 
     subst_hrel_inplace roles/leader.md
     subst_hrel_inplace roles/implementer.md
@@ -1101,27 +1117,27 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
     # archivo de definicion soportado): usa roles/*.md como fases secuenciales.
 
-    cp "$HARNESS_DIR/templates/CHECKPOINTS.md" "CHECKPOINTS.md"
+    install_asset "CHECKPOINTS.md"
 
     # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
     # features ya cargadas.
     if [ ! -f feature_list.json ]; then
-        cp "$HARNESS_DIR/templates/feature_list.json" "feature_list.json"
+        install_asset "feature_list.json"
     fi
 
     # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
     # en curso ni la bitacora ya escrita.
     if [ ! -f progress/current.md ]; then
-        cp "$HARNESS_DIR/templates/progress/current.md" "progress/current.md"
+        install_asset "progress/current.md"
     fi
 
     if [ ! -f progress/history.md ]; then
-        cp "$HARNESS_DIR/templates/progress/history.md" "progress/history.md"
+        install_asset "progress/history.md"
     fi
 
-    cp "$HARNESS_DIR/templates/docs/architecture.md" "docs/architecture.md"
-    cp "$HARNESS_DIR/templates/docs/conventions.md" "docs/conventions.md"
-    cp "$HARNESS_DIR/templates/docs/verification.md" "docs/verification.md"
+    install_asset "docs/architecture.md"
+    install_asset "docs/conventions.md"
+    install_asset "docs/verification.md"
 
     write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi

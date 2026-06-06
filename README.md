@@ -15,6 +15,9 @@ launchers, memoria compartida y una capa opcional de subagentes.
 
 El layout predeterminado es `subdir`: este repositorio vive dentro de la raiz
 multi-repo y escribe las superficies de agente en el directorio padre.
+La carpeta `templates/` pertenece a este repositorio fuente. Una distribucion
+aplanada puede dejar esos archivos junto a `setup_harness.sh`; el instalador no
+exige ni crea `templates/` en el proyecto destino.
 
 ```bash
 cd /ruta/al/proyecto/harness_process

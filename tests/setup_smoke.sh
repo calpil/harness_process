@@ -13,6 +13,13 @@ copy_fixture() {
     cp -R "$REPO_ROOT/templates" "$target/templates"
 }
 
+copy_flat_fixture() {
+    target="$1"
+    mkdir -p "$target"
+    cp "$REPO_ROOT/setup_harness.sh" "$target/setup_harness.sh"
+    cp -R "$REPO_ROOT/templates/." "$target/"
+}
+
 run_setup() {
     target="$1"
     shift
@@ -97,6 +104,24 @@ PYEOF
 )
 grep -qx 'postgres' "$POSTGRES_DEFAULT/.harness_backend"
 
+FLAT_LAYOUT="$TMP_ROOT/flat-layout"
+copy_flat_fixture "$FLAT_LAYOUT"
+(
+    cd "$TMP_ROOT"
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$TMP_ROOT/hub" \
+    bash "$FLAT_LAYOUT/setup_harness.sh" \
+        --root \
+        --no-graphify \
+        --no-graphify-skills \
+        --no-antigravity \
+        --json-hub
+)
+test ! -d "$FLAT_LAYOUT/templates"
+test -f "$FLAT_LAYOUT/graph_memory.py"
+test -f "$FLAT_LAYOUT/roles/leader.md"
+test -f "$FLAT_LAYOUT/.codex/hooks.json"
+
 NO_SUBAGENTS="$TMP_ROOT/no-subagents"
 copy_fixture "$NO_SUBAGENTS"
 run_setup "$NO_SUBAGENTS" --root --no-subagents
@@ -156,4 +181,4 @@ CUSTOM_BKP="$TMP_ROOT/custom-backups"
 )
 find "$CUSTOM_BKP" -type f -name 'AGENTS.md.bak.*' -print -quit | grep -q .
 
-echo "[Ok] setup smoke: PostgreSQL default, JSON, root, subdir, sin subagentes y reinstall."
+echo "[Ok] setup smoke: source templates, flat install, PostgreSQL, JSON, layouts y reinstall."
