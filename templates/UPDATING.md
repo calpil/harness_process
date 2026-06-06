@@ -45,3 +45,27 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 Mantén este repositorio (`harness_process`) actualizado y re-instala en tus proyectos cuando haya cambios relevantes. Así el protocolo de trabajo multi-agente se mantiene consistente y mejora con el tiempo.
 
 Si usas `--reset` + re-instalación, las superficies se regeneran desde cero con la versión más reciente del protocolo.
+
+## Para maintainers de este repositorio harness_process
+
+Cuando realizas mejoras (nuevo protocolo, recordatorios de planes actualizados por otros LLMs, fixes en harness.py, etc.):
+
+1. Haz los cambios en este repo (el "fuente").
+2. Una vez hecho el commit **sin co-author** (sin `Co-Authored-By`, sin "Generated with", sin trailers de IA):
+   ```bash
+   git commit -m "tu mensaje limpio"
+   ```
+3. Haz push del cambio:
+   ```bash
+   git push origin main
+   ```
+
+Esto hace que el cambio esté disponible **incluso si aplica en otros proyectos**. Los demás proyectos que usan este harness_process como fuente recibirán las mejoras la próxima vez que ejecuten:
+
+```bash
+./setup_harness.sh
+# o
+./setup_harness.sh --reset
+```
+
+Mantener el proceso explícito asegura consistencia multi-LLM a través de todos los proyectos.
