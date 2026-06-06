@@ -216,14 +216,21 @@ Servicios transversales:
   (Claude, Codex, Gemini, Antigravity) via `graphify install --platform <agente>`.
   Grok no tiene plataforma propia: usa el CLI (`graphify update .`,
   `graphify query "..."`) o lee la skill de Claude si tu build lo permite.
-- El hook `post-commit` de cada microservicio corre `graphify update` en segundo
-  plano cuando hay grafo existente y marca `graphify-out/.graphify_stale` si
-  detecta cambios que requieren rebuild semantico.
-- Primera construccion o rebuild semantico: usa `/graphify` (o `/graphify
-  --update`). Sin el comando nativo: `graphify update .` (estructural, sin LLM) o
-  `graphify extract .` (headless AST + semantico). `graphify query "..."` consulta
-  el grafo en cualquier agente.
-- Despues del rebuild, borra `graphify-out/.graphify_stale` y refresca el hub:
+- El hook `post-commit` de cada microservicio, en segundo plano y cuando hay grafo
+  existente: (1) corre `graphify update` (estructural, sin LLM, agnostico) y (2)
+  relanza el rebuild semantico (comunidades + god nodes + report) con `graphify
+  cluster-only --no-viz`. Backend multi-LLM: usa `GRAPHIFY_SEMANTIC_BACKEND` si esta
+  seteado; si no, auto-detecta segun la API key configurada (Gemini/OpenAI/Anthropic/
+  DeepSeek/Kimi, u Ollama/Bedrock); si no hay ninguna, cae al CLI de Claude Code
+  (`claude-cli`, login Pro/Max sin API key); y si tampoco, salta. El paso (2) es
+  *debounced*: solo si pasaron >30 min (configurable con `GRAPHIFY_SEMANTIC_DEBOUNCE`,
+  en segundos) desde el ultimo, en `.last_semantic`. Al lograrlo borra `.graphify_stale`.
+- Asi comunidades/god-nodes/report se refrescan solos. El rebuild semantico
+  *completo* con descripciones por nodo (mas caro) y la viz `graph.html` siguen en
+  `/graphify` (o `/graphify --update`); el hook usa `--no-viz` para no regenerarla.
+- Manual sin comando nativo: `graphify update .` (estructural) o `graphify
+  cluster-only . --backend=claude-cli` (semantico headless). `graphify query "..."`
+  consulta el grafo en cualquier agente. Tras un rebuild manual refresca el hub:
   `python3 "__HREL__graph_memory.py" vincular-grafo`
 
 ## Commits
@@ -1324,7 +1331,7 @@ for repo in */; do
 
     cat > "$POST_COMMIT" <<HOOKEOF
 #!/bin/bash
-# harness-managed-hook v7
+# harness-managed-hook v8
 set -u
 HARNESS_DIR="$HARNESS_DIR"
 REPO_ROOT="$REPO_ROOT"
@@ -1343,6 +1350,35 @@ if command -v graphify >/dev/null 2>&1 && [ -f "\$REPO_ROOT/graphify-out/graph.j
             graphify update "\$REPO_ROOT" >/dev/null 2>&1 || true
             if printf '%s' "\$ARCHIVOS" | grep -qiE '(^|,)(README|AGENTS|[^,]+[.]md)(,|\$)'; then
                 touch "\$REPO_ROOT/graphify-out/.graphify_stale" 2>/dev/null || true
+            fi
+            # Rebuild semantico debounced (comunidades + god nodes + report). Multi-LLM:
+            #   1) GRAPHIFY_SEMANTIC_BACKEND si esta seteado (gemini|openai|claude-cli|...);
+            #   2) si hay API key configurada (Gemini/OpenAI/Anthropic/DeepSeek/Kimi) o
+            #      Ollama/Bedrock, deja que graphify auto-detecte el backend;
+            #   3) si no hay ninguna, cae al CLI de Claude Code (claude-cli, sin API key);
+            #   4) si nada de eso existe, salta (queda .graphify_stale para /graphify manual).
+            # Debounced: solo si pasaron > GRAPHIFY_SEMANTIC_DEBOUNCE seg (default 1800=30min).
+            SEM_BACKEND="\${GRAPHIFY_SEMANTIC_BACKEND:-}"
+            if [ -z "\$SEM_BACKEND" ]; then
+                if [ -n "\${GEMINI_API_KEY:-}\${GOOGLE_API_KEY:-}\${OPENAI_API_KEY:-}\${ANTHROPIC_API_KEY:-}\${DEEPSEEK_API_KEY:-}\${MOONSHOT_API_KEY:-}\${OLLAMA_BASE_URL:-}\${AWS_PROFILE:-}\${AWS_REGION:-}\${AWS_DEFAULT_REGION:-}" ]; then
+                    SEM_BACKEND="auto"
+                elif command -v claude >/dev/null 2>&1; then
+                    SEM_BACKEND="claude-cli"
+                fi
+            fi
+            if [ -n "\$SEM_BACKEND" ]; then
+                SEM_DEBOUNCE=\${GRAPHIFY_SEMANTIC_DEBOUNCE:-1800}
+                SEM_STAMP="\$REPO_ROOT/graphify-out/.last_semantic"
+                sem_now=\$(date +%s); sem_last=0
+                [ -f "\$SEM_STAMP" ] && sem_last=\$(stat -f %m "\$SEM_STAMP" 2>/dev/null || stat -c %Y "\$SEM_STAMP" 2>/dev/null || echo 0)
+                [ -z "\$sem_last" ] && sem_last=0
+                if [ \$(( sem_now - sem_last )) -ge "\$SEM_DEBOUNCE" ]; then
+                    [ "\$SEM_BACKEND" = "auto" ] && SEM_BARG="" || SEM_BARG="--backend=\$SEM_BACKEND"
+                    if graphify cluster-only "\$REPO_ROOT" \$SEM_BARG --no-viz >/dev/null 2>&1; then
+                        touch "\$SEM_STAMP" 2>/dev/null || true
+                        rm -f "\$REPO_ROOT/graphify-out/.graphify_stale" 2>/dev/null || true
+                    fi
+                fi
             fi
             python3 "\$HARNESS_DIR/graph_memory.py" vincular-grafo >/dev/null 2>&1 || true
         ) &
