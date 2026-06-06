@@ -878,7 +878,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         subst_hrel_inplace "$out"
     }
 
-    if [ "$HARNESS_DIR" != "$ROOT" ]; then
+    if [ "$HARNESS_DIR" != "$REPO_ROOT" ]; then
         cp "$HARNESS_DIR/roles/leader.md" "roles/leader.md"
         cp "$HARNESS_DIR/roles/implementer.md" "roles/implementer.md"
         cp "$HARNESS_DIR/roles/reviewer.md" "roles/reviewer.md"
@@ -947,7 +947,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
     # archivo de definicion soportado): usa roles/*.md como fases secuenciales.
 
-    if [ "$HARNESS_DIR" != "$ROOT" ]; then
+    if [ "$HARNESS_DIR" != "$REPO_ROOT" ]; then
         cp "$HARNESS_DIR/CHECKPOINTS.md" "CHECKPOINTS.md"
 
         # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
