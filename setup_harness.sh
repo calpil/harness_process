@@ -529,6 +529,8 @@ Launchers disponibles: `bin/harness-claude`, `bin/harness-codex`,
 Para actualizar el harness (protocolo + herramientas) vuelve a la carpeta
 fuente `harness_process` y ejecuta `./setup_harness.sh` (o con `--reset`).
 Las superficies y scripts se regeneran desde la fuente.
+
+Consulta `UPDATING.md` (se instala en tu harness) para la guia completa.
 SURFACE_EOF
 
     surface_tmp="$target.harness.tmp"
@@ -687,6 +689,8 @@ Servicios transversales:
 
 Este protocolo y las herramientas (`harness.py`, `check-plan`, roles, hooks, etc.)
 viven en la carpeta `harness_process` (la fuente).
+
+**Consulta siempre `UPDATING.md`** (se instala junto a los scripts del harness).
 
 Para traer mejoras (nuevos recordatorios de planes actualizados por otros LLMs,
 cambios en el protocolo, fixes, etc.):
@@ -1155,6 +1159,7 @@ required_assets=(
     "harness_status.sh"
     "harness_check.sh"
     "harness.py"
+    "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     required_assets+=(
@@ -1308,6 +1313,7 @@ generated=(
     "harness_status.sh"
     "harness_check.sh"
     "harness.py"
+    "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     generated+=(
@@ -1355,6 +1361,7 @@ backup_file "$SURFACE_DIR/bin/harness-codex"
 backup_file "$SURFACE_DIR/bin/harness-gemini"
 backup_file "$SURFACE_DIR/bin/harness-grok"
 backup_file "$SURFACE_DIR/bin/harness-antigravity"
+backup_file "$HARNESS_DIR/UPDATING.md"
 
 log_info "Generando .claude/settings.json..."
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -1447,6 +1454,7 @@ install_asset "commit_guard.sh"
 install_asset "harness_status.sh"
 install_asset "harness_check.sh"
 install_asset "harness.py"
+install_asset "UPDATING.md"
 write_file_notice "scripts base ($HARNESS_DIR)"
 
 echo "Asegurando permisos de ejecucion en HARNESS_DIR..."
@@ -1940,5 +1948,6 @@ log_info "  nuevos comandos, etc.) vuelve a ejecutar este instalador desde la ca
 log_info "    cd /ruta/al/harness_process"
 log_info "    ./setup_harness.sh"
 log_info "  O usa --reset para una reinstalacion limpia de las superficies."
+log_info "  Consulta siempre 'UPDATING.md' (se instala en tu harness) para detalles."
 
 print_final_report

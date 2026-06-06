@@ -1,0 +1,47 @@
+# Actualización del Harness Process
+
+El Harness Process se mantiene actualizado **re-ejecutando el instalador** desde la carpeta fuente (`harness_process`). Esto es intencional y explícito.
+
+No existe un comando mágico `harness.py upgrade` dentro de tus proyectos. La forma correcta de traer mejoras es volver a correr el instalador.
+
+## Por qué funciona así
+
+- Las mejoras al protocolo (por ejemplo: `check-plan` para detectar si otros LLMs actualizaron planes, mejores instrucciones para implementer/reviewer, nuevos comandos, etc.) viven en este repositorio.
+- Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se **generan** desde el instalador.
+- Los scripts (`harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+- Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
+
+## Cómo actualizar
+
+Desde la carpeta del `harness_process` (la fuente):
+
+```bash
+# Actualización normal (recomendada)
+./setup_harness.sh
+
+# O reinstalación limpia (borra superficies anteriores y las regenera)
+./setup_harness.sh --reset
+```
+
+El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`) a menos que uses `--force`.
+
+## Cuándo actualizar
+
+- Después de hacer `git pull` o `git fetch` en la carpeta `harness_process`.
+- Cuando `harness_status.sh` o las superficies muestren recordatorios de nuevas funcionalidades.
+- Periódicamente para beneficiarte de mejoras en el manejo multi-LLM (detección de planes actualizados por otros agentes, mejores checkpoints, etc.).
+- Cuando agregues un nuevo LLM al equipo (para asegurarte de que tenga los últimos roles y hooks).
+
+## Qué se actualiza
+
+- Superficies de instrucciones (CLAUDE.md, AGENTS.md, etc.)
+- Subagentes nativos (`.claude/agents/`, `.codex/agents/`, `.gemini/agents/`)
+- Scripts del arnés (`harness.py`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
+- Hooks y launchers
+- Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
+
+## Recomendación
+
+Mantén este repositorio (`harness_process`) actualizado y re-instala en tus proyectos cuando haya cambios relevantes. Así el protocolo de trabajo multi-agente se mantiene consistente y mejora con el tiempo.
+
+Si usas `--reset` + re-instalación, las superficies se regeneran desde cero con la versión más reciente del protocolo.
