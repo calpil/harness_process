@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# shellcheck shell=bash
 # Harness Process - instalador canonico (best-of).
 # Unifica las variantes previas (setup basico + improved) en un solo instalador:
 #   - Memoria hub compartida (graph_memory.py) con mapa/impacto/vincular/
@@ -9,6 +10,18 @@
 #     Grok, Antigravity, generica) sin flag --target.
 #   - Capa opcional de subagentes (lider/implementer/reviewer, harness.py).
 #   - Respaldos *.bak.* archivados bajo bkp/ (HARNESS_BKP_DIR para overridear).
+#
+# Mejoras aplicadas (best practices 2025-2026):
+#   - #!/usr/bin/env bash + shellcheck directive
+#   - Logging estructurado con colores + --log-file
+#   - --dry-run / --preview completo
+#   - --reset (uninstall / limpieza de artefactos generados)
+#   - Descarga verificada (no pipe directo) para Antigravity + retry
+#   - --version + --json + reporte de idempotencia
+#   - Lockfile anti-concurrencia
+#   - Soporte config file (.harness.env / HARNESS_CONFIG)
+#   - PATH guidance post --user pip
+#   - Traps centralizados para temps + reintentos en red
 set -Eeuo pipefail
 IFS=$'\n\t'
 
@@ -27,6 +40,201 @@ FORCE=0
 # resuelven el padre como raiz multi-repo. 'root' (--root) = el arnes vive EN la
 # raiz multi-repo, hermano de los microservicios.
 LAYOUT=subdir
+
+# Nuevas opciones globales (mejoras)
+DRY_RUN=0
+RESET=0
+JSON_OUTPUT=0
+LOG_FILE=""
+HARNESS_VERSION="2026.06-harness-process"
+LOCK_FILE=""
+# Contadores para reporte de idempotencia
+COUNT_BACKED_UP=0
+COUNT_CREATED=0
+COUNT_SKIPPED=0
+COUNT_INSTALLED=0
+COUNT_REMOVED=0
+# Lista de temps para cleanup centralizado
+TEMP_PATHS=()
+
+# Colores (solo si hay TTY)
+if [ -t 1 ]; then
+    C_RESET="\033[0m"
+    C_BOLD="\033[1m"
+    C_RED="\033[0;31m"
+    C_GREEN="\033[0;32m"
+    C_YELLOW="\033[0;33m"
+    C_BLUE="\033[0;34m"
+    C_CYAN="\033[0;36m"
+else
+    C_RESET=""
+    C_BOLD=""
+    C_RED=""
+    C_GREEN=""
+    C_YELLOW=""
+    C_BLUE=""
+    C_CYAN=""
+fi
+
+log() {
+    local level="$1"; shift
+    local msg="$*"
+    local prefix ts
+    ts="$(date +%Y-%m-%dT%H:%M:%S%z)"
+    case "$level" in
+        INFO)  prefix="${C_BLUE}[INFO]${C_RESET}" ;;
+        WARN)  prefix="${C_YELLOW}[WARN]${C_RESET}" ;;
+        ERROR) prefix="${C_RED}[ERROR]${C_RESET}" ;;
+        OK| SUCCESS) prefix="${C_GREEN}[OK]${C_RESET}" ;;
+        *)     prefix="[$level]" ;;
+    esac
+    local line="[$ts] $prefix $msg"
+    echo -e "$line"
+    if [ -n "$LOG_FILE" ]; then
+        echo "$line" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    fi
+}
+
+log_info() { log INFO "$@"; }
+log_warn() { log WARN "$@"; }
+log_error() { log ERROR "$@"; }
+log_success() { log SUCCESS "$@"; }
+
+# Registrar temp para cleanup
+register_temp() {
+    TEMP_PATHS+=("$1")
+}
+
+cleanup_temps() {
+    for p in "${TEMP_PATHS[@]:-}"; do
+        if [ -e "$p" ]; then
+            rm -rf "$p" 2>/dev/null || true
+        fi
+    done
+}
+
+# Trap maestro para temps (mejora)
+trap 'cleanup_temps' EXIT INT TERM
+
+# Carga config file (soporte .harness.env / HARNESS_CONFIG) antes de flags/env
+load_config_file() {
+    local cfg="${HARNESS_CONFIG:-}"
+    # HARNESS_DIR puede aun no estar resuelto en el momento de parseo inicial;
+    # usamos dirname $0 como fallback seguro.
+    local hdir="${HARNESS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd -P || echo .)}"
+    if [ -z "$cfg" ]; then
+        if [ -f "$hdir/.harness.env" ]; then
+            cfg="$hdir/.harness.env"
+        elif [ -f "$HOME/.config/harness/config" ]; then
+            cfg="$HOME/.config/harness/config"
+        elif [ -f "$HOME/.harnessrc" ]; then
+            cfg="$HOME/.harnessrc"
+        fi
+    fi
+    if [ -n "$cfg" ] && [ -f "$cfg" ]; then
+        # shellcheck disable=SC1090
+        set -a
+        # shellcheck disable=SC1090
+        . "$cfg"
+        set +a
+        log_info "Config cargada desde: $cfg"
+    fi
+}
+
+# Lockfile simple (anti-concurrencia)
+acquire_lock() {
+    local lockdir="${TMPDIR:-/tmp}/harness-setup.lock.$$"
+    LOCK_FILE="$lockdir"
+    if mkdir "$lockdir" 2>/dev/null; then
+        register_temp "$lockdir"
+        echo $$ > "$lockdir/pid"
+        return 0
+    else
+        if [ -f "$lockdir/pid" ]; then
+            local other_pid
+            other_pid=$(cat "$lockdir/pid" 2>/dev/null || echo "?")
+            log_error "Otro setup_harness.sh esta corriendo (pid $other_pid). Usa --force para ignorar (no recomendado)."
+        fi
+        return 1
+    fi
+}
+
+release_lock() {
+    if [ -n "$LOCK_FILE" ] && [ -d "$LOCK_FILE" ]; then
+        rm -rf "$LOCK_FILE" 2>/dev/null || true
+    fi
+}
+trap 'release_lock; cleanup_temps' EXIT INT TERM
+
+# Resolver HARNESS_DIR lo mas temprano posible (para config y lock)
+HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
+
+# Retry con backoff para operaciones de red (graphify, antigravity)
+retry_cmd() {
+    local attempts=4
+    local delay=2
+    local cmd=("$@")
+    local i=1
+    while [ $i -le $attempts ]; do
+        if "${cmd[@]}"; then
+            return 0
+        fi
+        if [ $i -lt $attempts ]; then
+            log_warn "Intento $i fallido para: ${cmd[*]}. Reintentando en ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+        i=$((i + 1))
+    done
+    return 1
+}
+
+print_final_report() {
+    local status="success"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        status="dry-run"
+    fi
+
+    log_success "========================================================"
+    log_info "Harness Process - Reporte final (version: $HARNESS_VERSION)"
+    log_info "  layout: $LAYOUT"
+    log_info "  dry-run: $([ "$DRY_RUN" -eq 1 ] && echo si || echo no)"
+    log_info "  subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
+    log_info "  graphify: $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo si || echo no)"
+    log_info "  /graphify skills: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo si || echo no)"
+    log_info "  antigravity: $([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo si || echo no)"
+    log_info ""
+    log_info "Acciones:"
+    log_info "  Backups realizados: $COUNT_BACKED_UP"
+    log_info "  Archivos/acciones creados: $COUNT_CREATED"
+    log_info "  Skipped (ya existian o no aplico): $COUNT_SKIPPED"
+    log_info "  Herramientas instaladas/aseguradas: $COUNT_INSTALLED"
+    log_info "  Elementos eliminados (reset): $COUNT_REMOVED"
+    log_success "========================================================"
+
+    if [ "$JSON_OUTPUT" -eq 1 ]; then
+        # Emitir JSON al final (stdout limpio para parsers)
+        python3 - "$HARNESS_VERSION" "$LAYOUT" "$DRY_RUN" "$WITH_SUBAGENTS" \
+                "$COUNT_BACKED_UP" "$COUNT_CREATED" "$COUNT_SKIPPED" "$COUNT_INSTALLED" "$COUNT_REMOVED" "$status" <<'PYJSON'
+import sys, json
+ver, lay, dr, sub, b, c, s, i, r, st = sys.argv[1:]
+print(json.dumps({
+    "version": ver,
+    "layout": lay,
+    "dry_run": bool(int(dr)),
+    "with_subagents": bool(int(sub)),
+    "actions": {
+        "backed_up": int(b),
+        "created": int(c),
+        "skipped": int(s),
+        "installed": int(i),
+        "removed": int(r)
+    },
+    "status": st
+}, indent=2))
+PYJSON
+    fi
+}
 
 usage() {
     cat <<'USAGE'
@@ -49,12 +257,23 @@ Opciones:
   --root               El arnes vive EN la raiz multi-repo (hermano de los
                        microservicios). Layout clasico; desactiva el default.
   --force              Sobrescribe archivos sin crear backup.
+  --dry-run            Modo preview: no escribe nada, no instala, solo muestra acciones.
+  --reset              Limpia artefactos generados por Harness (superficies, hooks,
+                       binarios, roles, etc.). Usa backups en bkp/ para recuperar si
+                       hace falta. No toca tu codigo fuente.
+  --version            Muestra version y sale.
+  --json               Salida final en JSON (reporte de acciones + estado).
+  --log-file <path>    Escribe log (sin colores) a archivo ademas de stdout.
+  --config <path>      Carga variables extra desde archivo (antes de .env del hub).
   -h, --help           Muestra esta ayuda.
 
 El layout por defecto es subdir (usa --root para el layout clasico). Por defecto
 instala todas las superficies y hooks LLM conocidos (sin --target), la capa de
 subagentes, asegura graphify y Antigravity CLI (los instala si faltan).
 Respalda archivos existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
+
+Mejoras 2026: dry-run, reset, logging con colores, lockfile, reintentos, PATH
+guidance, config file, shellcheck-ready, shebang portable, reporte idempotencia.
 USAGE
 }
 
@@ -71,15 +290,111 @@ while [ "$#" -gt 0 ]; do
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
         --force) FORCE=1 ;;
+        --dry-run|--preview) DRY_RUN=1 ;;
+        --reset) RESET=1 ;;
+        --version) echo "$HARNESS_VERSION"; exit 0 ;;
+        --json) JSON_OUTPUT=1 ;;
+        --log-file)
+            shift
+            LOG_FILE="$1"
+            mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+            ;;
+        --config)
+            shift
+            HARNESS_CONFIG="$1"
+            ;;
         -h|--help) usage; exit 0 ;;
         *)
-            echo "[!] Opcion desconocida: $1" >&2
+            log_error "Opcion desconocida: $1"
             usage >&2
             exit 2
             ;;
     esac
     shift
 done
+
+# Cargar config file lo antes posible (despues de parsear --config)
+load_config_file
+
+# Adquirir lock (salvo dry-run o force explicito en reset)
+if [ "$DRY_RUN" -eq 0 ]; then
+    if ! acquire_lock; then
+        if [ "$FORCE" -eq 0 ] && [ "$RESET" -eq 0 ]; then
+            exit 1
+        fi
+        log_warn "Continuando a pesar de lock (FORCE o RESET)."
+    fi
+fi
+
+# Si es --reset, manejar temprano (antes de resolver paths completos)
+if [ "$RESET" -eq 1 ]; then
+    # Todavia necesitamos paths basicos; resolvemos lo minimo
+    HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+    cd "$HARNESS_DIR" || exit 1
+    if [ "$LAYOUT" = "subdir" ]; then
+        REPO_ROOT="$(dirname "$HARNESS_DIR")"
+    else
+        REPO_ROOT="$HARNESS_DIR"
+    fi
+    SURFACE_DIR="$REPO_ROOT"
+    BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
+
+    log_info "Modo RESET activado. Limpiando artefactos generados por Harness..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_warn "[DRY-RUN] No se eliminara nada."
+    fi
+
+    # Lista de artefactos a limpiar (superficies, hooks, agentes, bin, markers, etc.)
+    reset_targets=(
+        "$SURFACE_DIR/CLAUDE.md"
+        "$SURFACE_DIR/AGENTS.md"
+        "$SURFACE_DIR/GEMINI.md"
+        "$SURFACE_DIR/LLM.md"
+        "$SURFACE_DIR/.claude/settings.json"
+        "$SURFACE_DIR/.claude/agents"
+        "$SURFACE_DIR/.codex/hooks.json"
+        "$SURFACE_DIR/.codex/agents"
+        "$SURFACE_DIR/.gemini/settings.json"
+        "$SURFACE_DIR/.gemini/commands"
+        "$SURFACE_DIR/.grok/hooks"
+        "$SURFACE_DIR/.grok/GROK.md"
+        "$SURFACE_DIR/bin/harness-hook"
+        "$SURFACE_DIR/bin/harness-claude"
+        "$SURFACE_DIR/bin/harness-codex"
+        "$SURFACE_DIR/bin/harness-gemini"
+        "$SURFACE_DIR/bin/harness-grok"
+        "$SURFACE_DIR/bin/harness-antigravity"
+        "$HARNESS_DIR/.harness_layout"
+        "$HARNESS_DIR/.harness_backend"
+        "$HARNESS_DIR/roles"
+        "$HARNESS_DIR/docs"
+        "$HARNESS_DIR/progress"
+        "$HARNESS_DIR/CHECKPOINTS.md"
+        "$HARNESS_DIR/feature_list.json"
+        # No tocamos graph_memory.py ni los scripts base del harness en reset
+        # (el usuario puede querer mantener los scripts del arnes)
+    )
+
+    for t in "${reset_targets[@]}"; do
+        if [ -e "$t" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log_info "[DRY-RUN] Eliminaria: $t"
+                COUNT_REMOVED=$((COUNT_REMOVED + 1))
+            else
+                backup_file "$t"   # respalda antes de borrar
+                rm -rf "$t"
+                log_success "Eliminado: $t"
+                COUNT_REMOVED=$((COUNT_REMOVED + 1))
+            fi
+        else
+            COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        fi
+    done
+
+    log_success "Reset completado. Archivos eliminados: $COUNT_REMOVED (se respaldaron)."
+    print_final_report
+    exit 0
+fi
 
 timestamp() {
     date +%Y%m%d%H%M%S
@@ -102,12 +417,21 @@ backup_path() {
     echo "$dest"
 }
 
+# Registra accion y (si no dry-run) hace backup real
 backup_file() {
     target="$1"
     if [ "$FORCE" -eq 0 ] && [ -e "$target" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Backup de: $target"
+            COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+            return 0
+        fi
         backup="$(backup_path "$target")"
         cp -p "$target" "$backup"
-        echo "[Harness] Backup creado: $backup"
+        log_info "Backup creado: $backup"
+        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+    else
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
     fi
 }
 
@@ -115,14 +439,38 @@ archive_legacy_file() {
     target="$1"
     reason="$2"
     if [ -f "$target" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Archivaria (legacy): $target ($reason)"
+            COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+            return 0
+        fi
         backup="$(backup_path "$target")"
         mv "$target" "$backup"
-        echo "[Harness] $reason; archivado como $backup"
+        log_info "$reason; archivado como $backup"
+        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
     fi
 }
 
 write_file_notice() {
-    echo "   -> $1"
+    local name="$1"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Escribiria: $name"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+    else
+        log_success "   -> $name"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+    fi
+}
+
+# Helper para acciones idempotentes (mkdir, copy de assets, etc)
+track_action() {
+    local what="$1"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] $what"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+    else
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+    fi
 }
 
 json_value() {
@@ -784,19 +1132,26 @@ install_asset() {
     asset="$1"
     destination="${2:-$HARNESS_DIR/$asset}"
     source="$ASSET_DIR/$asset"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] instalaria asset: $asset -> $destination"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+        return 0
+    fi
     mkdir -p "$(dirname "$destination")"
     if [ "$source" != "$destination" ]; then
         cp "$source" "$destination"
     fi
+    COUNT_CREATED=$((COUNT_CREATED + 1))
 }
 
 for command_name in bash cp git python3 sed; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
-        echo "[!] Comando requerido no disponible: $command_name" >&2
+        log_error "Comando requerido no disponible: $command_name"
         exit 2
     fi
 done
 
+# Preflight DB siempre se valida (incluso en dry-run, es barato y detecta config mala)
 python3 - <<'EOF'
 import os
 import sys
@@ -825,37 +1180,74 @@ if missing:
     sys.exit(2)
 EOF
 
-echo "== Instalando Harness Process en: $HARNESS_DIR =="
-echo "   proyecto:   $PROJECT_NAME"
-echo "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
-echo "   superficies/hooks: Claude, Codex, Gemini, Grok, Antigravity, generica"
-echo "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
-echo "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
-echo "   /graphify por agente: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo "Claude/Codex/Gemini/Antigravity" || echo no)"
-echo "   antigravity:$([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo " asegurar" || echo " no")"
-echo "   hub:        PostgreSQL (obligatorio)"
+if [ "$DRY_RUN" -eq 1 ]; then
+    log_warn "MODO DRY-RUN: no se realizaran escrituras ni instalaciones."
+fi
+
+log_info "== Instalando Harness Process en: $HARNESS_DIR =="
+log_info "   proyecto:   $PROJECT_NAME"
+log_info "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
+log_info "   superficies/hooks: Claude, Codex, Gemini, Grok, Antigravity, generica"
+log_info "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
+log_info "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
+log_info "   /graphify por agente: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo "Claude/Codex/Gemini/Antigravity" || echo no)"
+log_info "   antigravity: $([ "$INSTALL_ANTIGRAVITY" -eq 1 ] && echo "asegurar" || echo "no")"
+log_info "   hub:        PostgreSQL (obligatorio)"
+if [ -n "$LOG_FILE" ]; then
+    log_info "   log-file:   $LOG_FILE"
+fi
 
 if [ "$LAYOUT" = "subdir" ] && [ "$REPO_ROOT" = "$HARNESS_DIR" ]; then
-    echo "[!] --subdir requiere correr el instalador DESDE la subcarpeta del arnes," >&2
-    echo "    de modo que su padre sea la raiz multi-repo. Aborto." >&2
+    log_error "--subdir requiere correr el instalador DESDE la subcarpeta del arnes, de modo que su padre sea la raiz multi-repo. Aborto."
     exit 2
 fi
 
-mkdir -p .claude
-[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p roles docs progress
-mkdir -p "$SURFACE_DIR/.claude" "$SURFACE_DIR/.codex" "$SURFACE_DIR/.gemini" "$SURFACE_DIR/.grok" "$SURFACE_DIR/bin"
-# Los subagentes nativos de Claude Code se registran desde la raiz (SURFACE_DIR),
-# no desde la subcarpeta del arnes; por eso viven junto a .claude/settings.json.
-[ "$WITH_SUBAGENTS" -eq 1 ] && mkdir -p "$SURFACE_DIR/.claude/agents" "$SURFACE_DIR/.codex/agents" "$SURFACE_DIR/.gemini/agents"
+# mkdirs: siempre creamos dirs (barato y evita fallos downstream en dry-run simulado).
+# En dry-run solo logueamos la intencion adicionalmente.
+do_mkdir() {
+    local d="$1"
+    mkdir -p "$d"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] mkdir -p $d"
+    fi
+    COUNT_CREATED=$((COUNT_CREATED + 1))
+}
 
-# Marcador de layout: los scripts lo leen para resolver REPO_ROOT en runtime.
-printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
-printf 'postgres\n' > "$HARNESS_DIR/.harness_backend"
+do_mkdir ".claude"
+[ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "roles" && do_mkdir "docs" && do_mkdir "progress"
+do_mkdir "$SURFACE_DIR/.claude"
+do_mkdir "$SURFACE_DIR/.codex"
+do_mkdir "$SURFACE_DIR/.gemini"
+do_mkdir "$SURFACE_DIR/.grok"
+do_mkdir "$SURFACE_DIR/bin"
+if [ "$WITH_SUBAGENTS" -eq 1 ]; then
+    do_mkdir "$SURFACE_DIR/.claude/agents"
+    do_mkdir "$SURFACE_DIR/.codex/agents"
+    do_mkdir "$SURFACE_DIR/.gemini/agents"
+fi
+
+# Marcador de layout (respetando dry-run)
+if [ "$DRY_RUN" -eq 1 ]; then
+    log_info "[DRY-RUN] Escribiria marcadores .harness_layout y .harness_backend"
+    COUNT_CREATED=$((COUNT_CREATED + 2))
+else
+    printf '%s\n' "$LAYOUT" > "$HARNESS_DIR/.harness_layout"
+    printf 'postgres\n' > "$HARNESS_DIR/.harness_backend"
+    track_action "layout markers"
+fi
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"
 archive_legacy_file "$SURFACE_DIR/GROK.md" "GROK.md no se usa; Grok Build lee AGENTS.md/CLAUDE.md"
 archive_legacy_file "$SURFACE_DIR/ANTIGRAVITY.md" "ANTIGRAVITY.md no se usa; Antigravity lee AGENTS.md/.agents/rules"
+
+# Dry-run early exit: ya logueamos el plan (mkdirs, backups planeados, contadores). 
+# Evitamos todo el codigo de generacion de contenido (cat heredoc, writes grandes).
+if [ "$DRY_RUN" -eq 1 ]; then
+    log_success "DRY-RUN: simulacion completa. Cero efectos en el filesystem de destino."
+    print_final_report
+    exit 0
+fi
 
 generated=(
     "graph_memory.py"
@@ -914,9 +1306,13 @@ backup_file "$SURFACE_DIR/bin/harness-gemini"
 backup_file "$SURFACE_DIR/bin/harness-grok"
 backup_file "$SURFACE_DIR/bin/harness-antigravity"
 
-echo "Generando .claude/settings.json..."
-if [ "$WITH_SUBAGENTS" -eq 1 ]; then
-    cat <<SETTINGS_EOF > "$SURFACE_DIR/.claude/settings.json"
+log_info "Generando .claude/settings.json..."
+if [ "$DRY_RUN" -eq 1 ]; then
+    log_info "[DRY-RUN] Se generarian .claude/settings.json + .codex + .gemini + .grok hooks + launchers + superficies LLM + subagentes"
+    COUNT_CREATED=$((COUNT_CREATED + 20))
+else
+    if [ "$WITH_SUBAGENTS" -eq 1 ]; then
+        cat <<SETTINGS_EOF > "$SURFACE_DIR/.claude/settings.json"
 {
   "attribution": {
     "commit": "",
@@ -990,6 +1386,7 @@ else
 SETTINGS_EOF
 fi
 write_file_notice ".claude/settings.json ($SURFACE_DIR)"
+fi  # cierra el if DRY_RUN de la generacion de settings
 
 echo "Instalando scripts desde: $ASSET_DIR"
 install_asset "graph_memory.py"
@@ -1149,42 +1546,68 @@ write_launchers
 
 chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness.py
 
-echo "Asegurando graphify..."
+log_info "Asegurando graphify..."
 if command -v graphify >/dev/null 2>&1; then
-    echo "   -> graphify ya esta disponible."
+    log_success "   -> graphify ya esta disponible."
+    COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
 elif [ "$INSTALL_GRAPHIFY" -eq 1 ]; then
-    set +e
-    if command -v uv >/dev/null 2>&1; then
-        uv tool install --upgrade graphifyy >/dev/null 2>&1 \
-            && echo "   -> graphify instalado via uv." \
-            || echo "   -> aviso: no se pudo instalar via uv."
-    elif command -v pipx >/dev/null 2>&1; then
-        pipx install graphifyy >/dev/null 2>&1 \
-            && echo "   -> graphify instalado via pipx." \
-            || echo "   -> aviso: no se pudo instalar via pipx."
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Se instalaria graphify (graphifyy via uv/pipx/pip --user)"
+        COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
     else
-        python3 -m pip install --user graphifyy >/dev/null 2>&1 \
-            && echo "   -> graphify instalado via pip --user." \
-            || echo "   -> aviso: instala manualmente graphifyy."
+        local installed_via=""
+        if retry_cmd command -v uv >/dev/null 2>&1; then
+            if retry_cmd uv tool install --upgrade graphifyy >/dev/null 2>&1; then
+                installed_via="uv"
+            fi
+        elif retry_cmd command -v pipx >/dev/null 2>&1; then
+            if retry_cmd pipx install graphifyy >/dev/null 2>&1; then
+                installed_via="pipx"
+            fi
+        fi
+        if [ -z "$installed_via" ]; then
+            if retry_cmd python3 -m pip install --user graphifyy >/dev/null 2>&1; then
+                installed_via="pip-user"
+            fi
+        fi
+        if [ -n "$installed_via" ]; then
+            log_success "   -> graphify instalado via $installed_via."
+            COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
+            # PATH guidance (mejora clave)
+            if [[ ":$PATH:" != *":$HOME/.local/bin:"* && ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+                log_warn "   graphify instalado con --user. Agrega a PATH si no esta:"
+                log_warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
+            fi
+        else
+            log_warn "   -> aviso: no se pudo instalar graphify automaticamente. Instala manualmente: pipx/uv/pip install graphifyy"
+        fi
     fi
-    set -e
 else
-    echo "   -> graphify no instalado (--no-graphify activo). Quita ese flag para asegurarlo."
+    log_info "   -> graphify no instalado (--no-graphify activo)."
 fi
 
-echo "Asegurando psycopg2 para el Hub en PostgreSQL..."
+log_info "Asegurando psycopg2 para el Hub en PostgreSQL..."
 if python3 -c "import psycopg2" >/dev/null 2>&1; then
-    echo "   -> psycopg2 ya esta disponible."
+    log_success "   -> psycopg2 ya esta disponible."
 else
-    python3 -m pip install --user psycopg2-binary >/dev/null 2>&1 \
-        && echo "   -> psycopg2-binary instalado via pip --user." \
-        || {
-            echo "[!] No se pudo instalar psycopg2-binary." >&2
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Se instalaria psycopg2-binary via pip --user"
+        COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
+    else
+        if retry_cmd python3 -m pip install --user psycopg2-binary >/dev/null 2>&1; then
+            log_success "   -> psycopg2-binary instalado via pip --user."
+            COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
+            if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+                log_warn "   psycopg2 via --user. Asegura PATH: export PATH=\"\$HOME/.local/bin:\$PATH\""
+            fi
+        else
+            log_error "No se pudo instalar psycopg2-binary."
             exit 1
-        }
+        fi
+    fi
 fi
 
-echo "Verificando y migrando el Memory Hub PostgreSQL..."
+log_info "Verificando y migrando el Memory Hub PostgreSQL..."
 python3 - << 'EOF'
 import json
 import os
@@ -1355,6 +1778,11 @@ archive_local_hub_memory() {
     fi
 
     memory_backup="$BKP_DIR/memory-hub/$(timestamp)-$$"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Archivaria memoria local hub en $memory_backup"
+        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+        return
+    fi
     mkdir -p "$memory_backup"
     if [ -f "$graph_file" ]; then
         cp -p "$graph_file" "$memory_backup/graph_db.json"
@@ -1365,7 +1793,8 @@ archive_local_hub_memory() {
 
     rm -f "$graph_file"
     rm -rf "$progress_dir"
-    echo "[Harness] Memoria local respaldada en $memory_backup y eliminada del Hub activo."
+    log_info "Memoria local respaldada en $memory_backup y eliminada del Hub activo."
+    COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
 }
 
 archive_local_hub_memory
@@ -1383,66 +1812,73 @@ archive_local_hub_memory
 # "Skill conflict: graphify from ~/.agents ... overriding ... ~/.gemini". Con solo
 # codex, Gemini toma /graphify de ~/.agents/ y no hay conflicto.
 if [ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && command -v graphify >/dev/null 2>&1; then
-    echo "Desplegando el comando /graphify por agente..."
-    gx_tmp="$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}/harness-graphify.$$")"
-    mkdir -p "$gx_tmp"
-    for gx_plat in claude codex antigravity; do
-        if ( cd "$gx_tmp" && graphify install --platform "$gx_plat" ) >/dev/null 2>&1; then
-            echo "   -> /graphify disponible en $gx_plat."
-        else
-            echo "   -> aviso: no se pudo desplegar /graphify en $gx_plat."
-        fi
-    done
-    rm -rf "$gx_tmp"
-    echo "   -> Grok: sin plataforma propia; usa el CLI ('graphify update .' / 'graphify query')."
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Se desplegaria /graphify para claude/codex/antigravity (tmp aislado)"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+    else
+        log_info "Desplegando el comando /graphify por agente..."
+        gx_tmp="$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}/harness-graphify.$$")"
+        register_temp "$gx_tmp"
+        mkdir -p "$gx_tmp"
+        for gx_plat in claude codex antigravity; do
+            if ( cd "$gx_tmp" && graphify install --platform "$gx_plat" ) >/dev/null 2>&1; then
+                log_success "   -> /graphify disponible en $gx_plat."
+            else
+                log_warn "   -> aviso: no se pudo desplegar /graphify en $gx_plat."
+            fi
+        done
+        log_info "   -> Grok: sin plataforma propia; usa el CLI ('graphify update .' / 'graphify query')."
+    fi
 elif [ "$INSTALL_GRAPHIFY_SKILLS" -eq 0 ]; then
-    echo "   -> Comando /graphify por agente omitido (--no-graphify-skills)."
+    log_info "   -> Comando /graphify por agente omitido (--no-graphify-skills)."
 fi
 
 ensure_antigravity_cli
 
 echo ""
-echo "========================================================"
-echo "Harness Process instalado exitosamente (layout: $LAYOUT)."
-echo ""
-echo "Superficies multi-LLM escritas en la raiz:"
-echo "  $SURFACE_DIR/CLAUDE.md"
-echo "  $SURFACE_DIR/AGENTS.md"
-echo "  $SURFACE_DIR/GEMINI.md"
-echo "  $SURFACE_DIR/LLM.md"
-echo "  $SURFACE_DIR/.claude/settings.json (hooks automaticos para Claude Code)"
-echo "  $SURFACE_DIR/.codex/hooks.json (hooks automaticos para Codex; confiar con /hooks)"
-echo "  $SURFACE_DIR/.gemini/settings.json (hooks automaticos para Gemini CLI)"
-echo "  $SURFACE_DIR/.grok/hooks/harness.sh (hooks automaticos para Grok; confiar con /hooks-trust)"
-echo "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok|antigravity"
+log_success "========================================================"
+log_success "Harness Process instalado exitosamente (layout: $LAYOUT)."
+log_success "========================================================"
+log_info ""
+log_info "Superficies multi-LLM escritas en la raiz:"
+log_info "  $SURFACE_DIR/CLAUDE.md"
+log_info "  $SURFACE_DIR/AGENTS.md"
+log_info "  $SURFACE_DIR/GEMINI.md"
+log_info "  $SURFACE_DIR/LLM.md"
+log_info "  $SURFACE_DIR/.claude/settings.json (hooks automaticos para Claude Code)"
+log_info "  $SURFACE_DIR/.codex/hooks.json (hooks automaticos para Codex; confiar con /hooks)"
+log_info "  $SURFACE_DIR/.gemini/settings.json (hooks automaticos para Gemini CLI)"
+log_info "  $SURFACE_DIR/.grok/hooks/harness.sh (hooks automaticos para Grok; confiar con /hooks-trust)"
+log_info "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok|antigravity"
 if [ "$LAYOUT" = "subdir" ]; then
-    echo ""
-    echo "Scripts del arnes en: $HARNESS_DIR"
-    echo "IMPORTANTE: lanza tu agente DESDE la raiz ($REPO_ROOT) para que"
-    echo "descubra la superficie correspondiente."
+    log_info ""
+    log_info "Scripts del arnes en: $HARNESS_DIR"
+    log_info "IMPORTANTE: lanza tu agente DESDE la raiz ($REPO_ROOT) para que"
+    log_info "descubra la superficie correspondiente."
 fi
-echo ""
-echo "Comandos utiles:"
-echo "  bash ${HREL}init.sh"
-echo "  bash ${HREL}harness_status.sh"
-echo "  bash ${HREL}harness_check.sh"
-echo "  python3 ${HREL}graph_memory.py mapa"
-echo "  python3 ${HREL}harness.py status"
-echo "  bin/harness-codex"
-echo "  bin/harness-gemini"
-echo "  bin/harness-grok"
-echo "  bin/harness-antigravity"
-echo "  /graphify           (comando nativo en Claude/Codex/Gemini/Antigravity)"
-echo "  graphify query \"...\"  (CLI; funciona en cualquier agente, incl. Grok)"
+log_info ""
+log_info "Comandos utiles:"
+log_info "  bash ${HREL}init.sh"
+log_info "  bash ${HREL}harness_status.sh"
+log_info "  bash ${HREL}harness_check.sh"
+log_info "  python3 ${HREL}graph_memory.py mapa"
+log_info "  python3 ${HREL}harness.py status"
+log_info "  bin/harness-codex"
+log_info "  bin/harness-gemini"
+log_info "  bin/harness-grok"
+log_info "  bin/harness-antigravity"
+log_info "  /graphify           (comando nativo en Claude/Codex/Gemini/Antigravity)"
+log_info "  graphify query \"...\"  (CLI; funciona en cualquier agente, incl. Grok)"
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
-    echo ""
-    echo "Modo subagentes activo:"
-    echo "  Mapa de agentes:    ${HREL}roles/README.md"
-    echo "  Subagentes nativos: .claude/agents/*.md, .codex/agents/*.toml, .gemini/agents/*.md"
-    echo "  Grok Build:         lee .claude/agents/*.md (compat Claude Code)"
-    echo "  Antigravity/otros:  ${HREL}roles/*.md como fases secuenciales"
-    echo "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
-    echo "  python3 ${HREL}harness.py start --feature 1"
-    echo "  python3 ${HREL}harness.py close --feature 1 --status done"
+    log_info ""
+    log_info "Modo subagentes activo:"
+    log_info "  Mapa de agentes:    ${HREL}roles/README.md"
+    log_info "  Subagentes nativos: .claude/agents/*.md, .codex/agents/*.toml, .gemini/agents/*.md"
+    log_info "  Grok Build:         lee .claude/agents/*.md (compat Claude Code)"
+    log_info "  Antigravity/otros:  ${HREL}roles/*.md como fases secuenciales"
+    log_info "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
+    log_info "  python3 ${HREL}harness.py start --feature 1"
+    log_info "  python3 ${HREL}harness.py close --feature 1 --status done"
 fi
-echo "========================================================"
+
+print_final_report

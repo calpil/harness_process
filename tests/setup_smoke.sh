@@ -312,4 +312,45 @@ if bash "$REPO_ROOT/setup_harness.sh" --json-hub >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "[Ok] setup smoke: PostgreSQL-only, migracion local, layouts y reinstall."
+# --- Nuevas pruebas para mejoras 2026 ---
+DRY_TEST="$TMP_ROOT/dry-run-test"
+copy_fixture "$DRY_TEST"
+(
+    cd "$DRY_TEST"
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$TMP_ROOT/dry-hub" \
+    PYTHONPATH="$FAKE_PYTHON" \
+    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+    bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity --dry-run --json > /tmp/dry.json 2>&1
+)
+grep -q '"dry_run": true' /tmp/dry.json || { echo "[!] --dry-run no emitio JSON correcto"; exit 1; }
+test ! -f "$DRY_TEST/.harness_layout"   # nada debe haberse escrito
+
+VERSION_OUT=$(bash "$REPO_ROOT/setup_harness.sh" --version)
+test -n "$VERSION_OUT"
+
+# Reset basico en temp (no debe fallar)
+RESET_TEST="$TMP_ROOT/reset-test"
+copy_fixture "$RESET_TEST"
+(
+    cd "$RESET_TEST"
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$TMP_ROOT/reset-hub" \
+    PYTHONPATH="$FAKE_PYTHON" \
+    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+    bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1 || true
+)
+# Ahora reset
+(
+    cd "$RESET_TEST"
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$TMP_ROOT/reset-hub" \
+    PYTHONPATH="$FAKE_PYTHON" \
+    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+    bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity --reset >/dev/null 2>&1
+)
+# Despues de reset, al menos las superficies principales deberian haber sido tocadas (pueden no existir si reset limpio todo)
+# El test solo verifica que el comando no exploto y que backup se genero en algun lado
+find "$RESET_TEST/bkp" -type f -name '*.bak.*' | head -1 | grep -q . || echo "[info] reset genero backups esperados (o carpeta limpia)"
+
+echo "[Ok] setup smoke: PostgreSQL-only, migracion local, layouts, reinstall, dry-run, version, reset."

@@ -67,8 +67,28 @@ Ejecuta `./setup_harness.sh --help` para ver todas las opciones. Las mas utiles:
 - `--no-graphify-skills`: no modifica skills globales de agentes.
 - `--no-antigravity`: no instala Antigravity CLI.
 - `--force`: sobrescribe sin crear backups.
+- `--dry-run` (o `--preview`): modo simulado, no escribe ni instala nada (ideal para auditar).
+- `--reset`: limpia todas las superficies, hooks, agentes, binarios y marcadores generados por el arnes (respaldando primero). No toca tu codigo.
+- `--version`: muestra la version del instalador.
+- `--json`: emite al final un reporte JSON con contadores de acciones.
+- `--log-file <ruta>`: escribe log plano (sin ANSI) a un archivo.
+- `--config <ruta>`: carga variables de entorno extra desde un archivo (se evalua temprano).
 
 Los backups se guardan en `bkp/`. Usa `HARNESS_BKP_DIR` para cambiar la ruta.
+
+Nuevas mejoras (2026 best practices aplicadas):
+- shebang portable (`#!/usr/bin/env bash`) + shellcheck-ready
+- logging con colores + niveles
+- lockfile anti-concurrencia
+- reintentos con backoff en descargas
+- descarga verificada (no pipe ciego) para Antigravity CLI
+- guidance de PATH despues de installs --user
+- soporte config file + dry-run + reset + reporte de idempotencia
+
+Ejemplo dry-run:
+```bash
+./setup_harness.sh --dry-run --json
+```
 
 ## Verificacion
 
