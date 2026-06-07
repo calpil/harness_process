@@ -44,6 +44,8 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 
 Mantén este repositorio (`harness_process`) actualizado y re-instala en tus proyectos cuando haya cambios relevantes. Así el protocolo de trabajo multi-agente se mantiene consistente y mejora con el tiempo.
 
+**NUNCA commitees la carpeta del harness** en los proyectos donde lo instalas. El instalador la agrega automáticamente a `.gitignore`.
+
 Si usas `--reset` + re-instalación, las superficies se regeneran desde cero con la versión más reciente del protocolo.
 
 ## Para maintainers de este repositorio harness_process

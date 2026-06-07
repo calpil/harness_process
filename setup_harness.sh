@@ -236,6 +236,53 @@ PYJSON
     fi
 }
 
+# ------------------------------------------------------------------
+# CRÍTICO: Nunca commitear la carpeta del harness en el proyecto destino.
+# Esta función se define temprano para que esté disponible incluso durante
+# el manejo de --reset.
+# ------------------------------------------------------------------
+ensure_harness_not_committed() {
+    # En este punto puede que aún no tengamos la resolución completa de layout.
+    # Usamos lo que haya disponible.
+    local hdir="${HARNESS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)}"
+    local layout="${LAYOUT:-subdir}"
+    local subdir="${HARNESS_SUBDIR:-}"
+
+    if [ "$layout" = "subdir" ] && [ -n "$subdir" ]; then
+        local ignore_dir="$subdir/"
+    elif [ "$layout" = "subdir" ]; then
+        # fallback si aún no se resolvió HARNESS_SUBDIR
+        local ignore_dir="$(basename "$hdir")/"
+    else
+        local ignore_dir="$(basename "$hdir")/"
+    fi
+
+    local repo_root="${REPO_ROOT:-$(dirname "$hdir")}"
+    if [ "$layout" = "root" ]; then
+        repo_root="$hdir"
+    fi
+
+    local gitignore_file="$repo_root/.gitignore"
+    if [ ! -f "$gitignore_file" ] || ! grep -qxF "$ignore_dir" "$gitignore_file" 2>/dev/null; then
+        # Intentar backup si la función existe
+        if declare -f backup_file >/dev/null; then
+            backup_file "$gitignore_file" || true
+        fi
+        {
+            echo ""
+            echo "# ============================================================"
+            echo "# Harness Process - NUNCA COMMITEAR"
+            echo "# La carpeta del harness vive en su propio repositorio fuente."
+            echo "# Aquí solo se instala para orquestar agentes multi-LLM."
+            echo "# ============================================================"
+            echo "$ignore_dir"
+            echo "# Backups locales del harness (nunca commitear)"
+            echo "bkp/"
+        } >> "$gitignore_file"
+        echo "[Harness] .gitignore actualizado: $ignore_dir nunca debe commitearse."
+    fi
+}
+
 usage() {
     cat <<'USAGE'
 Uso: ./setup_harness.sh [opciones]
@@ -271,6 +318,9 @@ El layout por defecto es subdir (usa --root para el layout clasico). Por defecto
 instala todas las superficies y hooks LLM conocidos (sin --target), la capa de
 subagentes, asegura graphify y Antigravity CLI (los instala si faltan).
 Respalda archivos existentes bajo bkp/ (configurable con HARNESS_BKP_DIR).
+
+**IMPORTANTE:** La carpeta del harness (donde está setup_harness.sh) se agrega
+automáticamente a .gitignore y **NUNCA debe commitearse**. Vive en su repo fuente.
 
 Mejoras 2026: dry-run, reset, logging con colores, lockfile, reintentos, PATH
 guidance, config file, shellcheck-ready, shebang portable, reporte idempotencia.
@@ -333,11 +383,16 @@ if [ "$RESET" -eq 1 ]; then
     cd "$HARNESS_DIR" || exit 1
     if [ "$LAYOUT" = "subdir" ]; then
         REPO_ROOT="$(dirname "$HARNESS_DIR")"
+        HARNESS_SUBDIR="$(basename "$HARNESS_DIR")"
     else
         REPO_ROOT="$HARNESS_DIR"
+        HARNESS_SUBDIR=""
     fi
     SURFACE_DIR="$REPO_ROOT"
     BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
+
+    # Asegurar .gitignore también en reset (por si alguien lo borró)
+    ensure_harness_not_committed
 
     log_info "Modo RESET activado. Limpiando artefactos generados por Harness..."
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -530,6 +585,11 @@ Para actualizar el harness (protocolo + herramientas) vuelve a la carpeta
 fuente `harness_process` y ejecuta `./setup_harness.sh` (o con `--reset`).
 Las superficies y scripts se regeneran desde la fuente.
 
+**NUNCA commitees la carpeta del harness** (harness_process/ o el subdirectorio
+donde vive setup_harness.sh). El instalador la agrega automáticamente a
+.gitignore. El harness es una herramienta que vive en su propio repositorio
+fuente.
+
 Consulta `UPDATING.md` (se instala en tu harness) para la guia completa.
 SURFACE_EOF
 
@@ -689,6 +749,11 @@ Servicios transversales:
 
 Este protocolo y las herramientas (`harness.py`, `check-plan`, roles, hooks, etc.)
 viven en la carpeta `harness_process` (la fuente).
+
+**NUNCA commitees la carpeta del harness** (harness_process/ o el subdirectorio
+donde vive setup_harness.sh). El instalador la agrega automáticamente a
+.gitignore. El harness es una herramienta que vive en su propio repositorio
+fuente (no forma parte de tu código del proyecto).
 
 **Consulta siempre `UPDATING.md`** (se instala junto a los scripts del harness).
 
@@ -1143,6 +1208,8 @@ fi
 SURFACE_DIR="$REPO_ROOT"
 PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
+
+ensure_harness_not_committed
 
 if [ -f "$HARNESS_DIR/templates/graph_memory.py" ]; then
     ASSET_DIR="$HARNESS_DIR/templates"
@@ -2010,6 +2077,11 @@ if [ "$LAYOUT" = "subdir" ]; then
     log_info "IMPORTANTE: lanza tu agente DESDE la raiz ($REPO_ROOT) para que"
     log_info "descubra la superficie correspondiente."
 fi
+
+log_info ""
+log_warn "IMPORTANTE: La carpeta del harness NUNCA debe commitearse."
+log_warn "             El instalador la agregó a .gitignore. El harness vive en su repo fuente separado."
+log_warn "             Solo se instala/copia aquí como herramienta."
 log_info ""
 log_info "Comandos utiles:"
 log_info "  bash ${HREL}init.sh"

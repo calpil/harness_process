@@ -112,6 +112,10 @@ cd /ruta/al/harness_process
 
 El instalador respalda archivos existentes en `bkp/` (a menos que uses `--force`).
 
+**NUNCA commitees la carpeta del harness** (`harness_process/` o el subdirectorio donde está `setup_harness.sh`). 
+
+El instalador la agrega automáticamente a `.gitignore` del proyecto. El harness es una **herramienta** que vive en su propio repositorio fuente separado. No forma parte del código de tu proyecto.
+
 No existe (ni se recomienda) un comando magico `harness.py upgrade` dentro del proyecto. La forma correcta y explícita de actualizar es volver a ejecutar el instalador desde la carpeta fuente de `harness_process`.
 
 ## Verificacion
