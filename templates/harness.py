@@ -530,7 +530,13 @@ def cmd_nudge(_args):
 def cmd_check_plan(args):
     """Verifica si el plan de la feature activa (o la indicada) fue actualizado
     por otro LLM/agente desde la ultima firma registrada (start/advance/autocheck).
-    Este es el gate principal antes de que un implementer toque codigo."""
+    Este es el gate principal antes de que un implementer toque codigo.
+
+    Exit codes:
+      0 = OK (plan fresco o no aplica)
+      1 = sin feature in_progress (proveniente de active_feature)
+      2 = plan genuinamente stale (modificado por otro agente/LLM)
+    """
     data = load_features()
     fid = getattr(args, "feature", None)
     feature = active_feature(data, fid)
