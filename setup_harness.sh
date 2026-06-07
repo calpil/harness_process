@@ -1150,6 +1150,98 @@ else
     ASSET_DIR="$HARNESS_DIR"
 fi
 
+# Bootstrap for new required documentation files (e.g. when user updated only setup_harness.sh
+# from a newer source but hasn't copied the new asset files yet). This prevents the
+# "Falta el recurso requerido: UPDATING.md" error during incremental updates.
+if [ ! -f "$ASSET_DIR/UPDATING.md" ]; then
+    mkdir -p "$(dirname "$ASSET_DIR/UPDATING.md")"
+    cat > "$ASSET_DIR/UPDATING.md" << 'UPDATING_BOOTSTRAP_EOF'
+# Actualización del Harness Process
+
+El Harness Process se mantiene actualizado **re-ejecutando el instalador** desde la carpeta fuente (`harness_process`). Esto es intencional y explícito.
+
+No existe un comando mágico `harness.py upgrade` dentro de tus proyectos. La forma correcta de traer mejoras es volver a correr el instalador.
+
+## Por qué funciona así
+
+- Las mejoras al protocolo (por ejemplo: `check-plan` para detectar si otros LLMs actualizaron planes, mejores instrucciones para implementer/reviewer, nuevos comandos, etc.) viven en este repositorio.
+- Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se **generan** desde el instalador.
+- Los scripts (`harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+- Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
+
+## Cómo actualizar
+
+Desde la carpeta del `harness_process` (la fuente):
+
+```bash
+# Actualización normal (recomendada)
+./setup_harness.sh
+
+# O reinstalación limpia (borra superficies anteriores y las regenera)
+./setup_harness.sh --reset
+```
+
+El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`) a menos que uses `--force`.
+
+## Cuándo actualizar
+
+- Después de hacer `git pull` o `git fetch` en la carpeta `harness_process`.
+- Cuando `harness_status.sh` o las superficies muestren recordatorios de nuevas funcionalidades.
+- Periódicamente para beneficiarte de mejoras en el manejo multi-LLM (detección de planes actualizados por otros agentes, mejores checkpoints, etc.).
+- Cuando agregues un nuevo LLM al equipo (para asegurarte de que tenga los últimos roles y hooks).
+
+## Qué se actualiza
+
+- Superficies de instrucciones (CLAUDE.md, AGENTS.md, etc.)
+- Subagentes nativos (`.claude/agents/`, `.codex/agents/`, `.gemini/agents/`)
+- Scripts del arnés (`harness.py`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
+- Hooks y launchers
+- Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
+
+## Recomendación
+
+Mantén este repositorio (`harness_process`) actualizado y re-instala en tus proyectos cuando haya cambios relevantes. Así el protocolo de trabajo multi-agente se mantiene consistente y mejora con el tiempo.
+
+Si usas `--reset` + re-instalación, las superficies se regeneran desde cero con la versión más reciente del protocolo.
+
+## Para maintainers de este repositorio harness_process
+
+Cuando realizas mejoras (nuevo protocolo, recordatorios de planes actualizados por otros LLMs, fixes en harness.py, etc.):
+
+1. Haz los cambios en este repo (el "fuente").
+2. Una vez hecho el commit **sin co-author** (sin `Co-Authored-By`, sin "Generated with", sin trailers de IA):
+   ```bash
+   git commit -m "tu mensaje limpio"
+   ```
+3. Haz push del cambio:
+   ```bash
+   git push origin main
+   ```
+
+Esto hace que el cambio esté disponible **incluso si aplica en otros proyectos**. Los demás proyectos que usan este harness_process como fuente recibirán las mejoras la próxima vez que ejecuten:
+
+```bash
+./setup_harness.sh
+# o
+./setup_harness.sh --reset
+```
+
+Mantener el proceso explícito asegura consistencia multi-LLM a través de todos los proyectos.
+
+## Cómo obtener este archivo si te falta al actualizar
+
+Si al correr `./setup_harness.sh` ves el error "Falta el recurso requerido: UPDATING.md", significa que estás usando una versión actualizada del instalador pero aún no tienes el archivo UPDATING.md en tu carpeta `harness_process`.
+
+Solución rápida:
+- Copia este archivo `UPDATING.md` a tu carpeta `harness_process/` (junto a `setup_harness.sh`).
+- O, si usas la estructura con `templates/`, colócalo dentro de `templates/`.
+- Luego vuelve a ejecutar `./setup_harness.sh` (recomendado con `--reset` para una actualización limpia).
+
+Este archivo se copiará automáticamente a los proyectos destino en futuras instalaciones.
+UPDATING_BOOTSTRAP_EOF
+    echo "[Harness] UPDATING.md faltaba; se creó automáticamente (bootstrap para actualización)."
+fi
+
 required_assets=(
     "graph_memory.py"
     "init.sh"
