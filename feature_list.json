@@ -5,5 +5,25 @@
     "require_tests_to_close": true,
     "require_impact_check": true
   },
-  "features": []
+  "features": [
+    {
+      "id": 1,
+      "name": "kafka-verification",
+      "microservicios": [
+        "infra"
+      ],
+      "acceptance": [
+        "Plan de verificación de Kafka redactado en docs/"
+      ],
+      "status": "done",
+      "started_at": "2026-06-07T05:57:51Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-1-kafka-verification.md",
+        "mtime": 1780812328.7324474,
+        "size": 3106,
+        "hash": "4b3dcac83b88e2fb"
+      },
+      "closed_at": "2026-06-07T06:06:18Z"
+    }
+  ]
 }
