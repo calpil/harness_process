@@ -69,3 +69,14 @@ Esto hace que el cambio esté disponible **incluso si aplica en otros proyectos*
 ```
 
 Mantener el proceso explícito asegura consistencia multi-LLM a través de todos los proyectos.
+
+## Cómo obtener este archivo si te falta al actualizar
+
+Si al correr `./setup_harness.sh` ves el error "Falta el recurso requerido: UPDATING.md", significa que estás usando una versión actualizada del instalador pero aún no tienes el archivo UPDATING.md en tu carpeta `harness_process`.
+
+Solución rápida:
+- Copia este archivo `UPDATING.md` a tu carpeta `harness_process/` (junto a `setup_harness.sh`).
+- O, si usas la estructura con `templates/`, colócalo dentro de `templates/`.
+- Luego vuelve a ejecutar `./setup_harness.sh` (recomendado con `--reset` para una actualización limpia).
+
+Este archivo se copiará automáticamente a los proyectos destino en futuras instalaciones.

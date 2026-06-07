@@ -1179,6 +1179,10 @@ fi
 for asset in "${required_assets[@]}"; do
     if [ ! -f "$ASSET_DIR/$asset" ]; then
         echo "[!] Falta el recurso requerido: $asset (buscado en $ASSET_DIR)" >&2
+        if [ "$asset" = "UPDATING.md" ]; then
+            echo "    Este es un archivo nuevo. Copia 'UPDATING.md' desde tu carpeta fuente de harness_process (o desde templates/) a este directorio." >&2
+            echo "    Luego vuelve a ejecutar el instalador." >&2
+        fi
         exit 2
     fi
 done
