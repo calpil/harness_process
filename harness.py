@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -75,6 +76,80 @@ def slugify(text):
 
 def plan_path(feature):
     return os.path.join(PLANS, f"plan-feature-{feature.get('id')}-{slugify(feature.get('name', ''))}.md")
+
+
+def plan_signature(path):
+    """Firma ligera del plan para detectar ediciones por otros LLMs (Claude, Gemini,
+    Antigravity, Grok, Codex, etc.). Usa mtime + sha256 del contenido. Funciona
+    aunque el archivo sea editado directamente en disco por cualquier agente."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+        with open(path, "rb") as f:
+            content = f.read()
+        h = hashlib.sha256(content).hexdigest()[:16]
+        return {
+            "path": os.path.relpath(path, REPO_ROOT),
+            "mtime": mtime,
+            "size": len(content),
+            "hash": h,
+        }
+    except Exception:
+        return None
+
+
+def get_plan_sig(feature):
+    """Recupera la ultima firma conocida del plan para esta feature."""
+    sig = feature.get("last_plan_sig")
+    if isinstance(sig, dict):
+        return sig
+    return None
+
+
+def update_plan_sig(feature):
+    """Calcula y persiste la firma actual del plan en la feature (en feature_list.json).
+    Se llama al crear/actualizar el plan (start, advance manual, autocheck)."""
+    path = plan_path(feature)
+    sig = plan_signature(path)
+    if sig:
+        feature["last_plan_sig"] = sig
+        return sig
+    return None
+
+
+def is_plan_stale(feature):
+    """True si el plan en disco fue modificado por otro agente/LLM desde la ultima
+    vez que harness.py registro la firma (start/advance/autocheck)."""
+    current = plan_signature(plan_path(feature))
+    last = get_plan_sig(feature)
+    if not current or not last:
+        return False
+    return (
+        current.get("hash") != last.get("hash") or
+        abs(current.get("mtime", 0) - last.get("mtime", 0)) > 1.0
+    )
+
+
+def plan_staleness_message(feature):
+    """Mensaje amigable para mostrar cuando el plan esta desactualizado."""
+    path = plan_path(feature)
+    current = plan_signature(path)
+    last = get_plan_sig(feature)
+    if not current:
+        return f"[!] No se pudo leer el plan actual: {path}"
+    if not last:
+        return f"[!] Plan sin firma previa. Ejecuta harness.py check-plan despues de start/advance."
+    if is_plan_stale(feature):
+        return (
+            f"[!] PLAN ACTUALIZADO POR OTRO LLM (Claude/Gemini/Antigravity/Grok/Codex/etc.)\n"
+            f"    Plan en disco: {current['path']} (mtime={current['mtime']:.0f}, hash={current['hash']})\n"
+            f"    Ultima firma conocida: mtime={last.get('mtime',0):.0f}, hash={last.get('hash')}\n"
+            f"    Accion requerida: Re-lee COMPLETAMENTE el plan actualizado en docs/.\n"
+            f"    Luego confirma con: python3 harness.py check-plan  (debe salir limpio)\n"
+            f"    Registra la re-sincronizacion: python3 harness.py advance --nota \"Re-sincronizado con plan actualizado por otro agente\""
+        )
+    return "Plan fresco (sin cambios desde la ultima firma registrada)."
 
 
 def plan_template(feature):
@@ -236,6 +311,14 @@ def cmd_status(_args):
             print("\nprogress/current.md:")
             print(content)
 
+    # Reporte de frescura de planes (importante para multi-LLM)
+    for f in active:
+        if get_plan_sig(f):
+            if is_plan_stale(f):
+                print(f"  [!] #{f.get('id')} PLAN STALE - actualizado por otro agente/LLM. Ejecuta: harness.py check-plan")
+            else:
+                print(f"  [plan] #{f.get('id')} fresco")
+
 
 def cmd_next(_args):
     data = load_features()
@@ -257,6 +340,9 @@ def cmd_start(args):
     save_features(data)
     plan = write_plan(feature)
     rel_plan = os.path.relpath(plan, REPO_ROOT)
+    # Capturar firma del plan para detectar ediciones por otros LLMs (multi-agente)
+    update_plan_sig(feature)
+    save_features(data)
     os.makedirs(PROGRESS, exist_ok=True)
     with open(CURRENT, "w", encoding="utf-8") as f:
         f.write(f"# Feature #{feature.get('id')}: {feature.get('name')}\n\n")
@@ -270,6 +356,7 @@ def cmd_start(args):
     update_memories("start", "in_progress", f"feature-{feature.get('id')}", feature.get("name", ""))
     _touch_stamp()  # linea base: el plan recien creado no dispara autocheck
     print(f"Feature #{feature.get('id')} iniciada. Plan: {rel_plan}")
+    print("  (firma del plan registrada para deteccion de actualizaciones por otros agentes)")
 
 
 def cmd_close(args):
@@ -344,6 +431,9 @@ def cmd_advance(args):
     if os.path.exists(plan):
         with open(plan, "a", encoding="utf-8") as f:
             f.write(f"\n### Avance {stamp}\n{args.nota}\n")
+    # Actualizar firma del plan (por si el avance modifico el archivo o el lider edito entre turnos)
+    update_plan_sig(feature)
+    save_features(data)
     # 2) current.md: suma el avance a la evidencia (append, no reescribe).
     if os.path.exists(CURRENT):
         with open(CURRENT, "a", encoding="utf-8") as f:
@@ -387,6 +477,11 @@ def cmd_autocheck(args):
         nota = "auto: " + ", ".join(changed)
         log(f"autocheck feature #{fid} {nota}")
         _hub_register("advance", "in_progress", f"feature-{fid}", nota)
+        # Si el plan fue uno de los cambiados, refrescamos su firma para que
+        # futuros implementers vean que fue actualizado (posiblemente por otro LLM).
+        if any("plan-feature" in c or c.endswith(".md") for c in changed):
+            update_plan_sig(feature)
+            save_features(data)
         if not args.no_graphify:
             _graphify_refresh_bg()
         _touch_stamp()
@@ -397,27 +492,55 @@ def cmd_autocheck(args):
 
 
 def cmd_nudge(_args):
-    """Aviso (no bloqueante) para los hooks post-tool: si NO hay feature
-    in_progress, recuerda registrar el trabajo antes de seguir editando, para que
-    se active el ciclo (plan en docs/ + autocheck, que duerme sin feature activa).
-    Debounced (~10 min) y best-effort: escribe a stderr y nunca falla."""
+    """Aviso (no bloqueante) para los hooks post-tool.
+    - Si NO hay feature activa: recuerda registrar.
+    - Si HAY feature activa: avisa (a stderr) si el plan fue actualizado por
+      otro LLM (Claude, Gemini, Antigravity, Grok, etc.) desde la ultima firma.
+      El implementer DEBE re-leer el plan antes de continuar implementando."""
     try:
         data = load_features()
-        if any(f.get("status") == "in_progress" for f in data.get("features", [])):
-            return  # hay feature activa: nada que recordar
-        last = os.path.getmtime(NUDGE_STAMP) if os.path.exists(NUDGE_STAMP) else 0.0
-        if datetime.now(timezone.utc).timestamp() - last < 600:
-            return  # ya avisamos hace poco
-        os.makedirs(PROGRESS, exist_ok=True)
-        open(NUDGE_STAMP, "w").close()
-        sys.stderr.write(
-            "[harness] Sin feature activa: el avance NO se esta capturando "
-            "(autocheck duerme sin una feature in_progress). Antes de seguir, "
-            "consulta graphify, corre impacto y registra el trabajo con "
-            "'harness.py add' + 'harness.py start'.\n"
-        )
+        active = [f for f in data.get("features", []) if f.get("status") == "in_progress"]
+        if not active:
+            # Caso sin feature (comportamiento original)
+            last = os.path.getmtime(NUDGE_STAMP) if os.path.exists(NUDGE_STAMP) else 0.0
+            if datetime.now(timezone.utc).timestamp() - last < 600:
+                return
+            os.makedirs(PROGRESS, exist_ok=True)
+            open(NUDGE_STAMP, "w").close()
+            sys.stderr.write(
+                "[harness] Sin feature activa: el avance NO se esta capturando "
+                "(autocheck duerme sin una feature in_progress). Antes de seguir, "
+                "consulta graphify, corre impacto y registra el trabajo con "
+                "'harness.py add' + 'harness.py start'.\n"
+            )
+            return
+
+        # Hay feature activa: chequeo de frescura del plan (multi-LLM)
+        feature = active[0]
+        if is_plan_stale(feature):
+            sys.stderr.write(
+                "\n[harness] " + plan_staleness_message(feature) + "\n"
+                "[harness] Antes de implementar mas cambios, re-lee el plan y ejecuta:\n"
+                "    python3 harness.py check-plan\n\n"
+            )
     except Exception:
         pass
+
+
+def cmd_check_plan(args):
+    """Verifica si el plan de la feature activa (o la indicada) fue actualizado
+    por otro LLM/agente desde la ultima firma registrada (start/advance/autocheck).
+    Este es el gate principal antes de que un implementer toque codigo."""
+    data = load_features()
+    fid = getattr(args, "feature", None)
+    feature = active_feature(data, fid)
+    stale = is_plan_stale(feature)
+    msg = plan_staleness_message(feature)
+    print(msg)
+    if stale:
+        # Codigo de error para que harness_check.sh y hooks lo usen como gate.
+        raise SystemExit(2)
+    print("[OK] Plan fresco para implementacion.")
 
 
 def cmd_add(args):
@@ -464,6 +587,10 @@ def main():
     autochk.set_defaults(func=cmd_autocheck)
 
     sub.add_parser("nudge").set_defaults(func=cmd_nudge)
+
+    chk = sub.add_parser("check-plan")
+    chk.add_argument("--feature")
+    chk.set_defaults(func=cmd_check_plan)
 
     add = sub.add_parser("add")
     add.add_argument("--name", required=True)

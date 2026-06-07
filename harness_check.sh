@@ -21,6 +21,17 @@ echo "== Harness Check =="
 
 if [ -f "$HARNESS_DIR/feature_list.json" ]; then
     python3 "$HARNESS_DIR/harness.py" status || failures=$((failures + 1))
+
+    # NUEVO: Gate de frescura del plan (multi-LLM).
+    # Si hay feature in_progress y el plan en docs/ fue modificado por otro LLM
+    # (Claude, Gemini, Antigravity/agy, Grok, Codex...), bloqueamos hasta que
+    # el implementer re-lee el plan actualizado.
+    if python3 "$HARNESS_DIR/harness.py" check-plan >/dev/null 2>&1; then
+        : # plan fresco
+    else
+        echo "[!] Plan desactualizado (modificado por otro LLM). Ejecuta 'python3 harness.py check-plan' y re-lee el plan antes de continuar." >&2
+        failures=$((failures + 1))
+    fi
 fi
 
 if [ -f "$HARNESS_DIR/CHECKPOINTS.md" ] && [ ! -s "$HARNESS_DIR/progress/current.md" ]; then

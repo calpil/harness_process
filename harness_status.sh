@@ -42,3 +42,21 @@ else
     echo "Repos con cambios: ninguno"
 fi
 python3 "$HARNESS_DIR/graph_memory.py" mapa || true
+
+# Chequeo rapido de frescura de plan (multi-LLM) - no bloqueante aqui
+if [ -f "$HARNESS_DIR/feature_list.json" ]; then
+    python3 "$HARNESS_DIR/harness.py" check-plan 2>/dev/null || echo "[Harness] Plan puede estar desactualizado (ver 'harness.py check-plan')"
+fi
+
+# Recordatorio fuerte de actualizacion (proceso explicito)
+# Se muestra en casi todas las sesiones porque status se llama al inicio.
+# Mantiene la filosofia de que para obtener mejoras hay que re-correr el instalador.
+if [ "$BRIEF" -eq 0 ]; then
+    echo ""
+    echo "[Harness] Recordatorio de actualizacion:"
+    echo "  El protocolo y herramientas se actualizan re-correndo el instalador"
+    echo "  desde la carpeta fuente del harness_process."
+    echo "  Ejemplo:  cd /ruta/al/harness_process && ./setup_harness.sh"
+    echo "  (o con --reset para regenerar superficies)."
+    echo "  Lee 'UPDATING.md' (disponible en tu instalacion) para mas detalles."
+fi
