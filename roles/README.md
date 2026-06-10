@@ -61,12 +61,11 @@ subagente `leader`.
 
 ## Modelos, effort y tools por rol (tunable)
 
-- **Claude** (`.claude/agents/*.md`): `leader` y `reviewer` con
-  `model: claude-opus-4-8` (Opus 4.8); `implementer` con
-  `model: claude-sonnet-4-6` (Sonnet 4.6); los tres con `effort: max`. `model:`
-  acepta ID fijo o alias auto-ultima-version (`opus`, `sonnet`, `haiku`,
-  `inherit`); `effort:` es `low|medium|high|xhigh|max` (`xhigh` solo Opus 4.7+).
-  El `effort:` del frontmatter NO sobreescribe la env var
+- **Claude** (`.claude/agents/*.md`): los tres roles (`leader`, `implementer`
+  y `reviewer`) con `model: claude-fable-5` (Fable 5) y `effort: max`. `model:`
+  acepta ID fijo o alias auto-ultima-version (`fable`, `opus`, `sonnet`,
+  `haiku`, `inherit`); `effort:` es `low|medium|high|xhigh|max` (`xhigh` solo
+  Opus 4.7+). El `effort:` del frontmatter NO sobreescribe la env var
   `CLAUDE_CODE_EFFORT_LEVEL`.
 - **Codex** (`.codex/agents/*.toml`): `model` se hereda de la sesion;
   `model_reasoning_effort = high` (tope de Codex). Read-only via

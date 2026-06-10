@@ -1707,9 +1707,9 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     desc_rev="Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en docs/ de la raiz. Solo lectura; no implementa."
 
     # --- Claude Code: .claude/agents/*.md (frontmatter + cuerpo de rol) ----------
-    build_claude_agent leader      leader      claude-opus-4-8   max "Read, Grep, Glob, Bash"              "$desc_leader"
-    build_claude_agent implementer implementer claude-sonnet-4-6 max "Read, Edit, Write, Bash, Grep, Glob" "$desc_impl"
-    build_claude_agent reviewer    reviewer    claude-opus-4-8   max "Read, Grep, Glob, Bash"              "$desc_rev"
+    build_claude_agent leader      leader      claude-fable-5    max "Read, Grep, Glob, Bash"              "$desc_leader"
+    build_claude_agent implementer implementer claude-fable-5    max "Read, Edit, Write, Bash, Grep, Glob" "$desc_impl"
+    build_claude_agent reviewer    reviewer    claude-fable-5    max "Read, Grep, Glob, Bash"              "$desc_rev"
 
     # --- Codex CLI: .codex/agents/*.toml (sandbox por rol; effort high = tope) ---
     build_codex_agent leader      read-only       high "$desc_leader"
