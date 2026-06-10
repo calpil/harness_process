@@ -1,0 +1,5 @@
+# El shim y los scripts deben llegar con LF tambien en checkouts Windows:
+# un shebang con CRLF rompe `sh`.
+*.sh text eol=lf
+templates/harness_cli text eol=lf
+harness_cli text eol=lf

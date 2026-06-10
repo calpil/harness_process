@@ -2,3 +2,6 @@
 __pycache__/
 *.py[cod]
 /bkp/
+/rust/target/
+/harness
+/harness.exe
