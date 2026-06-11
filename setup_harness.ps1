@@ -399,7 +399,19 @@ function Assert-PostgresConfiguration {
         }
     }
     if ($missing.Count -gt 0) {
-        throw "PostgreSQL is the required Hub. Missing variables: $($missing -join ', '). Set them in the environment or `$HARNESS_HUB/.env."
+        $hubDir = if ($env:HARNESS_HUB) { $env:HARNESS_HUB } else { Join-Path $HOME ".harness-hub" }
+        $envFile = Join-Path $hubDir ".env"
+        Write-HarnessLog ERROR "PostgreSQL is the required Hub. Missing variables: $($missing -join ', ')."
+        Write-HarnessLog INFO "Option A (this session only):"
+        Write-HarnessLog INFO '    $env:DB_HOST = "postgres.example.com"; $env:DB_USER = "user"; $env:DB_PASSWORD = "secret"'
+        Write-HarnessLog INFO "Option B (persistent, recommended): create $envFile with one VAR=value per line:"
+        Write-HarnessLog INFO "    DB_HOST=postgres.example.com"
+        Write-HarnessLog INFO "    DB_USER=user"
+        Write-HarnessLog INFO "    DB_PASSWORD=secret"
+        Write-HarnessLog INFO "    DB_NAME=harness_db        # optional (default: postgres)"
+        Write-HarnessLog INFO "    DB_SSL_MODE=require       # optional (default: require)"
+        Write-HarnessLog INFO "Then re-run: .\setup_harness.ps1"
+        exit 2
     }
 }
 
