@@ -34,18 +34,25 @@ fi
 
 echo "== Harness Status =="
 if [ -f "$HARNESS_DIR/feature_list.json" ]; then
-    python3 "$HARNESS_DIR/harness.py" status || true
+    sh "$HARNESS_DIR/harness_cli" status || true
 fi
 if [ -n "$dirty" ]; then
     echo "Repos con cambios:$dirty"
 else
     echo "Repos con cambios: ninguno"
 fi
-python3 "$HARNESS_DIR/graph_memory.py" mapa || true
+sh "$HARNESS_DIR/harness_cli" graph mapa || true
 
 # Chequeo rapido de frescura de plan (multi-LLM) - no bloqueante aqui
+# Solo mostramos advertencia si check-plan sale con 2 (stale real).
+# Exit 1 = sin feature activa → no es un problema de staleness.
 if [ -f "$HARNESS_DIR/feature_list.json" ]; then
-    python3 "$HARNESS_DIR/harness.py" check-plan 2>/dev/null || echo "[Harness] Plan puede estar desactualizado (ver 'harness.py check-plan')"
+    sh "$HARNESS_DIR/harness_cli" check-plan 2>/dev/null || {
+        rc=$?
+        if [ "$rc" -eq 2 ]; then
+            echo "[Harness] Plan puede estar desactualizado (ver 'sh harness_cli check-plan')"
+        fi
+    }
 fi
 
 # Recordatorio fuerte de actualizacion (proceso explicito)
