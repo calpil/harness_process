@@ -2,13 +2,13 @@
 
 El Harness Process se mantiene actualizado **re-ejecutando el instalador** desde la carpeta fuente (`harness_process`). Esto es intencional y explícito.
 
-No existe un comando mágico `harness.py upgrade` dentro de tus proyectos. La forma correcta de traer mejoras es volver a correr el instalador.
+No existe un comando mágico `harness_cli upgrade` dentro de tus proyectos. La forma correcta de traer mejoras es volver a correr el instalador.
 
 ## Por qué funciona así
 
 - Las mejoras al protocolo (por ejemplo: `check-plan` para detectar si otros LLMs actualizaron planes, mejores instrucciones para implementer/reviewer, nuevos comandos, etc.) viven en este repositorio.
 - Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se **generan** desde el instalador.
-- Los scripts (`harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+- Los scripts (`harness_cli`, `harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`, y el binario Rust `harness` se compila desde `rust/` durante el setup (si hay cargo).
 - Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
 
 ## Cómo actualizar
@@ -36,9 +36,19 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 
 - Superficies de instrucciones (CLAUDE.md, AGENTS.md, etc.)
 - Subagentes nativos (`.claude/agents/`, `.codex/agents/`, `.gemini/agents/`)
-- Scripts del arnés (`harness.py`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
+- Scripts del arnés (`harness_cli`, `harness.py`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
+- El binario Rust `harness` (recompilado con cargo si está disponible; sin cargo, `harness_cli` usa el fallback Python automáticamente)
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
+
+## Mantenimiento dual Rust + Python (obligatorio para maintainers)
+
+El punto de entrada es **`harness_cli`**: ejecuta el binario Rust `harness` (compilado desde `rust/`, corre en macOS/Windows/Linux) y, si no existe, cae al fallback Python (`harness.py` / `graph_memory.py`). Ambas implementaciones conviven y DEBEN mantenerse en paridad:
+
+1. Los `.py` son el **oráculo de comportamiento**: todo cambio de comportamiento en `templates/harness.py` o `templates/graph_memory.py` se espeja en `rust/src/` **en el mismo commit** (y viceversa).
+2. `bash tests/parity_smoke.sh` debe pasar antes de cada push: ejecuta el mismo escenario en ambas implementaciones y compara exit codes, salidas y archivos de estado.
+3. Sube la versión en `rust/Cargo.toml` en cada cambio de comportamiento.
+4. Las máquinas sin cargo siguen funcionando con el fallback; si un binario viejo quedara desactualizado, `rm harness harness.exe` en la instalación reactiva el fallback hasta el próximo setup con cargo.
 
 ## Recomendación
 
@@ -50,7 +60,7 @@ Si usas `--reset` + re-instalación, las superficies se regeneran desde cero con
 
 ## Para maintainers de este repositorio harness_process
 
-Cuando realizas mejoras (nuevo protocolo, recordatorios de planes actualizados por otros LLMs, fixes en harness.py, etc.):
+Cuando realizas mejoras (nuevo protocolo, recordatorios de planes actualizados por otros LLMs, fixes en harness.py + su espejo en rust/src, etc.):
 
 1. Haz los cambios en este repo (el "fuente").
 2. Una vez hecho el commit **sin co-author** (sin `Co-Authored-By`, sin "Generated with", sin trailers de IA):

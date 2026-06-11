@@ -8,7 +8,9 @@ launchers, memoria compartida y una capa opcional de subagentes.
 
 - Bash 3.2 o superior
 - Git
-- Python 3
+- Python 3 (instalador y fallback de `harness_cli`)
+- Rust/cargo (opcional, recomendado): compila el binario nativo `harness`
+  durante el setup; sin cargo todo sigue funcionando via el fallback Python
 - `curl`, `uv` o `pipx` solo cuando se instalan herramientas opcionales
 
 ## Instalacion
@@ -95,7 +97,8 @@ Ejemplo dry-run:
 El Harness Process se actualiza **re-correndo el instalador**. Esto es intencional y explicito:
 
 - Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se generan desde los heredocs del instalador.
-- Los scripts (`harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+- Los scripts (`harness_cli`, `harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+- El binario Rust `harness` se compila desde `rust/` con cargo (si esta disponible) y `harness_cli` lo prefiere sobre el fallback Python.
 
 Para recibir mejoras (nuevo protocolo de `check-plan`, recordatorios de planes actualizados por otros LLMs, fixes, nuevas opciones, etc.):
 
@@ -116,7 +119,23 @@ El instalador respalda archivos existentes en `bkp/` (a menos que uses `--force`
 
 El instalador la agrega automáticamente a `.gitignore` del proyecto. El harness es una **herramienta** que vive en su propio repositorio fuente separado. No forma parte del código de tu proyecto.
 
-No existe (ni se recomienda) un comando magico `harness.py upgrade` dentro del proyecto. La forma correcta y explícita de actualizar es volver a ejecutar el instalador desde la carpeta fuente de `harness_process`.
+No existe (ni se recomienda) un comando magico `harness_cli upgrade` dentro del proyecto. La forma correcta y explícita de actualizar es volver a ejecutar el instalador desde la carpeta fuente de `harness_process`.
+
+## harness_cli: binario Rust + fallback Python
+
+Todos los hooks, scripts y docs invocan `sh .../harness_cli <cmd>`:
+
+- Si existe el binario `harness` (o `harness.exe` en Windows), lo ejecuta.
+  Es un solo ejecutable multi-OS (macOS/Windows/Linux) con los comandos de
+  ciclo de vida al tope (`status`, `start`, `check-plan`, ...) y el Memory
+  Hub bajo `harness graph <cmd>` (`mapa`, `impacto`, `vincular`, ...).
+- Si no, cae a `python3 harness.py` / `graph_memory.py` (mismos comandos,
+  mismos mensajes, mismos exit codes).
+
+Regla de mantenedor: los `.py` son el oraculo; cualquier cambio de
+comportamiento se espeja en `rust/src/` en el mismo commit y
+`bash tests/parity_smoke.sh` debe pasar antes de push (compara ambas
+implementaciones paso a paso). Detalles en `templates/UPDATING.md`.
 
 ## Verificacion
 
@@ -124,4 +143,9 @@ No existe (ni se recomienda) un comando magico `harness.py upgrade` dentro del p
 bash init.sh
 bash harness_status.sh
 bash harness_check.sh
+
+# Suites del repo fuente
+bash tests/setup_smoke.sh     # instalador (layouts, hooks, build-on-setup)
+bash tests/parity_smoke.sh    # paridad Rust vs Python (oraculo)
+(cd rust && cargo clippy --all-targets -- -D warnings && cargo test)
 ```
