@@ -504,6 +504,7 @@ dependencies = [
  "filetime",
  "hex",
  "indexmap",
+ "libc",
  "pathdiff",
  "postgres",
  "predicates",

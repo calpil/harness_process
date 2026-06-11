@@ -1,0 +1,23 @@
+#!/bin/sh
+# Punto de entrada unico del Harness: usa el binario Rust si existe, si no
+# cae al fallback Python (harness.py / graph_memory.py). Los hooks, scripts
+# y docs invocan SIEMPRE `sh .../harness_cli <cmd>`; nunca llames a los .py
+# o al binario directo desde fuera.
+#
+# Mapeo del fallback: `harness_cli graph <cmd>` -> graph_memory.py <cmd>;
+# el resto -> harness.py <cmd> (el binario ya trae ambos namespaces).
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+for exe in "$DIR/harness" "$DIR/harness.exe"; do
+    if [ -x "$exe" ]; then
+        exec "$exe" "$@"
+    fi
+done
+PY=$(command -v python3 || command -v python) || {
+    echo "[harness_cli] Ni el binario 'harness' ni python3 estan disponibles." >&2
+    exit 127
+}
+if [ "${1:-}" = "graph" ]; then
+    shift
+    exec "$PY" "$DIR/graph_memory.py" "$@"
+fi
+exec "$PY" "$DIR/harness.py" "$@"

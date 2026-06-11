@@ -16,7 +16,24 @@ mod pycompat;
 
 use std::process::ExitCode;
 
+/// Restaura el comportamiento Unix clasico ante SIGPIPE (morir en silencio,
+/// como Python o grep). Rust lo ignora por defecto y `println!` entraria en
+/// panico con "Broken pipe" cuando el lector del pipe cierra temprano
+/// (p.ej. `harness status | head`).
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // SAFETY: cambiar la disposicion de SIGPIPE antes de cualquier I/O es
+    // seguro; no hay otros hilos todavia.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe() {}
+
 fn main() -> ExitCode {
+    restore_sigpipe();
     match cli::run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

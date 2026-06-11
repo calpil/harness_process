@@ -376,7 +376,49 @@ if [ "$DRY_RUN" -eq 0 ]; then
     fi
 fi
 
+timestamp() {
+    date +%Y%m%d%H%M%S
+}
+
+# Calcula la ruta del backup dentro de bkp/, preservando la estructura de
+# subcarpetas del archivo original para evitar colisiones de nombres.
+backup_path() {
+    target="$1"
+    case "$target" in
+        "$HARNESS_DIR"/*) rel="${target#"$HARNESS_DIR"/}" ;;
+        "$SURFACE_DIR"/*) rel="surface/${target#"$SURFACE_DIR"/}" ;;
+        /*) rel="external/${target#/}" ;;
+        *) rel="${target#./}" ;;
+    esac
+    dest="$BKP_DIR/${rel}.bak.$(timestamp)"
+    mkdir -p "$(dirname "$dest")"
+    echo "$dest"
+}
+
+# Registra accion y (si no dry-run) hace backup real
+backup_file() {
+    target="$1"
+    if [ "$FORCE" -eq 0 ] && [ -e "$target" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Backup de: $target"
+            COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+            return 0
+        fi
+        backup="$(backup_path "$target")"
+        if [ -d "$target" ]; then
+            cp -pR "$target" "$backup"   # reset tambien respalda directorios
+        else
+            cp -p "$target" "$backup"
+        fi
+        log_info "Backup creado: $backup"
+        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+    else
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+    fi
+}
+
 # Si es --reset, manejar temprano (antes de resolver paths completos)
+# (timestamp/backup_path/backup_file ya estan definidos: el reset los usa)
 if [ "$RESET" -eq 1 ]; then
     # Todavia necesitamos paths basicos; resolvemos lo minimo
     HARNESS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -451,44 +493,7 @@ if [ "$RESET" -eq 1 ]; then
     exit 0
 fi
 
-timestamp() {
-    date +%Y%m%d%H%M%S
-}
-
 BKP_DIR=""
-
-# Calcula la ruta del backup dentro de bkp/, preservando la estructura de
-# subcarpetas del archivo original para evitar colisiones de nombres.
-backup_path() {
-    target="$1"
-    case "$target" in
-        "$HARNESS_DIR"/*) rel="${target#"$HARNESS_DIR"/}" ;;
-        "$SURFACE_DIR"/*) rel="surface/${target#"$SURFACE_DIR"/}" ;;
-        /*) rel="external/${target#/}" ;;
-        *) rel="${target#./}" ;;
-    esac
-    dest="$BKP_DIR/${rel}.bak.$(timestamp)"
-    mkdir -p "$(dirname "$dest")"
-    echo "$dest"
-}
-
-# Registra accion y (si no dry-run) hace backup real
-backup_file() {
-    target="$1"
-    if [ "$FORCE" -eq 0 ] && [ -e "$target" ]; then
-        if [ "$DRY_RUN" -eq 1 ]; then
-            log_info "[DRY-RUN] Backup de: $target"
-            COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
-            return 0
-        fi
-        backup="$(backup_path "$target")"
-        cp -p "$target" "$backup"
-        log_info "Backup creado: $backup"
-        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
-    else
-        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
-    fi
-}
 
 archive_legacy_file() {
     target="$1"
@@ -551,23 +556,23 @@ bash "__HREL__harness_status.sh"
 0. Verifica frescura del plan (puede haber sido actualizado por Claude, Gemini,
    Antigravity, Grok, etc.):
    ```bash
-   python3 "__HREL__harness.py" check-plan
+   sh "__HREL__harness_cli" check-plan
    ```
    Si está desactualizado, re-lee el plan en `docs/` y sincroniza con `advance`.
 
 Antes de modificar codigo:
 
-1. Revisa el mapa: `python3 "__HREL__graph_memory.py" mapa`.
-2. Revisa impacto: `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`.
+1. Revisa el mapa: `sh "__HREL__harness_cli" graph mapa`.
+2. Revisa impacto: `sh "__HREL__harness_cli" graph impacto --microservicio <proyecto>/<servicio>`.
 3. Si existe `graphify-out/graph.json`, consulta `graphify query "<pregunta>"`.
-4. Verifica plan: `python3 "__HREL__harness.py" check-plan`.
+4. Verifica plan: `sh "__HREL__harness_cli" check-plan`.
 5. Trabaja y valida dentro del microservicio afectado.
 
 El Hub usa exclusivamente PostgreSQL y graphify mantiene el grafo del codigo.
 Para declarar dependencias usa:
 
 ```bash
-python3 "__HREL__graph_memory.py" vincular \
+sh "__HREL__harness_cli" graph vincular \
   --microservicio <consumidor> \
   --destino <proyecto>/<servicio>
 ```
@@ -646,31 +651,31 @@ bash "__HREL__harness_status.sh"
 0. Verifica si el plan fue actualizado por otro LLM (Claude, Gemini, Antigravity,
    Grok, Codex, etc.):
    ```bash
-   python3 "__HREL__harness.py" check-plan
+   sh "__HREL__harness_cli" check-plan
    ```
    - Si reporta **PLAN ACTUALIZADO POR OTRO LLM** → **DETENTE**, re-lee
      completamente el plan en `docs/plan-feature-*.md`.
-   - Luego sincroniza: `python3 "__HREL__harness.py" advance --nota "Re-sincronizado con plan actualizado por otro agente"`.
+   - Luego sincroniza: `sh "__HREL__harness_cli" advance --nota "Re-sincronizado con plan actualizado por otro agente"`.
    - Repite `check-plan` hasta que salga limpio.
 
 Antes de tocar codigo, arquitectura o dependencias entre servicios, en ESTE
 orden:
 
 1. Revisa el mapa del hub:
-   `python3 "__HREL__graph_memory.py" mapa`
+   `sh "__HREL__harness_cli" graph mapa`
 2. Si vas a modificar un servicio, revisa su radio de impacto:
-   `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+   `sh "__HREL__harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
 3. Si existe `graphify-out/graph.json`, consulta el grafo antes de leer a
    ciegas: `graphify query "<pregunta de la task>"`
 4. **Verifica frescura del plan** (obligatorio antes de implementar):
-   `python3 "__HREL__harness.py" check-plan`
+   `sh "__HREL__harness_cli" check-plan`
 5. Trabaja dentro del microservicio correspondiente; no programes en la raiz
    multi-repo salvo que la tarea sea del arnes.
 6. Valida los servicios afectados. Los documentos durables (plan, investigacion,
    evidencia de implementacion/review) se guardan en `docs/` de la RAIZ del
    proyecto, no en chat ni en `__HREL__progress/` (solo estado vivo).
 7. Al cerrar la feature usa
-   `python3 "__HREL__harness.py" close --feature <id> --status <estado>`: mueve la
+   `sh "__HREL__harness_cli" close --feature <id> --status <estado>`: mueve la
    task y las memorias juntas (registra el hub y refresca graphify). Luego corre
    `bash "__HREL__harness_check.sh"`.
 
@@ -690,27 +695,27 @@ Son sistemas separados:
 Servicios transversales:
 
 - Ver dependencias de todos los proyectos:
-  `python3 "__HREL__graph_memory.py" impacto --microservicio <proyecto>/<servicio>`
+  `sh "__HREL__harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
 - Declarar una dependencia:
-  `python3 "__HREL__graph_memory.py" vincular --microservicio <consumidor> --destino <proyecto>/<servicio>`
+  `sh "__HREL__harness_cli" graph vincular --microservicio <consumidor> --destino <proyecto>/<servicio>`
 - Marcar destino transversal:
   agrega `--transversal` al comando `vincular`.
 - Quitar marca transversal:
-  `python3 "__HREL__graph_memory.py" desmarcar --microservicio <servicio>`
+  `sh "__HREL__harness_cli" graph desmarcar --microservicio <servicio>`
 - **Verificar si el plan fue actualizado por otro LLM** (Claude/Gemini/Antigravity/Grok/etc.):
-  `python3 "__HREL__harness.py" check-plan`
+  `sh "__HREL__harness_cli" check-plan`
   **Obligatorio antes de implementar cualquier tarea.** Si detecta cambios,
   re-lee el plan en `docs/` y sincroniza con `advance`.
 - Registrar un avance de la feature activa (mueve hub + graphify + history.md +
   current.md de una vez):
-  `python3 "__HREL__harness.py" advance --nota "<que avanzaste>"`
+  `sh "__HREL__harness_cli" advance --nota "<que avanzaste>"`
   El arnes ademas hace este checkpoint AUTOMATICAMENTE al cierre de cada turno
   (hook multi-LLM en Claude/Codex/Gemini/Grok) si el plan o la evidencia
   cambiaron; `advance` queda para dejar la nota explicita.
 - Registrar progreso (evento de bajo nivel en el hub):
-  `python3 "__HREL__graph_memory.py" registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
+  `sh "__HREL__harness_cli" graph registrar --accion <accion> --estado <estado> --artefacto <nombre> [--meta ...]`
 - Consultar progreso:
-  `python3 "__HREL__graph_memory.py" consultar --artefacto <nombre> [--microservicio <servicio>]`
+  `sh "__HREL__harness_cli" graph consultar --artefacto <nombre> [--microservicio <servicio>]`
 
 ## graphify
 
@@ -733,7 +738,7 @@ Servicios transversales:
 - Manual sin comando nativo: `graphify update .` (estructural) o `graphify
   cluster-only . --backend=claude-cli` (semantico headless). `graphify query "..."`
   consulta el grafo en cualquier agente. Tras un rebuild manual refresca el hub:
-  `python3 "__HREL__graph_memory.py" vincular-grafo`
+  `sh "__HREL__harness_cli" graph vincular-grafo`
 
 ## Commits
 
@@ -747,8 +752,9 @@ Servicios transversales:
 
 ## Actualizacion del Harness Process
 
-Este protocolo y las herramientas (`harness.py`, `check-plan`, roles, hooks, etc.)
-viven en la carpeta `harness_process` (la fuente).
+Este protocolo y las herramientas (`harness_cli` con su binario Rust `harness`
+y el fallback `harness.py`, `check-plan`, roles, hooks, etc.) viven en la
+carpeta `harness_process` (la fuente).
 
 **NUNCA commitees la carpeta del harness** (harness_process/ o el subdirectorio
 donde vive setup_harness.sh). El instalador la agrega automáticamente a
@@ -846,7 +852,7 @@ run_session_start() {
 run_post_tool() {
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Aviso no bloqueante si no hay feature activa.
-        HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" nudge || true
+        HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" nudge || true
     fi
     HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_status.sh" --brief
 }
@@ -854,7 +860,7 @@ run_post_tool() {
 run_stop() {
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Checkpoint automatico de avance; harness_check conserva el exit code.
-        HARNESS_REPO_ROOT="$ROOT" python3 "$HARNESS_DIR/harness.py" autocheck 1>&2 || true
+        HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" autocheck 1>&2 || true
         HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh"
     else
         HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/commit_guard.sh"
@@ -1318,6 +1324,7 @@ required_assets=(
     "harness_status.sh"
     "harness_check.sh"
     "harness.py"
+    "harness_cli"
     "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -1476,6 +1483,7 @@ generated=(
     "harness_status.sh"
     "harness_check.sh"
     "harness.py"
+    "harness_cli"
     "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -1555,7 +1563,7 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOOK_BASE/harness.py\" nudge || true; bash \"$HOOK_BASE/harness_status.sh\" --brief"
+            "command": "sh \"$HOOK_BASE/harness_cli\" nudge || true; bash \"$HOOK_BASE/harness_status.sh\" --brief"
           }
         ]
       }
@@ -1565,7 +1573,7 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOOK_BASE/harness.py\" autocheck >/dev/null 2>&1 || true; bash \"$HOOK_BASE/harness_check.sh\""
+            "command": "sh \"$HOOK_BASE/harness_cli\" autocheck >/dev/null 2>&1 || true; bash \"$HOOK_BASE/harness_check.sh\""
           }
         ]
       }
@@ -1617,6 +1625,7 @@ install_asset "commit_guard.sh"
 install_asset "harness_status.sh"
 install_asset "harness_check.sh"
 install_asset "harness.py"
+install_asset "harness_cli"
 install_asset "UPDATING.md"
 write_file_notice "scripts base ($HARNESS_DIR)"
 
@@ -1628,6 +1637,32 @@ chmod +x "$HARNESS_DIR/harness_status.sh"
 chmod +x "$HARNESS_DIR/commit_guard.sh"
 chmod +x "$HARNESS_DIR/harness_check.sh"
 chmod +x "$HARNESS_DIR/harness.py"
+chmod +x "$HARNESS_DIR/harness_cli"
+
+# Binario Rust (build-on-setup): harness_cli lo prefiere; sin cargo o sin
+# rust/ se queda el fallback Python. NUNCA es fatal.
+echo "Asegurando binario harness (Rust, opcional)..."
+HARNESS_BIN_NAME="harness"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) HARNESS_BIN_NAME="harness.exe" ;;
+esac
+if [ "$DRY_RUN" -eq 1 ]; then
+    log_info "[DRY-RUN] Se compilaria rust/ (cargo build --release) y se copiaria $HARNESS_BIN_NAME"
+elif command -v cargo >/dev/null 2>&1 && [ -f "$HARNESS_DIR/rust/Cargo.toml" ]; then
+    if (cd "$HARNESS_DIR/rust" && cargo build --release --quiet) \
+        && cp "${CARGO_TARGET_DIR:-$HARNESS_DIR/rust/target}/release/$HARNESS_BIN_NAME" "$HARNESS_DIR/$HARNESS_BIN_NAME" \
+        && chmod +x "$HARNESS_DIR/$HARNESS_BIN_NAME"; then
+        log_success "   -> binario harness compilado; harness_cli lo usara en vez del fallback Python."
+    else
+        log_warn "   -> no se pudo compilar el binario harness; harness_cli usara el fallback Python."
+    fi
+else
+    if [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
+        log_warn "   -> cargo no disponible: el binario harness existente podria quedar desactualizado respecto de los .py."
+    else
+        log_warn "   -> sin cargo (o sin rust/): harness_cli usara el fallback Python. Instala rustup para el binario nativo."
+    fi
+fi
 
 echo "Generando capa de subagentes (mapa de agentes)..."
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -1765,7 +1800,7 @@ write_gemini_hooks
 write_grok_hooks
 write_launchers
 
-chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness.py
+chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness.py harness_cli
 
 log_info "Asegurando graphify..."
 if command -v graphify >/dev/null 2>&1; then
@@ -1822,13 +1857,22 @@ else
                 log_warn "   psycopg2 via --user. Asegura PATH: export PATH=\"\$HOME/.local/bin:\$PATH\""
             fi
         else
-            log_error "No se pudo instalar psycopg2-binary."
-            exit 1
+            if [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
+                log_warn "   -> no se pudo instalar psycopg2-binary; el binario harness cubre el hub (psycopg2 solo hace falta para el fallback Python)."
+            else
+                log_error "No se pudo instalar psycopg2-binary."
+                exit 1
+            fi
         fi
     fi
 fi
 
 log_info "Verificando y migrando el Memory Hub PostgreSQL..."
+if ! python3 -c "import psycopg2" >/dev/null 2>&1 && [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
+    # Sin psycopg2 pero con binario Rust: el esquema lo crea el binario en el
+    # primer uso; la migracion legacy solo aplica a hubs que ya tenian Python.
+    log_warn "   -> sin psycopg2: se omite preflight/migracion legacy; el binario harness crea el esquema al primer uso."
+else
 python3 - << 'EOF'
 import json
 import os
@@ -1989,6 +2033,7 @@ if legacy_nodes or legacy_edges:
         + " relaciones."
     )
 EOF
+fi
 
 archive_local_hub_memory() {
     hub_dir="${HARNESS_HUB:-$HOME/.harness-hub}"
@@ -2087,9 +2132,9 @@ log_info "Comandos utiles:"
 log_info "  bash ${HREL}init.sh"
 log_info "  bash ${HREL}harness_status.sh"
 log_info "  bash ${HREL}harness_check.sh"
-log_info "  python3 ${HREL}graph_memory.py mapa"
-log_info "  python3 ${HREL}harness.py status"
-log_info "  python3 ${HREL}harness.py check-plan     # <-- OBLIGATORIO antes de implementar (detecta planes actualizados por otros LLMs)"
+log_info "  sh ${HREL}harness_cli graph mapa"
+log_info "  sh ${HREL}harness_cli status"
+log_info "  sh ${HREL}harness_cli check-plan     # <-- OBLIGATORIO antes de implementar (detecta planes actualizados por otros LLMs)"
 log_info "  bin/harness-codex"
 log_info "  bin/harness-gemini"
 log_info "  bin/harness-grok"
@@ -2103,10 +2148,10 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     log_info "  Subagentes nativos: .claude/agents/*.md, .codex/agents/*.toml, .gemini/agents/*.md"
     log_info "  Grok Build:         lee .claude/agents/*.md (compat Claude Code)"
     log_info "  Antigravity/otros:  ${HREL}roles/*.md como fases secuenciales"
-    log_info "  python3 ${HREL}harness.py add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
-    log_info "  python3 ${HREL}harness.py start --feature 1"
-    log_info "  python3 ${HREL}harness.py check-plan     # verifica si otro LLM actualizo el plan"
-    log_info "  python3 ${HREL}harness.py close --feature 1 --status done"
+    log_info "  sh ${HREL}harness_cli add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
+    log_info "  sh ${HREL}harness_cli start --feature 1"
+    log_info "  sh ${HREL}harness_cli check-plan     # verifica si otro LLM actualizo el plan"
+    log_info "  sh ${HREL}harness_cli close --feature 1 --status done"
 fi
 
 log_info ""

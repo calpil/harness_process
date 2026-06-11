@@ -181,6 +181,8 @@ test ! -e "$TMP_ROOT/postgres-hub/progress"
 find "$POSTGRES_DEFAULT/bkp/memory-hub" -type f -name graph_db.json -print -quit | grep -q .
 find "$POSTGRES_DEFAULT/bkp/memory-hub" -type f -path '*/progress/test/feature-2.json' -print -quit | grep -q .
 ! grep -q 'GRAPH_DB_FILE\|PROGRESS_DIR\|GraphStore' "$POSTGRES_DEFAULT/graph_memory.py"
+test -x "$POSTGRES_DEFAULT/harness_cli"
+# Las fixtures no traen rust/: harness_cli debe caer al fallback Python.
 FAKE_PG_NODE='{"id":"postgres-default/feature-1","label":"Artefacto","props":{"estado":"done"}}' \
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/postgres-hub" \
@@ -190,7 +192,7 @@ FAKE_PG_NODE='{"id":"postgres-default/feature-1","label":"Artefacto","props":{"e
     DB_PASSWORD=secret \
     DB_NAME=harness \
     DB_SSL_MODE=require \
-    python3 "$POSTGRES_DEFAULT/graph_memory.py" consultar --artefacto feature-1 \
+    sh "$POSTGRES_DEFAULT/harness_cli" graph consultar --artefacto feature-1 \
     | grep -q '"estado": "done"'
 HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/postgres-hub" \
@@ -200,7 +202,7 @@ HOME="$TMP_ROOT/home" \
     DB_PASSWORD=secret \
     DB_NAME=harness \
     DB_SSL_MODE=require \
-    python3 "$POSTGRES_DEFAULT/graph_memory.py" registrar \
+    sh "$POSTGRES_DEFAULT/harness_cli" graph registrar \
         --accion update \
         --estado done \
         --artefacto feature-3 >/dev/null
@@ -226,6 +228,7 @@ copy_flat_fixture "$FLAT_LAYOUT"
 )
 test ! -d "$FLAT_LAYOUT/templates"
 test -f "$FLAT_LAYOUT/graph_memory.py"
+test -x "$FLAT_LAYOUT/harness_cli"
 test -f "$FLAT_LAYOUT/roles/leader.md"
 test -f "$FLAT_LAYOUT/.codex/hooks.json"
 
@@ -242,14 +245,19 @@ copy_fixture "$ROOT_LAYOUT"
 run_setup "$ROOT_LAYOUT" --root
 
 test -f "$ROOT_LAYOUT/graph_memory.py"
+test -x "$ROOT_LAYOUT/harness_cli"
 test -f "$ROOT_LAYOUT/AGENTS.md"
 test -f "$ROOT_LAYOUT/.codex/hooks.json"
 test -d "$ROOT_LAYOUT/templates"
 grep -qx 'postgres' "$ROOT_LAYOUT/.harness_backend"
+# Hooks y superficies deben invocar el shim, no python3 directo.
+grep -Fq 'harness_cli\" nudge' "$ROOT_LAYOUT/.claude/settings.json"
+grep -Fq 'harness_cli" graph mapa' "$ROOT_LAYOUT/AGENTS.md"
 python3 -m json.tool "$ROOT_LAYOUT/.codex/hooks.json" >/dev/null
 python3 -m json.tool "$ROOT_LAYOUT/.gemini/settings.json" >/dev/null
 python3 -c 'import pathlib, tomllib; [tomllib.loads(p.read_text()) for p in pathlib.Path("'"$ROOT_LAYOUT"'/.codex/agents").glob("*.toml")]'
 grep -Fq "$ROOT_LAYOUT/bin/harness-hook" "$ROOT_LAYOUT/.codex/hooks.json"
+git init -q "$ROOT_LAYOUT/svc-demo"
 HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$ROOT_LAYOUT/.test-hub" \
     PYTHONPATH="$FAKE_PYTHON" \
@@ -259,6 +267,9 @@ HOME="$TMP_ROOT/home" \
     DB_NAME=harness \
     DB_SSL_MODE=require \
     bash "$ROOT_LAYOUT/init.sh" >/dev/null
+# El hook post-commit conectado debe ser v9 y pasar por el shim.
+grep -q 'harness-managed-hook v9' "$ROOT_LAYOUT/svc-demo/.git/hooks/post-commit"
+grep -Fq 'harness_cli" graph sync_git' "$ROOT_LAYOUT/svc-demo/.git/hooks/post-commit"
 
 SUBDIR_ROOT="$TMP_ROOT/subdir-layout"
 SUBDIR_HARNESS="$SUBDIR_ROOT/harness_process"
@@ -266,11 +277,13 @@ copy_fixture "$SUBDIR_HARNESS"
 run_setup "$SUBDIR_HARNESS"
 
 test -f "$SUBDIR_HARNESS/graph_memory.py"
+test -x "$SUBDIR_HARNESS/harness_cli"
 test -f "$SUBDIR_ROOT/AGENTS.md"
 test -f "$SUBDIR_ROOT/bin/harness-hook"
 test -d "$SUBDIR_HARNESS/templates"
 grep -qx 'postgres' "$SUBDIR_HARNESS/.harness_backend"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
+grep -Fq 'harness_process/harness_cli" graph mapa' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
 mkdir -p "$SUBDIR_ROOT/service"
 codex_start="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$SUBDIR_ROOT/.codex/hooks.json")"
@@ -352,5 +365,36 @@ copy_fixture "$RESET_TEST"
 # Despues de reset, al menos las superficies principales deberian haber sido tocadas (pueden no existir si reset limpio todo)
 # El test solo verifica que el comando no exploto y que backup se genero en algun lado
 find "$RESET_TEST/bkp" -type f -name '*.bak.*' | head -1 | grep -q . || echo "[info] reset genero backups esperados (o carpeta limpia)"
+
+# --- Binario Rust (build-on-setup): solo corre si hay cargo disponible ------
+if command -v cargo >/dev/null 2>&1 && [ -f "$REPO_ROOT/rust/Cargo.toml" ]; then
+    RUST_TEST="$TMP_ROOT/rust-binary"
+    copy_fixture "$RUST_TEST"
+    mkdir -p "$RUST_TEST/rust"
+    cp "$REPO_ROOT/rust/Cargo.toml" "$REPO_ROOT/rust/Cargo.lock" "$RUST_TEST/rust/"
+    cp -R "$REPO_ROOT/rust/src" "$RUST_TEST/rust/src"
+    # El HOME falso del sandbox dejaria a rustup/cargo sin toolchain ni
+    # cache: capturamos los reales ANTES de pisar HOME.
+    REAL_RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+    REAL_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+    (
+        cd "$RUST_TEST"
+        HOME="$TMP_ROOT/home" \
+        RUSTUP_HOME="$REAL_RUSTUP_HOME" \
+        CARGO_HOME="$REAL_CARGO_HOME" \
+        HARNESS_HUB="$TMP_ROOT/rust-hub" \
+        PYTHONPATH="$FAKE_PYTHON" \
+        CARGO_TARGET_DIR="$REPO_ROOT/rust/target" \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+        bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1
+    )
+    test -x "$RUST_TEST/harness"
+    # El shim debe despachar al binario (status responde sin python3 de por
+    # medio). grep SIN -q: consume todo el stdout y evita SIGPIPE temprano.
+    sh "$RUST_TEST/harness_cli" status | grep '^Backlog:' >/dev/null
+    echo "[Ok] binario Rust compilado por el setup e integrado via harness_cli."
+else
+    echo "[info] cargo no disponible: se omite la prueba del binario Rust (fallback Python cubierto)."
+fi
 
 echo "[Ok] setup smoke: PostgreSQL-only, migracion local, layouts, reinstall, dry-run, version, reset."

@@ -26,8 +26,9 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "[!] python3 no esta disponible; graph_memory.py lo requiere." >&2
+if [ ! -x "$HARNESS_DIR/harness" ] && [ ! -x "$HARNESS_DIR/harness.exe" ] \
+    && ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+    echo "[!] Ni el binario 'harness' ni python3 estan disponibles; harness_cli no tiene como correr." >&2
     exit 1
 fi
 
@@ -80,14 +81,14 @@ for repo in */; do
         fi
     done
 
-    if ! grep -q "harness-managed-hook v8" "$POST_COMMIT"; then
+    if ! grep -q "harness-managed-hook v9" "$POST_COMMIT"; then
         tmp_hook="${POST_COMMIT}.tmp"
         if [ -f "$POST_COMMIT" ]; then
             sed '/harness-managed-hook/,$d' "$POST_COMMIT" > "$tmp_hook" && mv "$tmp_hook" "$POST_COMMIT"
         fi
         cat >> "$POST_COMMIT" <<HOOKEOF
 
-# harness-managed-hook v8
+# harness-managed-hook v9
 set -u
 HARNESS_DIR="$HARNESS_DIR"
 REPO_ROOT="$REPO_ROOT"
@@ -95,7 +96,7 @@ MICROSERVICIO=\$(basename "\$(git rev-parse --show-toplevel)")
 COMMIT_HASH=\$(git rev-parse HEAD)
 ARCHIVOS=\$(git diff-tree --no-commit-id --name-only -r --root "\$COMMIT_HASH" | paste -sd "," -)
 COMMIT_MSG_BODY=\$(git log -1 --format=%B "\$COMMIT_HASH")
-python3 "\$HARNESS_DIR/graph_memory.py" sync_git --artefacto "\$COMMIT_HASH" --meta "\$ARCHIVOS" --microservicio "\$MICROSERVICIO" \
+sh "\$HARNESS_DIR/harness_cli" graph sync_git --artefacto "\$COMMIT_HASH" --meta "\$ARCHIVOS" --microservicio "\$MICROSERVICIO" \
   || echo "[Harness] Aviso: no se pudo sincronizar memoria para \$MICROSERVICIO." >&2
 
 export PATH="\$HOME/.local/bin:\$PATH"
@@ -129,7 +130,7 @@ if command -v graphify >/dev/null 2>&1 && [ -f "\$REPO_ROOT/graphify-out/graph.j
                 SEM_DEBOUNCE=\${GRAPHIFY_SEMANTIC_DEBOUNCE:-1800}
                 SEM_STAMP="\$REPO_ROOT/graphify-out/.last_semantic"
                 sem_now=\$(date +%s); sem_last=0
-                [ -f "\$SEM_STAMP" ] && sem_last=\$(python3 -c "import os; print(int(os.path.getmtime('\$SEM_STAMP')))" 2>/dev/null || echo 0)
+                [ -f "\$SEM_STAMP" ] && sem_last=\$(stat -c %Y "\$SEM_STAMP" 2>/dev/null || stat -f %m "\$SEM_STAMP" 2>/dev/null || echo 0)
                 [ -z "\$sem_last" ] && sem_last=0
                 FORCE_REBUILD=0
                 if printf '%s' "\$COMMIT_MSG_BODY" | grep -qF "[rebuild graph]"; then
@@ -148,7 +149,7 @@ if command -v graphify >/dev/null 2>&1 && [ -f "\$REPO_ROOT/graphify-out/graph.j
                     echo "Skip rebuild semantico (debounce activo)."
                 fi
             fi
-            python3 "\$HARNESS_DIR/graph_memory.py" vincular-grafo || true
+            sh "\$HARNESS_DIR/harness_cli" graph vincular-grafo || true
             echo "Actualizacion en segundo plano finalizada."
         ) &
     fi
@@ -176,10 +177,10 @@ CMEOF
     echo "   -> [Ok] $REPO_DIR conectado"
 done
 
-python3 "$HARNESS_DIR/graph_memory.py" descubrir
+sh "$HARNESS_DIR/harness_cli" graph descubrir
 
 if [ -f "$REPO_ROOT/graphify-out/graph.json" ]; then
-    python3 "$HARNESS_DIR/graph_memory.py" vincular-grafo || true
+    sh "$HARNESS_DIR/harness_cli" graph vincular-grafo || true
     if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
         echo "[graphify] Grafo desactualizado: corre '/graphify --update' y luego borra graphify-out/.graphify_stale."
     else
@@ -190,6 +191,6 @@ else
 fi
 
 echo ""
-python3 "$HARNESS_DIR/graph_memory.py" mapa
+sh "$HARNESS_DIR/harness_cli" graph mapa
 echo ""
 echo "== [Ok] Harness listo =="
