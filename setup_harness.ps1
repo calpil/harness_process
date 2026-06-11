@@ -924,17 +924,6 @@ function Ensure-Antigravity {
 # Ensure-Psycopg + Invoke-PostgresMigration + heredoc py migration REMOVED (feature #2 pure Rust).
 # The harness.exe binary owns hub init, schema creation and any legacy data load.
 function Invoke-PostgresMigration { param([string]$Python) Write-HarnessLog INFO "[psycopg] skipped (Rust only)"; }
-# (rest of py migration body excised; Rust only)
-            continue
-        node_id = node["_id"]
-        merged = dict(node)
-
-print(f"PostgreSQL database {db_name} is ready.")
-'@
-    if ($LASTEXITCODE -ne 0) {
-        throw "PostgreSQL validation or legacy Hub migration failed."
-    }
-}
 
 function Archive-LegacyHub {
     $hubDir = if ($env:HARNESS_HUB) {
