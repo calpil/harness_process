@@ -6,7 +6,8 @@ launchers, memoria compartida y una capa opcional de subagentes.
 
 ## Requisitos
 
-- Bash 3.2 o superior
+- Bash 3.2 o superior para `setup_harness.sh` y los hooks POSIX existentes
+- Windows PowerShell 5.1 o PowerShell 7 para `setup_harness.ps1`
 - Git
 - Python 3 (instalador y fallback de `harness_cli`)
 - Rust/cargo (opcional, recomendado): compila el binario nativo `harness`
@@ -26,10 +27,34 @@ cd /ruta/al/proyecto/harness_process
 ./setup_harness.sh
 ```
 
+En Windows:
+
+```powershell
+cd C:\ruta\al\proyecto\harness_process
+.\setup_harness.ps1
+```
+
+PowerShell busca `cargo.exe` en `PATH`, `$env:CARGO_HOME\bin` y
+`$HOME\.cargo\bin`. Si rustup todavia no actualizo la sesion, agrega la carpeta
+de Cargo al `PATH` del proceso antes de compilar. Se puede fijar el target:
+
+```powershell
+$env:CARGO_HOME = "$HOME\.cargo"
+.\setup_harness.ps1 -CargoTargetDir "$PWD\.cargo-target"
+```
+
+El instalador agrega `harness_cli.ps1`, que prioriza `harness.exe` y cae a
+Python. Git for Windows Bash sigue siendo necesario para los scripts y hooks
+POSIX historicos; ambos instaladores se mantienen.
+
 Para instalar el arnes directamente en la raiz multi-repo:
 
 ```bash
 ./setup_harness.sh --root
+```
+
+```powershell
+.\setup_harness.ps1 -Root
 ```
 
 Instalacion sin graphify ni cambios globales adicionales:
@@ -41,6 +66,10 @@ Instalacion sin graphify ni cambios globales adicionales:
   --no-antigravity
 ```
 
+```powershell
+.\setup_harness.ps1 -NoGraphify -NoGraphifySkills -NoAntigravity
+```
+
 El Memory Hub usa exclusivamente PostgreSQL. Configura la conexion en el entorno:
 
 ```bash
@@ -50,6 +79,15 @@ export DB_PASSWORD='...'
 export DB_NAME=harness
 export DB_SSL_MODE=require
 ./setup_harness.sh
+```
+
+```powershell
+$env:DB_HOST = "localhost"
+$env:DB_USER = "harness"
+$env:DB_PASSWORD = "..."
+$env:DB_NAME = "harness"
+$env:DB_SSL_MODE = "require"
+.\setup_harness.ps1
 ```
 
 Tambien se pueden guardar esas variables en `$HARNESS_HUB/.env`.
@@ -75,6 +113,11 @@ Ejecuta `./setup_harness.sh --help` para ver todas las opciones. Las mas utiles:
 - `--json`: emite al final un reporte JSON con contadores de acciones.
 - `--log-file <ruta>`: escribe log plano (sin ANSI) a un archivo.
 - `--config <ruta>`: carga variables de entorno extra desde un archivo (se evalua temprano).
+
+PowerShell usa los equivalentes `-Root`, `-Subdir`, `-NoSubagents`,
+`-NoGraphify`, `-NoGraphifySkills`, `-NoAntigravity`, `-Force`, `-DryRun`,
+`-Reset`, `-Version`, `-Help`, `-Json`, `-LogFile`, `-Config` y
+`-CargoTargetDir`.
 
 Los backups se guardan en `bkp/`. Usa `HARNESS_BKP_DIR` para cambiar la ruta.
 
@@ -148,4 +191,9 @@ bash harness_check.sh
 bash tests/setup_smoke.sh     # instalador (layouts, hooks, build-on-setup)
 bash tests/parity_smoke.sh    # paridad Rust vs Python (oraculo)
 (cd rust && cargo clippy --all-targets -- -D warnings && cargo test)
+```
+
+```powershell
+.\tests\setup_smoke.ps1
+.\harness_cli.ps1 status
 ```

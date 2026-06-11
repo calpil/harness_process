@@ -182,6 +182,7 @@ find "$POSTGRES_DEFAULT/bkp/memory-hub" -type f -name graph_db.json -print -quit
 find "$POSTGRES_DEFAULT/bkp/memory-hub" -type f -path '*/progress/test/feature-2.json' -print -quit | grep -q .
 ! grep -q 'GRAPH_DB_FILE\|PROGRESS_DIR\|GraphStore' "$POSTGRES_DEFAULT/graph_memory.py"
 test -x "$POSTGRES_DEFAULT/harness_cli"
+test -f "$POSTGRES_DEFAULT/harness_cli.ps1"
 # Las fixtures no traen rust/: harness_cli debe caer al fallback Python.
 FAKE_PG_NODE='{"id":"postgres-default/feature-1","label":"Artefacto","props":{"estado":"done"}}' \
     HOME="$TMP_ROOT/home" \
@@ -229,6 +230,7 @@ copy_flat_fixture "$FLAT_LAYOUT"
 test ! -d "$FLAT_LAYOUT/templates"
 test -f "$FLAT_LAYOUT/graph_memory.py"
 test -x "$FLAT_LAYOUT/harness_cli"
+test -f "$FLAT_LAYOUT/harness_cli.ps1"
 test -f "$FLAT_LAYOUT/roles/leader.md"
 test -f "$FLAT_LAYOUT/.codex/hooks.json"
 
@@ -246,6 +248,7 @@ run_setup "$ROOT_LAYOUT" --root
 
 test -f "$ROOT_LAYOUT/graph_memory.py"
 test -x "$ROOT_LAYOUT/harness_cli"
+test -f "$ROOT_LAYOUT/harness_cli.ps1"
 test -f "$ROOT_LAYOUT/AGENTS.md"
 test -f "$ROOT_LAYOUT/.codex/hooks.json"
 test -d "$ROOT_LAYOUT/templates"
@@ -278,6 +281,7 @@ run_setup "$SUBDIR_HARNESS"
 
 test -f "$SUBDIR_HARNESS/graph_memory.py"
 test -x "$SUBDIR_HARNESS/harness_cli"
+test -f "$SUBDIR_HARNESS/harness_cli.ps1"
 test -f "$SUBDIR_ROOT/AGENTS.md"
 test -f "$SUBDIR_ROOT/bin/harness-hook"
 test -d "$SUBDIR_HARNESS/templates"

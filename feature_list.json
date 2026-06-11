@@ -5,5 +5,24 @@
     "require_tests_to_close": true,
     "require_impact_check": true
   },
-  "features": []
+  "features": [
+    {
+      "id": 1,
+      "name": "powershell_windows_installer",
+      "microservicios": [],
+      "acceptance": [
+        "Mantener setup_harness.sh; agregar setup_harness.ps1 para Windows; configurar/detectar Cargo desde PowerShell; compilar harness.exe; documentar y probar el flujo."
+      ],
+      "status": "done",
+      "started_at": "2026-06-11T03:40:11Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-1-powershell-windows-installer.md",
+        "mtime": 1781150674.7952197,
+        "size": 3752,
+        "hash": "6a7105b9b07075bd"
+      },
+      "closed_at": "2026-06-11T04:06:31Z",
+      "note": "Instalacion Windows PowerShell agregada; Bash conservado; Cargo y smoke tests verificados"
+    }
+  ]
 }

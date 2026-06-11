@@ -588,6 +588,7 @@ Launchers disponibles: `bin/harness-claude`, `bin/harness-codex`,
 
 Para actualizar el harness (protocolo + herramientas) vuelve a la carpeta
 fuente `harness_process` y ejecuta `./setup_harness.sh` (o con `--reset`).
+En Windows usa `.\setup_harness.ps1` (o `-Reset`); ambos instaladores se mantienen.
 Las superficies y scripts se regeneran desde la fuente.
 
 **NUNCA commitees la carpeta del harness** (harness_process/ o el subdirectorio
@@ -768,6 +769,7 @@ cambios en el protocolo, fixes, etc.):
 
 1. Ve a la carpeta del harness_process.
 2. Ejecuta `./setup_harness.sh` (o `./setup_harness.sh --reset` para limpiar antes).
+   En Windows usa `.\setup_harness.ps1` (o `-Reset`).
 3. Los archivos de instrucciones (CLAUDE.md, AGENTS.md, subagentes, etc.) y los
    scripts se regeneran automaticamente con la version actualizada.
 
@@ -1333,6 +1335,7 @@ required_assets=(
     "harness_check.sh"
     "harness.py"
     "harness_cli"
+    "harness_cli.ps1"
     "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -1492,6 +1495,7 @@ generated=(
     "harness_check.sh"
     "harness.py"
     "harness_cli"
+    "harness_cli.ps1"
     "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -1634,6 +1638,7 @@ install_asset "harness_status.sh"
 install_asset "harness_check.sh"
 install_asset "harness.py"
 install_asset "harness_cli"
+install_asset "harness_cli.ps1"
 install_asset "UPDATING.md"
 write_file_notice "scripts base ($HARNESS_DIR)"
 
@@ -2168,6 +2173,7 @@ log_info "  Para traer mejoras (nuevo protocolo, recordatorios de planes actuali
 log_info "  nuevos comandos, etc.) vuelve a ejecutar este instalador desde la carpeta fuente:"
 log_info "    cd /ruta/al/harness_process"
 log_info "    ./setup_harness.sh"
+log_info "    .\\setup_harness.ps1    # Windows PowerShell"
 log_info "  O usa --reset para una reinstalacion limpia de las superficies."
 log_info "  Consulta siempre 'UPDATING.md' (se instala en tu harness) para detalles."
 

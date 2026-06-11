@@ -23,6 +23,18 @@ Desde la carpeta del `harness_process` (la fuente):
 ./setup_harness.sh --reset
 ```
 
+En Windows se mantiene un instalador paralelo:
+
+```powershell
+.\setup_harness.ps1
+.\setup_harness.ps1 -Reset
+```
+
+`setup_harness.ps1` configura Cargo para la sesion desde `PATH`,
+`$env:CARGO_HOME\bin` o `$HOME\.cargo\bin`, compila `harness.exe` con
+`cargo build --release --locked` y despliega `harness_cli.ps1`. El instalador
+Bash sigue disponible y tambien copia el shim PowerShell.
+
 El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`) a menos que uses `--force`.
 
 ## Cuándo actualizar
