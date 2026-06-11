@@ -443,6 +443,30 @@ function Initialize-CargoEnvironment {
     return $null
 }
 
+function Test-WindowsGnuToolchainGap {
+    # El target *-windows-gnu necesita binutils de MinGW (dlltool.exe) para
+    # crates con raw-dylib (windows-sys, getrandom). El estandar en Windows
+    # es el toolchain MSVC, que no depende de herramientas externas.
+    $rustc = Get-Command rustc -ErrorAction SilentlyContinue
+    if (-not $rustc) {
+        return $false
+    }
+    $hostLine = (& $rustc.Source -vV | Where-Object { $_ -like "host:*" }) -join ""
+    if ($hostLine -notlike "*windows-gnu*") {
+        return $false
+    }
+    if (Get-Command dlltool -ErrorAction SilentlyContinue) {
+        return $false
+    }
+    Write-HarnessLog ERROR "Rust toolchain is *-windows-gnu but MinGW 'dlltool.exe' is not in PATH; the build would fail (getrandom/windows-sys need it)."
+    Write-HarnessLog INFO "Recommended fix - switch to the MSVC toolchain:"
+    Write-HarnessLog INFO "    rustup default stable-x86_64-pc-windows-msvc"
+    Write-HarnessLog INFO "    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`""
+    Write-HarnessLog INFO "    (reopen the terminal and re-run .\setup_harness.ps1)"
+    Write-HarnessLog INFO "Alternative - stay on GNU: install MSYS2/MinGW-w64 and add its bin (dlltool.exe) to PATH."
+    return $true
+}
+
 function Build-HarnessBinary {
     $cargo = Initialize-CargoEnvironment
     $manifest = Join-Path $script:HarnessDir "rust/Cargo.toml"
@@ -459,6 +483,10 @@ function Build-HarnessBinary {
 
     if ($DryRun) {
         Write-HarnessLog INFO "[DRY-RUN] Run cargo build --release --locked and copy harness.exe"
+        return
+    }
+
+    if (Test-WindowsGnuToolchainGap) {
         return
     }
 
