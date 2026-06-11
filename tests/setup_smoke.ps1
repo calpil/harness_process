@@ -56,18 +56,7 @@ edition = "2021"
 
     $runningOnWindows = $env:OS -eq "Windows_NT"
     if ($runningOnWindows) {
-        $fakePython = @'
-@echo off
-if "%1"=="-c" exit /b 0
-if "%1"=="-" (
-  more >nul
-  exit /b 0
-)
-exit /b 0
-'@
-        Set-Content -LiteralPath (Join-Path $fakeBin "python.cmd") -Value $fakePython -Encoding Ascii
-        Set-Content -LiteralPath (Join-Path $fakeBin "python3.cmd") -Value $fakePython -Encoding Ascii
-        $fakeCargo = @'
+        # (fake python block removed - Rust only)
 @echo off
 echo %*> "%CD%\cargo-args.txt"
 if not exist "%CARGO_TARGET_DIR%\release" mkdir "%CARGO_TARGET_DIR%\release"
@@ -77,23 +66,7 @@ exit /b 0
         Set-Content -LiteralPath (Join-Path $fakeBin "cargo.cmd") -Value $fakeCargo -Encoding Ascii
     }
     else {
-        $fakePython = @'
-#!/bin/sh
-if [ "$1" = "-c" ]; then
-  exit 0
-fi
-if [ "$1" = "-" ]; then
-  cat >/dev/null
-  exit 0
-fi
-exit 0
-'@
-        foreach ($name in @("python", "python3")) {
-            $path = Join-Path $fakeBin $name
-            Set-Content -LiteralPath $path -Value $fakePython -Encoding utf8NoBOM
-            & chmod +x $path
-        }
-        $fakeCargo = @'
+        # (fake python block removed - Rust only)
 #!/bin/sh
 printf '%s\n' "$*" > "$PWD/cargo-args.txt"
 mkdir -p "$CARGO_TARGET_DIR/release"

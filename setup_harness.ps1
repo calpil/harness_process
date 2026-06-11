@@ -82,7 +82,7 @@ $script:BackupDir = if ($env:HARNESS_BKP_DIR) {
 else {
     Join-Path $script:HarnessDir "bkp"
 }
-$script:AssetDir = if (Test-Path -LiteralPath (Join-Path $script:HarnessDir "templates/graph_memory.py")) {
+$script:AssetDir = if (Test-Path -LiteralPath (Join-Path $script:HarnessDir "templates/harness_cli")) {
     Join-Path $script:HarnessDir "templates"
 }
 else {
@@ -324,14 +324,12 @@ function Ensure-HarnessGitIgnore {
 
 function Assert-HarnessAssets {
     $required = @(
-        "graph_memory.py",
         "init.sh",
         "validate_ui.sh",
         "debug_ui.js",
         "commit_guard.sh",
         "harness_status.sh",
         "harness_check.sh",
-        "harness.py",
         "harness_cli",
         "harness_cli.ps1",
         "UPDATING.md"
@@ -391,16 +389,7 @@ function Install-HarnessAssetIfMissing {
     Install-HarnessAsset -Asset $Asset -Destination $destination
 }
 
-function Get-PythonCommand {
-    $python = Get-Command python3 -ErrorAction SilentlyContinue
-    if (-not $python) {
-        $python = Get-Command python -ErrorAction SilentlyContinue
-    }
-    if (-not $python) {
-        throw "Python 3 is required for the fallback and PostgreSQL migration."
-    }
-    $python.Source
-}
+# Get-PythonCommand removido (feature #2, solo Rust). harness.exe es obligatorio.
 
 function Assert-PostgresConfiguration {
     $missing = @()
@@ -451,7 +440,7 @@ function Build-HarnessBinary {
             Write-HarnessLog WARN "Cargo is unavailable; the existing harness.exe may be stale."
         }
         else {
-            Write-HarnessLog WARN "Cargo is unavailable; harness_cli.ps1 will use the Python fallback. Install rustup from https://rustup.rs/ and reopen PowerShell."
+            Write-HarnessLog WARN "Cargo unavailable and no harness.exe present; harness_cli.ps1 will not work. Install rustup."
         }
         return
     }
@@ -466,7 +455,7 @@ function Build-HarnessBinary {
     try {
         & $cargo build --release --locked
         if ($LASTEXITCODE -ne 0) {
-            Write-HarnessLog WARN "Cargo build failed; harness_cli.ps1 will use the Python fallback."
+            Write-HarnessLog ERROR "Cargo build failed; no harness.exe produced. harness_cli will be unusable."
             return
         }
     }
@@ -865,7 +854,7 @@ function Ensure-Graphify {
         return
     }
     if ($DryRun) {
-        Write-HarnessLog INFO "[DRY-RUN] Install graphifyy with uv, pipx, or Python pip --user"
+        Write-HarnessLog INFO "[DRY-RUN] Install graphifyy with uv or pipx"
         return
     }
 
@@ -879,8 +868,7 @@ function Ensure-Graphify {
             & $pipx.Source install graphifyy
         }
         else {
-            $python = Get-PythonCommand
-            & $python -m pip install --user graphifyy
+            # python pip fallback for graphifyy removed; only uv/pipx attempted above
         }
     }
     if ($LASTEXITCODE -eq 0) {
@@ -933,138 +921,16 @@ function Ensure-Antigravity {
     Write-HarnessLog WARN "Antigravity automatic installation remains POSIX-only. Install it separately or rerun setup_harness.sh from Git Bash."
 }
 
-function Ensure-Psycopg {
-    param([string]$Python)
-    & $Python -c "import psycopg2" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        return $true
-    }
-    $nativeBinary = Join-Path $script:HarnessDir "harness.exe"
-    if (Test-Path -LiteralPath $nativeBinary) {
-        Write-HarnessLog WARN "psycopg2 is unavailable; harness.exe will initialize PostgreSQL on first use."
-        return $false
-    }
-    if ($DryRun) {
-        Write-HarnessLog INFO "[DRY-RUN] Install psycopg2-binary with Python pip --user"
-        return $false
-    }
-    & $Python -m pip install --user psycopg2-binary
-    if ($LASTEXITCODE -ne 0) {
-        throw "psycopg2-binary could not be installed and harness.exe is unavailable."
-    }
-    $script:Counters.installed++
-    return $true
-}
-
-function Invoke-PostgresMigration {
-    param([string]$Python)
-    if (-not (Ensure-Psycopg -Python $Python)) {
-        return
-    }
-    if ($DryRun) {
-        return
-    }
-
-    $migration = @'
-import json
-import os
-import sys
-from pathlib import Path
-
-import psycopg2
-import psycopg2.extensions
-from psycopg2 import sql
-from psycopg2.extras import Json
-
-hub_dir = Path(os.environ.get("HARNESS_HUB") or Path.home() / ".harness-hub")
-db_name = os.environ.get("DB_NAME", "postgres")
-connection = {
-    "user": os.environ["DB_USER"],
-    "password": os.environ["DB_PASSWORD"],
-    "host": os.environ["DB_HOST"],
-    "port": os.environ.get("DB_PORT", "5432"),
-    "sslmode": os.environ.get("DB_SSL_MODE", "require"),
-    "connect_timeout": 10,
-}
-
-try:
-    conn = psycopg2.connect(dbname=db_name, **connection)
-except psycopg2.OperationalError as exc:
-    if "does not exist" not in str(exc) and "no existe" not in str(exc).lower():
-        raise
-    admin = psycopg2.connect(dbname="postgres", **connection)
-    admin.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-    with admin.cursor() as cur:
-        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
-    admin.close()
-    conn = psycopg2.connect(dbname=db_name, **connection)
-
-legacy_nodes = {}
-legacy_edges = []
-graph_file = hub_dir / "graph_db.json"
-if graph_file.exists():
-    data = json.loads(graph_file.read_text(encoding="utf-8"))
-    legacy_nodes.update(data.get("nodes") or {})
-    legacy_edges.extend(data.get("edges") or [])
-
-progress_dir = hub_dir / "progress"
-if progress_dir.exists():
-    for progress_file in progress_dir.rglob("*.json"):
-        node = json.loads(progress_file.read_text(encoding="utf-8"))
-        if not isinstance(node, dict) or not node.get("_id"):
+# Ensure-Psycopg + Invoke-PostgresMigration + heredoc py migration REMOVED (feature #2 pure Rust).
+# The harness.exe binary owns hub init, schema creation and any legacy data load.
+function Invoke-PostgresMigration { param([string]$Python) Write-HarnessLog INFO "[psycopg] skipped (Rust only)"; }
+# (rest of py migration body excised; Rust only)
             continue
         node_id = node["_id"]
         merged = dict(node)
-        merged.update(legacy_nodes.get(node_id) or {})
-        legacy_nodes[node_id] = merged
 
-with conn:
-    with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS graph_nodes (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                props JSONB NOT NULL DEFAULT '{}'::jsonb
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                source TEXT NOT NULL,
-                target TEXT NOT NULL,
-                type TEXT NOT NULL,
-                props JSONB NOT NULL DEFAULT '{}'::jsonb,
-                PRIMARY KEY (source, target, type)
-            );
-        """)
-        for node_id, raw_props in legacy_nodes.items():
-            props = dict(raw_props or {})
-            label = props.pop("_label", "Artefacto")
-            props.setdefault("_id", node_id)
-            cur.execute("""
-                INSERT INTO graph_nodes (id, label, props)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    label = EXCLUDED.label,
-                    props = graph_nodes.props || EXCLUDED.props;
-            """, (node_id, label, Json(props)))
-        for edge in legacy_edges:
-            props = dict(edge)
-            source = props.pop("source")
-            target = props.pop("target")
-            edge_type = props.pop("type")
-            cur.execute("""
-                INSERT INTO graph_edges (source, target, type, props)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (source, target, type) DO UPDATE SET
-                    props = graph_edges.props || EXCLUDED.props;
-            """, (source, target, edge_type, Json(props)))
-
-conn.close()
 print(f"PostgreSQL database {db_name} is ready.")
-if legacy_nodes or legacy_edges:
-    print(f"Migrated {len(legacy_nodes)} nodes and {len(legacy_edges)} relationships.")
 '@
-    $migration | & $Python -
     if ($LASTEXITCODE -ne 0) {
         throw "PostgreSQL validation or legacy Hub migration failed."
     }
@@ -1237,14 +1103,12 @@ try {
     Write-HarnessText -Path $backendMarker -Content ("postgres" + [Environment]::NewLine)
 
     $generatedAssets = @(
-        "graph_memory.py",
         "init.sh",
         "validate_ui.sh",
         "debug_ui.js",
         "commit_guard.sh",
         "harness_status.sh",
         "harness_check.sh",
-        "harness.py",
         "harness_cli",
         "harness_cli.ps1",
         "UPDATING.md"
@@ -1273,8 +1137,7 @@ try {
     }
 
     Build-HarnessBinary
-    $python = Get-PythonCommand
-    Invoke-PostgresMigration -Python $python
+    # Python postgres migration skipped (pure Rust harness.exe owns hub init/migration)
     Archive-LegacyHub
 
     $surfaceBackups = @(

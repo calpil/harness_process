@@ -2,13 +2,13 @@
 # shellcheck shell=bash
 # Harness Process - instalador canonico (best-of).
 # Unifica las variantes previas (setup basico + improved) en un solo instalador:
-#   - Memoria hub compartida (graph_memory.py) con mapa/impacto/vincular/
+#   - Memory Hub PostgreSQL (via binario Rust) con mapa/impacto/vincular/
 #     desmarcar/sync_git/vincular-grafo + registrar/consultar.
 #   - Integracion graphify (estructura automatica, rebuild semantico, hub) con el
 #     comando /graphify nativo desplegado por agente (Claude/Codex/Gemini/Antigravity).
 #   - Superficies y hooks multi-LLM auto-instalados (Claude, Codex, Gemini,
 #     Grok, Antigravity, generica) sin flag --target.
-#   - Capa opcional de subagentes (lider/implementer/reviewer, harness.py).
+#   - Capa opcional de subagentes (lider/implementer/reviewer).
 #   - Respaldos *.bak.* archivados bajo bkp/ (HARNESS_BKP_DIR para overridear).
 #
 # Mejoras aplicadas (best practices 2025-2026):
@@ -213,26 +213,23 @@ print_final_report() {
     log_success "========================================================"
 
     if [ "$JSON_OUTPUT" -eq 1 ]; then
-        # Emitir JSON al final (stdout limpio para parsers)
-        python3 - "$HARNESS_VERSION" "$LAYOUT" "$DRY_RUN" "$WITH_SUBAGENTS" \
-                "$COUNT_BACKED_UP" "$COUNT_CREATED" "$COUNT_SKIPPED" "$COUNT_INSTALLED" "$COUNT_REMOVED" "$status" <<'PYJSON'
-import sys, json
-ver, lay, dr, sub, b, c, s, i, r, st = sys.argv[1:]
-print(json.dumps({
-    "version": ver,
-    "layout": lay,
-    "dry_run": bool(int(dr)),
-    "with_subagents": bool(int(sub)),
-    "actions": {
-        "backed_up": int(b),
-        "created": int(c),
-        "skipped": int(s),
-        "installed": int(i),
-        "removed": int(r)
-    },
-    "status": st
-}, indent=2))
-PYJSON
+        # Emitir JSON al final (stdout limpio para parsers) - puro shell post-migracion
+        cat <<JSON
+{
+  "version": "$HARNESS_VERSION",
+  "layout": "$LAYOUT",
+  "dry_run": $([ "$DRY_RUN" -eq 1 ] && echo true || echo false),
+  "with_subagents": $([ "$WITH_SUBAGENTS" -eq 1 ] && echo true || echo false),
+  "actions": {
+    "backed_up": $COUNT_BACKED_UP,
+    "created": $COUNT_CREATED,
+    "skipped": $COUNT_SKIPPED,
+    "installed": $COUNT_INSTALLED,
+    "removed": $COUNT_REMOVED
+  },
+  "status": "$status"
+}
+JSON
     fi
 }
 
@@ -468,8 +465,7 @@ if [ "$RESET" -eq 1 ]; then
         "$HARNESS_DIR/progress"
         "$HARNESS_DIR/CHECKPOINTS.md"
         "$HARNESS_DIR/feature_list.json"
-        # No tocamos graph_memory.py ni los scripts base del harness en reset
-        # (el usuario puede querer mantener los scripts del arnes)
+        # (post-migracion Rust: ya no hay graph_memory.py / harness.py que preservar)
     )
 
     for t in "${reset_targets[@]}"; do
@@ -533,9 +529,7 @@ track_action() {
     fi
 }
 
-json_value() {
-    python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
-}
+# json_value removido (era python); se inlinan los comandos en los JSON de hooks.
 
 write_basic_agent_surface() {
     target="$1"
@@ -754,7 +748,7 @@ Servicios transversales:
 ## Actualizacion del Harness Process
 
 Este protocolo y las herramientas (`harness_cli` con su binario Rust `harness`
-y el fallback `harness.py`, `check-plan`, roles, hooks, etc.) viven en la
+y el binario Rust + shims, `check-plan`, roles, hooks, etc.) viven en la
 carpeta `harness_process` (la fuente).
 
 **NUNCA commitees la carpeta del harness** (harness_process/ o el subdirectorio
@@ -1219,7 +1213,7 @@ BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
 
 ensure_harness_not_committed
 
-if [ -f "$HARNESS_DIR/templates/graph_memory.py" ]; then
+if [ -f "$HARNESS_DIR/templates/harness_cli" ] || [ -f "$HARNESS_DIR/harness_cli" ]; then
     ASSET_DIR="$HARNESS_DIR/templates"
 else
     ASSET_DIR="$HARNESS_DIR"
@@ -1241,7 +1235,7 @@ No existe un comando mágico `harness_cli upgrade` dentro de tus proyectos. La f
 
 - Las mejoras al protocolo (por ejemplo: `check-plan` para detectar si otros LLMs actualizaron planes, mejores instrucciones para implementer/reviewer, nuevos comandos, etc.) viven en este repositorio.
 - Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se **generan** desde el instalador.
-- Los scripts (`harness_cli`, `harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`, y el binario Rust `harness` se compila desde `rust/` durante el setup (si hay cargo).
+- Los scripts (`harness_cli`, `harness_check.sh`, roles, etc.) se copian desde `templates/`, y el binario Rust `harness` se compila desde `rust/` durante el setup (cargo requerido).
 - Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
 
 ## Cómo actualizar
@@ -1269,17 +1263,16 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 
 - Superficies de instrucciones (CLAUDE.md, AGENTS.md, etc.)
 - Subagentes nativos (`.claude/agents/`, `.codex/agents/`, `.gemini/agents/`)
-- Scripts del arnés (`harness_cli`, `harness.py`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
-- El binario Rust `harness` (recompilado con cargo si está disponible; sin cargo, `harness_cli` usa el fallback Python automáticamente)
+- Scripts del arnés (`harness_cli`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
+- El binario Rust `harness` (compilado con cargo durante el setup; requerido para que harness_cli funcione)
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
 
-## Mantenimiento dual Rust + Python (obligatorio para maintainers)
+## Recomendación (solo Rust)
 
-`harness_cli` ejecuta el binario Rust `harness` (desde `rust/`) y cae al
-fallback Python (`harness.py` / `graph_memory.py`) si no existe. Todo cambio
-de comportamiento en los `.py` se espeja en `rust/src/` en el mismo commit;
-`bash tests/parity_smoke.sh` debe pasar antes de push.
+El binario Rust `harness` (construido desde `rust/`) es ahora el unico backend.
+`harness_cli` (sh/ps1) lo ejecuta directamente. Sin el binario, harness_cli falla con
+mensaje claro. Cargo es requerido para instalaciones nuevas/actualizadas.
 
 ## Recomendación
 
@@ -1289,7 +1282,7 @@ Si usas `--reset` + re-instalación, las superficies se regeneran desde cero con
 
 ## Para maintainers de este repositorio harness_process
 
-Cuando realizas mejoras (nuevo protocolo, recordatorios de planes actualizados por otros LLMs, fixes en harness.py, etc.):
+Cuando realizas mejoras (nuevo protocolo, fixes en rust/src o shims/setup, actualizacion de templates):
 
 1. Haz los cambios en este repo (el "fuente").
 2. Una vez hecho el commit **sin co-author** (sin `Co-Authored-By`, sin "Generated with", sin trailers de IA):
@@ -1309,7 +1302,7 @@ Esto hace que el cambio esté disponible **incluso si aplica en otros proyectos*
 ./setup_harness.sh --reset
 ```
 
-Mantener el proceso explícito asegura consistencia multi-LLM a través de todos los proyectos.
+Mantener el proceso explícito asegura consistencia multi-LLM a través de todos los proyectos. (Solo Rust desde feature #2).
 
 ## Cómo obtener este archivo si te falta al actualizar
 
@@ -1326,14 +1319,12 @@ UPDATING_BOOTSTRAP_EOF
 fi
 
 required_assets=(
-    "graph_memory.py"
     "init.sh"
     "validate_ui.sh"
     "debug_ui.js"
     "commit_guard.sh"
     "harness_status.sh"
     "harness_check.sh"
-    "harness.py"
     "harness_cli"
     "harness_cli.ps1"
     "UPDATING.md"
@@ -1380,41 +1371,32 @@ install_asset() {
     COUNT_CREATED=$((COUNT_CREATED + 1))
 }
 
-for command_name in bash cp git python3 sed; do
+for command_name in bash cp git sed; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         log_error "Comando requerido no disponible: $command_name"
         exit 2
     fi
 done
 
-# Preflight DB siempre se valida (incluso en dry-run, es barato y detecta config mala)
-python3 - <<'EOF'
-import os
-import sys
-
-hub_dir = os.environ.get("HARNESS_HUB") or os.path.join(
-    os.path.expanduser("~"), ".harness-hub"
-)
-env_file = os.path.join(hub_dir, ".env")
-if os.path.exists(env_file):
-    with open(env_file, encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
-
-required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
-missing = [key for key in required if not os.environ.get(key)]
-if missing:
-    print(
-        "[!] PostgreSQL es el Hub predeterminado. Faltan variables: "
-        + ", ".join(missing)
-        + ". Configuralas en el entorno o en $HARNESS_HUB/.env.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
-EOF
+# Preflight DB / .env (puro sh, sin python post-migracion). El binario Rust
+# es quien crea/usa el schema de PG; aqui solo preparamos y validamos hints.
+HUB_DIR_PREF="${HARNESS_HUB:-$HOME/.harness-hub}"
+mkdir -p "$HUB_DIR_PREF"
+ENV_FILE="$HUB_DIR_PREF/.env"
+if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a
+    # shellcheck disable=SC1091
+    . "$ENV_FILE" 2>/dev/null || true
+    set +a
+fi
+for key in DB_HOST DB_USER DB_PASSWORD; do
+    if [ -z "${!key:-}" ]; then
+        log_warn "[preflight] Falta $key (PostgreSQL Hub). Configura en entorno o $ENV_FILE (el binario Rust lo usara en graph ops)."
+        # No exit: permite installs sin DB para features puras; graph fallara util cuando se use.
+        break
+    fi
+done
 
 if [ "$DRY_RUN" -eq 1 ]; then
     log_warn "MODO DRY-RUN: no se realizaran escrituras ni instalaciones."
@@ -1486,14 +1468,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 generated=(
-    "graph_memory.py"
     "init.sh"
     "validate_ui.sh"
     "debug_ui.js"
     "commit_guard.sh"
     "harness_status.sh"
     "harness_check.sh"
-    "harness.py"
     "harness_cli"
     "harness_cli.ps1"
     "UPDATING.md"
@@ -1629,51 +1609,50 @@ write_file_notice ".claude/settings.json ($SURFACE_DIR)"
 fi  # cierra el if DRY_RUN de la generacion de settings
 
 echo "Instalando scripts desde: $ASSET_DIR"
-install_asset "graph_memory.py"
 install_asset "init.sh"
 install_asset "validate_ui.sh"
 install_asset "debug_ui.js"
 install_asset "commit_guard.sh"
 install_asset "harness_status.sh"
 install_asset "harness_check.sh"
-install_asset "harness.py"
 install_asset "harness_cli"
 install_asset "harness_cli.ps1"
 install_asset "UPDATING.md"
 write_file_notice "scripts base ($HARNESS_DIR)"
 
 echo "Asegurando permisos de ejecucion en HARNESS_DIR..."
-chmod +x "$HARNESS_DIR/graph_memory.py"
 chmod +x "$HARNESS_DIR/init.sh"
 chmod +x "$HARNESS_DIR/validate_ui.sh"
 chmod +x "$HARNESS_DIR/harness_status.sh"
 chmod +x "$HARNESS_DIR/commit_guard.sh"
 chmod +x "$HARNESS_DIR/harness_check.sh"
-chmod +x "$HARNESS_DIR/harness.py"
 chmod +x "$HARNESS_DIR/harness_cli"
 
-# Binario Rust (build-on-setup): harness_cli lo prefiere; sin cargo o sin
-# rust/ se queda el fallback Python. NUNCA es fatal.
-echo "Asegurando binario harness (Rust, opcional)..."
+# Binario Rust (build-on-setup): ahora requerido. harness_cli (sh/ps1) solo
+# despacha al binario; sin el binario los comandos fallan.
+echo "Asegurando binario harness (Rust, requerido)..."
 HARNESS_BIN_NAME="harness"
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) HARNESS_BIN_NAME="harness.exe" ;;
 esac
 if [ "$DRY_RUN" -eq 1 ]; then
-    log_info "[DRY-RUN] Se compilaria rust/ (cargo build --release) y se copiaria $HARNESS_BIN_NAME"
+    log_info "[DRY-RUN] Se compilaria rust/ (cargo build --release --locked) y se copiaria $HARNESS_BIN_NAME"
 elif command -v cargo >/dev/null 2>&1 && [ -f "$HARNESS_DIR/rust/Cargo.toml" ]; then
-    if (cd "$HARNESS_DIR/rust" && cargo build --release --quiet) \
+    if (cd "$HARNESS_DIR/rust" && cargo build --release --quiet --locked) \
         && cp "${CARGO_TARGET_DIR:-$HARNESS_DIR/rust/target}/release/$HARNESS_BIN_NAME" "$HARNESS_DIR/$HARNESS_BIN_NAME" \
         && chmod +x "$HARNESS_DIR/$HARNESS_BIN_NAME"; then
-        log_success "   -> binario harness compilado; harness_cli lo usara en vez del fallback Python."
+        log_success "   -> binario harness compilado; harness_cli lo usara."
     else
-        log_warn "   -> no se pudo compilar el binario harness; harness_cli usara el fallback Python."
+        log_error "   -> fallo al compilar/copiar el binario harness. Instala rustup y re-ejecuta."
+        exit 1
     fi
 else
     if [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
-        log_warn "   -> cargo no disponible: el binario harness existente podria quedar desactualizado respecto de los .py."
+        log_success "   -> binario harness preexistente presente (sin rebuild)."
     else
-        log_warn "   -> sin cargo (o sin rust/): harness_cli usara el fallback Python. Instala rustup para el binario nativo."
+        log_error "   -> sin cargo/rust o sin rust/ en fuente: no se puede producir $HARNESS_BIN_NAME. harness_cli no funcionara."
+        log_error "   -> Instala rustup (https://rustup.rs) y re-ejecuta setup."
+        exit 1
     fi
 fi
 
@@ -1813,7 +1792,7 @@ write_gemini_hooks
 write_grok_hooks
 write_launchers
 
-chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness.py harness_cli
+chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness_cli
 
 log_info "Asegurando graphify..."
 if command -v graphify >/dev/null 2>&1; then
@@ -1834,11 +1813,6 @@ elif [ "$INSTALL_GRAPHIFY" -eq 1 ]; then
                 installed_via="pipx"
             fi
         fi
-        if [ -z "$installed_via" ]; then
-            if retry_cmd python3 -m pip install --user graphifyy >/dev/null 2>&1; then
-                installed_via="pip-user"
-            fi
-        fi
         if [ -n "$installed_via" ]; then
             log_success "   -> graphify instalado via $installed_via."
             COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
@@ -1848,205 +1822,20 @@ elif [ "$INSTALL_GRAPHIFY" -eq 1 ]; then
                 log_warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
             fi
         else
-            log_warn "   -> aviso: no se pudo instalar graphify automaticamente. Instala manualmente: pipx/uv/pip install graphifyy"
+            log_warn "   -> aviso: no se pudo instalar graphify automaticamente. Instala manualmente: uv tool install graphifyy o pipx install graphifyy"
         fi
     fi
 else
     log_info "   -> graphify no instalado (--no-graphify activo)."
 fi
 
-log_info "Asegurando psycopg2 para el Hub en PostgreSQL..."
-if python3 -c "import psycopg2" >/dev/null 2>&1; then
-    log_success "   -> psycopg2 ya esta disponible."
-else
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Se instalaria psycopg2-binary via pip --user"
-        COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
-    else
-        if retry_cmd python3 -m pip install --user psycopg2-binary >/dev/null 2>&1; then
-            log_success "   -> psycopg2-binary instalado via pip --user."
-            COUNT_INSTALLED=$((COUNT_INSTALLED + 1))
-            if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-                log_warn "   psycopg2 via --user. Asegura PATH: export PATH=\"\$HOME/.local/bin:\$PATH\""
-            fi
-        else
-            if [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
-                log_warn "   -> no se pudo instalar psycopg2-binary; el binario harness cubre el hub (psycopg2 solo hace falta para el fallback Python)."
-            else
-                log_error "No se pudo instalar psycopg2-binary."
-                exit 1
-            fi
-        fi
-    fi
-fi
+log_info "Memory Hub: sin pre-requisito psycopg2 (binario Rust usa postgres crate nativo)."
+# psycopg2 / pip blocks removidos en feature #2 (solo Rust)
 
-log_info "Verificando y migrando el Memory Hub PostgreSQL..."
-if ! python3 -c "import psycopg2" >/dev/null 2>&1 && [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
-    # Sin psycopg2 pero con binario Rust: el esquema lo crea el binario en el
-    # primer uso; la migracion legacy solo aplica a hubs que ya tenian Python.
-    log_warn "   -> sin psycopg2: se omite preflight/migracion legacy; el binario harness crea el esquema al primer uso."
-else
-python3 - << 'EOF'
-import json
-import os
-import sys
-from pathlib import Path
+log_info "Memory Hub: verificacion y schema delegados 100% al binario Rust."
+# (py psycopg migration legacy removido)
+# if ! python3 ... else python3 heredoc EOF removido
 
-try:
-    import psycopg2
-    import psycopg2.extensions
-    from psycopg2 import sql
-    from psycopg2.extras import Json
-except ImportError:
-    print("[!] psycopg2 no esta disponible.", file=sys.stderr)
-    sys.exit(1)
-
-hub_dir = Path(
-    os.environ.get("HARNESS_HUB")
-    or os.path.join(os.path.expanduser("~"), ".harness-hub")
-)
-env_file = hub_dir / ".env"
-if env_file.exists():
-    with env_file.open(encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
-
-required = ("DB_HOST", "DB_USER", "DB_PASSWORD")
-missing = [key for key in required if not os.environ.get(key)]
-if missing:
-    print("[!] PostgreSQL requiere: " + ", ".join(missing), file=sys.stderr)
-    sys.exit(2)
-
-db_name = os.environ.get("DB_NAME", "postgres")
-connection = {
-    "user": os.environ["DB_USER"],
-    "password": os.environ["DB_PASSWORD"],
-    "host": os.environ["DB_HOST"],
-    "port": os.environ.get("DB_PORT", "5432"),
-    "sslmode": os.environ.get("DB_SSL_MODE", "require"),
-    "connect_timeout": 10,
-}
-
-try:
-    conn = psycopg2.connect(dbname=db_name, **connection)
-except psycopg2.OperationalError as exc:
-    if "does not exist" not in str(exc) and "no existe" not in str(exc).lower():
-        print("[!] Fallo de conexion PostgreSQL: " + str(exc).strip(), file=sys.stderr)
-        sys.exit(1)
-    try:
-        print("   -> Creando base de datos " + db_name + "...")
-        admin = psycopg2.connect(dbname="postgres", **connection)
-        admin.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-        with admin.cursor() as cur:
-            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
-        admin.close()
-        conn = psycopg2.connect(dbname=db_name, **connection)
-    except Exception as create_exc:
-        print("[!] Fallo al crear base de datos: " + str(create_exc), file=sys.stderr)
-        sys.exit(1)
-
-legacy_nodes = {}
-legacy_edges = []
-graph_file = hub_dir / "graph_db.json"
-if graph_file.exists():
-    try:
-        data = json.loads(graph_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print("[!] No se puede migrar graph_db.json: " + str(exc), file=sys.stderr)
-        conn.close()
-        sys.exit(1)
-    if not isinstance(data, dict):
-        print("[!] graph_db.json no contiene un objeto JSON valido.", file=sys.stderr)
-        conn.close()
-        sys.exit(1)
-    legacy_nodes.update(data.get("nodes") or {})
-    legacy_edges.extend(data.get("edges") or [])
-
-progress_dir = hub_dir / "progress"
-if progress_dir.exists():
-    for progress_file in progress_dir.rglob("*.json"):
-        try:
-            node = json.loads(progress_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(
-                "[!] No se puede migrar " + str(progress_file) + ": " + str(exc),
-                file=sys.stderr,
-            )
-            conn.close()
-            sys.exit(1)
-        if not isinstance(node, dict) or not node.get("_id"):
-            continue
-        node_id = node["_id"]
-        merged = dict(node)
-        merged.update(legacy_nodes.get(node_id) or {})
-        legacy_nodes[node_id] = merged
-
-with conn:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS graph_nodes (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                props JSONB NOT NULL DEFAULT '{}'::jsonb
-            );
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                source TEXT NOT NULL,
-                target TEXT NOT NULL,
-                type TEXT NOT NULL,
-                props JSONB NOT NULL DEFAULT '{}'::jsonb,
-                PRIMARY KEY (source, target, type)
-            );
-            """
-        )
-        for node_id, raw_props in legacy_nodes.items():
-            props = dict(raw_props or {})
-            label = props.pop("_label", "Artefacto")
-            props.setdefault("_id", node_id)
-            cur.execute(
-                """
-                INSERT INTO graph_nodes (id, label, props)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    label = EXCLUDED.label,
-                    props = graph_nodes.props || EXCLUDED.props;
-                """,
-                (node_id, label, Json(props)),
-            )
-        for edge in legacy_edges:
-            props = dict(edge)
-            source = props.pop("source")
-            target = props.pop("target")
-            edge_type = props.pop("type")
-            cur.execute(
-                """
-                INSERT INTO graph_edges (source, target, type, props)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (source, target, type) DO UPDATE SET
-                    props = graph_edges.props || EXCLUDED.props;
-                """,
-                (source, target, edge_type, Json(props)),
-            )
-
-conn.close()
-print("   -> Base de datos " + db_name + " lista.")
-if legacy_nodes or legacy_edges:
-    print(
-        "   -> Memoria local migrada: "
-        + str(len(legacy_nodes))
-        + " nodos, "
-        + str(len(legacy_edges))
-        + " relaciones."
-    )
-EOF
-fi
 
 archive_local_hub_memory() {
     hub_dir="${HARNESS_HUB:-$HOME/.harness-hub}"

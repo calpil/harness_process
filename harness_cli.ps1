@@ -14,23 +14,5 @@ if (Test-Path -LiteralPath $nativeBinary -PathType Leaf) {
     exit $LASTEXITCODE
 }
 
-$python = Get-Command python3 -ErrorAction SilentlyContinue
-if (-not $python) {
-    $python = Get-Command python -ErrorAction SilentlyContinue
-}
-if (-not $python) {
-    Write-Error "[harness_cli] Neither harness.exe nor Python is available."
-    exit 127
-}
-
-if ($Arguments.Count -gt 0 -and $Arguments[0] -eq "graph") {
-    $graphArgs = @()
-    if ($Arguments.Count -gt 1) {
-        $graphArgs = $Arguments[1..($Arguments.Count - 1)]
-    }
-    & $python.Source (Join-Path $scriptDir "graph_memory.py") @graphArgs
-    exit $LASTEXITCODE
-}
-
-& $python.Source (Join-Path $scriptDir "harness.py") @Arguments
-exit $LASTEXITCODE
+Write-Error "[harness_cli] Binario 'harness.exe' no encontrado en $scriptDir. Ejecuta setup_harness.ps1 con rust/cargo disponible para compilarlo."
+exit 127

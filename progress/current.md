@@ -6,4 +6,4 @@ Sin feature activa.
 
 -
 
-_Estado de la feature #1 archivado en `docs/estado-feature-1-powershell-windows-installer.md`._
+_Estado de la feature #2 archivado en `docs/estado-feature-2-remove-python-full-rust-migration.md`._

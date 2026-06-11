@@ -9,10 +9,9 @@ launchers, memoria compartida y una capa opcional de subagentes.
 - Bash 3.2 o superior para `setup_harness.sh` y los hooks POSIX existentes
 - Windows PowerShell 5.1 o PowerShell 7 para `setup_harness.ps1`
 - Git
-- Python 3 (instalador y fallback de `harness_cli`)
-- Rust/cargo (opcional, recomendado): compila el binario nativo `harness`
-  durante el setup; sin cargo todo sigue funcionando via el fallback Python
-- `curl`, `uv` o `pipx` solo cuando se instalan herramientas opcionales
+- Rust + cargo (requerido): compila el binario nativo `harness` durante el setup.
+  `harness_cli` (sh/ps1) despacha exclusivamente al binario; sin el binario falla.
+- `curl`, `uv` o `pipx` solo cuando se instalan herramientas opcionales (graphify etc)
 
 ## Instalacion
 
@@ -43,9 +42,7 @@ $env:CARGO_HOME = "$HOME\.cargo"
 .\setup_harness.ps1 -CargoTargetDir "$PWD\.cargo-target"
 ```
 
-El instalador agrega `harness_cli.ps1`, que prioriza `harness.exe` y cae a
-Python. Git for Windows Bash sigue siendo necesario para los scripts y hooks
-POSIX historicos; ambos instaladores se mantienen.
+El instalador agrega `harness_cli.ps1`, que ejecuta `harness.exe` (Rust). Git for Windows Bash sigue siendo necesario para scripts/hook POSIX historicos; ambos instaladores se mantienen. (Sin fallback Python desde feature #2).
 
 Para instalar el arnes directamente en la raiz multi-repo:
 

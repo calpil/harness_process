@@ -15,7 +15,7 @@ Para cambios del instalador:
 
 ```bash
 bash tests/setup_smoke.sh
-bash tests/parity_smoke.sh
+# (parity_smoke.sh removido con los .py; solo Rust) # bash tests/parity_smoke.sh
 (cd rust && cargo clippy --all-targets --all-features --locked -- -D warnings)
 (cd rust && cargo test --locked)
 ```

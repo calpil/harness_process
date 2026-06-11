@@ -23,6 +23,24 @@
       },
       "closed_at": "2026-06-11T04:06:31Z",
       "note": "Instalacion Windows PowerShell agregada; Bash conservado; Cargo y smoke tests verificados"
+    },
+    {
+      "id": 2,
+      "name": "remove_python_full_rust_migration",
+      "microservicios": [],
+      "acceptance": [
+        "Eliminar todos los scripts Python (harness.py, graph_memory.py y sus copias en templates/); simplificar harness_cli (sh+ps1) y setup_harness (sh+ps1) para despachar exclusivamente al binario Rust eliminando toda deteccion, fallback, imports y logica de Python/pip/psycopg2/graphifyy; actualizar init.sh, tests (parity y smoke), docs (README, UPDATING, verification, plan, etc) y requisitos; remover reglas de mantenimiento dual y tests de paridad Python; asegurar harness_check y cargo test/clippy limpios."
+      ],
+      "status": "done",
+      "started_at": "2026-06-11T04:12:47Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-2-remove-python-full-rust-migration.md",
+        "mtime": 1781151763.2053633,
+        "size": 7159,
+        "hash": "39fef84e0a0eabed"
+      },
+      "closed_at": "2026-06-11T04:24:11Z",
+      "note": "Python eliminado completamente (4 .py + parity + fallbacks en sh/ps1/setup/init/tests/docs); solo Rust. harness_check limpio, cargo verde, evidencia en progress/impl/review."
     }
   ]
 }

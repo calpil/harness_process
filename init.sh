@@ -26,9 +26,8 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ ! -x "$HARNESS_DIR/harness" ] && [ ! -x "$HARNESS_DIR/harness.exe" ] \
-    && ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
-    echo "[!] Ni el binario 'harness' ni python3 estan disponibles; harness_cli no tiene como correr." >&2
+if [ ! -x "$HARNESS_DIR/harness" ] && [ ! -x "$HARNESS_DIR/harness.exe" ]; then
+    echo "[!] Binario 'harness'/'harness.exe' no disponible; ejecuta setup con cargo/rustup para compilarlo. (sin fallback Python)" >&2
     exit 1
 fi
 

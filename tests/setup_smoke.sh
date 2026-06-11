@@ -119,8 +119,7 @@ run_setup() {
         cd "$target"
         HOME="$TMP_ROOT/home" \
         HARNESS_HUB="$target/.test-hub" \
-        PYTHONPATH="$FAKE_PYTHON" \
-        DB_HOST=postgres.example \
+                DB_HOST=postgres.example \
         DB_USER=harness \
         DB_PASSWORD=secret \
         DB_NAME=harness \
@@ -164,8 +163,7 @@ JSONEOF
     cd "$TMP_ROOT"
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/postgres-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example \
+        DB_HOST=postgres.example \
     DB_USER=harness \
     DB_PASSWORD=secret \
     DB_SSL_MODE=require \
@@ -183,12 +181,11 @@ find "$POSTGRES_DEFAULT/bkp/memory-hub" -type f -path '*/progress/test/feature-2
 ! grep -q 'GRAPH_DB_FILE\|PROGRESS_DIR\|GraphStore' "$POSTGRES_DEFAULT/graph_memory.py"
 test -x "$POSTGRES_DEFAULT/harness_cli"
 test -f "$POSTGRES_DEFAULT/harness_cli.ps1"
-# Las fixtures no traen rust/: harness_cli debe caer al fallback Python.
+# (no py) fixtures sin rust/ => harness_cli no funcional hasta que se copie bin.
 FAKE_PG_NODE='{"id":"postgres-default/feature-1","label":"Artefacto","props":{"estado":"done"}}' \
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/postgres-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example \
+        DB_HOST=postgres.example \
     DB_USER=harness \
     DB_PASSWORD=secret \
     DB_NAME=harness \
@@ -197,8 +194,7 @@ FAKE_PG_NODE='{"id":"postgres-default/feature-1","label":"Artefacto","props":{"e
     | grep -q '"estado": "done"'
 HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/postgres-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example \
+        DB_HOST=postgres.example \
     DB_USER=harness \
     DB_PASSWORD=secret \
     DB_NAME=harness \
@@ -215,8 +211,7 @@ copy_flat_fixture "$FLAT_LAYOUT"
     cd "$TMP_ROOT"
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$FLAT_LAYOUT/.test-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example \
+        DB_HOST=postgres.example \
     DB_USER=harness \
     DB_PASSWORD=secret \
     DB_NAME=harness \
@@ -228,7 +223,7 @@ copy_flat_fixture "$FLAT_LAYOUT"
         --no-antigravity
 )
 test ! -d "$FLAT_LAYOUT/templates"
-test -f "$FLAT_LAYOUT/graph_memory.py"
+# test -f "$FLAT_LAYOUT/graph_memory.py"  # py removed
 test -x "$FLAT_LAYOUT/harness_cli"
 test -f "$FLAT_LAYOUT/harness_cli.ps1"
 test -f "$FLAT_LAYOUT/roles/leader.md"
@@ -246,7 +241,7 @@ ROOT_LAYOUT="$TMP_ROOT/root-layout"
 copy_fixture "$ROOT_LAYOUT"
 run_setup "$ROOT_LAYOUT" --root
 
-test -f "$ROOT_LAYOUT/graph_memory.py"
+# test -f "$ROOT_LAYOUT/graph_memory.py"  # py removed
 test -x "$ROOT_LAYOUT/harness_cli"
 test -f "$ROOT_LAYOUT/harness_cli.ps1"
 test -f "$ROOT_LAYOUT/AGENTS.md"
@@ -263,8 +258,7 @@ grep -Fq "$ROOT_LAYOUT/bin/harness-hook" "$ROOT_LAYOUT/.codex/hooks.json"
 git init -q "$ROOT_LAYOUT/svc-demo"
 HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$ROOT_LAYOUT/.test-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example \
+        DB_HOST=postgres.example \
     DB_USER=harness \
     DB_PASSWORD=secret \
     DB_NAME=harness \
@@ -279,7 +273,7 @@ SUBDIR_HARNESS="$SUBDIR_ROOT/harness_process"
 copy_fixture "$SUBDIR_HARNESS"
 run_setup "$SUBDIR_HARNESS"
 
-test -f "$SUBDIR_HARNESS/graph_memory.py"
+# test -f "$SUBDIR_HARNESS/graph_memory.py"  # py removed
 test -x "$SUBDIR_HARNESS/harness_cli"
 test -f "$SUBDIR_HARNESS/harness_cli.ps1"
 test -f "$SUBDIR_ROOT/AGENTS.md"
@@ -295,8 +289,7 @@ codex_start="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[
     cd "$SUBDIR_ROOT/service"
     HOME="$TMP_ROOT/home" \
         HARNESS_HUB="$SUBDIR_HARNESS/.test-hub" \
-        PYTHONPATH="$FAKE_PYTHON" \
-        DB_HOST=postgres.example \
+                DB_HOST=postgres.example \
         DB_USER=harness \
         DB_PASSWORD=secret \
         DB_NAME=harness \
@@ -311,8 +304,7 @@ CUSTOM_BKP="$TMP_ROOT/custom-backups"
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$SUBDIR_HARNESS/.test-hub" \
     HARNESS_BKP_DIR="$CUSTOM_BKP" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example \
+        DB_HOST=postgres.example \
     DB_USER=harness \
     DB_PASSWORD=secret \
     DB_NAME=harness \
@@ -336,8 +328,7 @@ copy_fixture "$DRY_TEST"
     cd "$DRY_TEST"
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/dry-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
     bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity --dry-run --json > /tmp/dry.json 2>&1
 )
 grep -q '"dry_run": true' /tmp/dry.json || { echo "[!] --dry-run no emitio JSON correcto"; exit 1; }
@@ -353,8 +344,7 @@ copy_fixture "$RESET_TEST"
     cd "$RESET_TEST"
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/reset-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
     bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1 || true
 )
 # Ahora reset
@@ -362,8 +352,7 @@ copy_fixture "$RESET_TEST"
     cd "$RESET_TEST"
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/reset-hub" \
-    PYTHONPATH="$FAKE_PYTHON" \
-    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
     bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity --reset >/dev/null 2>&1
 )
 # Despues de reset, al menos las superficies principales deberian haber sido tocadas (pueden no existir si reset limpio todo)
@@ -387,8 +376,7 @@ if command -v cargo >/dev/null 2>&1 && [ -f "$REPO_ROOT/rust/Cargo.toml" ]; then
         RUSTUP_HOME="$REAL_RUSTUP_HOME" \
         CARGO_HOME="$REAL_CARGO_HOME" \
         HARNESS_HUB="$TMP_ROOT/rust-hub" \
-        PYTHONPATH="$FAKE_PYTHON" \
-        CARGO_TARGET_DIR="$REPO_ROOT/rust/target" \
+                CARGO_TARGET_DIR="$REPO_ROOT/rust/target" \
         DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
         bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1
     )
