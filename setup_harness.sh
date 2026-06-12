@@ -116,6 +116,38 @@ cleanup_temps() {
 # Trap maestro para temps (mejora)
 trap 'cleanup_temps' EXIT INT TERM
 
+# Parsea un archivo VAR=valor linea a linea SIN sourcearlo: un password con
+# metacaracteres no puede ejecutar codigo ni abortar el script (antes, un
+# error de sintaxis al sourcear ~/.harness-hub/.env mataba el setup en
+# silencio porque el stderr iba a /dev/null). Semantica identica a
+# harness.exe y setup_harness.ps1: el entorno del proceso SIEMPRE gana
+# (setdefault) y se despojan comillas envolventes simples/dobles.
+import_env_file() {
+    local file="$1" line key val
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        case "$line" in
+            ''|'#'*) continue ;;
+            *=*) ;;
+            *) continue ;;
+        esac
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="${key%"${key##*[![:space:]]}"}"
+        val="${val#"${val%%[![:space:]]*}"}"
+        if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            continue
+        fi
+        while case "$val" in \'*|\"*) true ;; *) false ;; esac; do val="${val#?}"; done
+        while case "$val" in *\'|*\") true ;; *) false ;; esac; do val="${val%?}"; done
+        if [ -z "${!key+x}" ]; then
+            export "$key=$val"
+        fi
+    done < "$file"
+}
+
 # Carga config file (soporte .harness.env / HARNESS_CONFIG) antes de flags/env
 load_config_file() {
     local cfg="${HARNESS_CONFIG:-}"
@@ -132,11 +164,7 @@ load_config_file() {
         fi
     fi
     if [ -n "$cfg" ] && [ -f "$cfg" ]; then
-        # shellcheck disable=SC1090
-        set -a
-        # shellcheck disable=SC1090
-        . "$cfg"
-        set +a
+        import_env_file "$cfg"
         log_info "Config cargada desde: $cfg"
     fi
 }
@@ -1228,6 +1256,21 @@ SURFACE_DIR="$REPO_ROOT"
 PROJECT_NAME="${HARNESS_PROJECT:-$(basename "$REPO_ROOT")}"
 BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
 
+# Guardrail: JAMAS escribir superficies en el $HOME del usuario (pisaria
+# .claude/settings.json, agentes globales, bin/, etc.). Ocurre con un
+# checkout suelto directamente bajo $HOME y layout subdir. Escape explicito:
+# HARNESS_ALLOW_HOME_SURFACE=1.
+if [ "${HARNESS_ALLOW_HOME_SURFACE:-0}" != "1" ] \
+    && [ "$(cd "$SURFACE_DIR" 2>/dev/null && pwd -P)" = "$(cd "$HOME" 2>/dev/null && pwd -P)" ]; then
+    log_error "SURFACE_DIR es tu HOME ($HOME): instalar aqui sobreescribiria .claude/settings.json y los agentes globales."
+    log_info "Este checkout parece ser la FUENTE del harness suelta en \$HOME, no una instalacion en un proyecto."
+    log_info "Opciones:"
+    log_info "  - Clona/copia el harness DENTRO de tu proyecto: <proyecto>/harness_process y corre el setup alli."
+    log_info "  - O usa --root para un install autocontenido en esta carpeta (sin tocar \$HOME)."
+    log_info "  - Escape consciente: HARNESS_ALLOW_HOME_SURFACE=1 ./setup_harness.sh"
+    exit 2
+fi
+
 ensure_harness_not_committed
 
 # templates/ presente => fuente normal; si no, distribucion aplanada (assets
@@ -1403,13 +1446,7 @@ done
 HUB_DIR_PREF="${HARNESS_HUB:-$HOME/.harness-hub}"
 mkdir -p "$HUB_DIR_PREF"
 ENV_FILE="$HUB_DIR_PREF/.env"
-if [ -f "$ENV_FILE" ]; then
-    # shellcheck disable=SC1090
-    set -a
-    # shellcheck disable=SC1091
-    . "$ENV_FILE" 2>/dev/null || true
-    set +a
-fi
+import_env_file "$ENV_FILE"
 # Gate duro (decision usuario 2026-06-11: bloquear, igual que setup_harness.ps1):
 # sin credenciales del Hub no se instala NADA.
 MISSING_DB=""

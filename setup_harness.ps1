@@ -70,6 +70,19 @@ else {
     $script:Hrel = ""
 }
 $script:SurfaceDir = $script:RepoRoot
+
+# Guardrail: nunca escribir superficies en el HOME del usuario (pisaria
+# .claude/settings.json y agentes globales). Escape: HARNESS_ALLOW_HOME_SURFACE=1.
+if ($env:HARNESS_ALLOW_HOME_SURFACE -ne "1") {
+    $surfaceFull = [IO.Path]::GetFullPath($script:SurfaceDir).TrimEnd('\', '/')
+    $homeFull = [IO.Path]::GetFullPath($HOME).TrimEnd('\', '/')
+    if ($surfaceFull -eq $homeFull) {
+        Write-Host "[ERROR] SurfaceDir is your HOME ($HOME): installing here would overwrite .claude/settings.json and global agents." -ForegroundColor Red
+        Write-Host "Move this checkout inside your project (<project>\harness_process) or use -Root for a self-contained install."
+        Write-Host "Conscious escape: `$env:HARNESS_ALLOW_HOME_SURFACE = '1'"
+        exit 2
+    }
+}
 $script:ProjectName = if ($env:HARNESS_PROJECT) {
     $env:HARNESS_PROJECT
 }

@@ -37,6 +37,19 @@ Bash sigue disponible y tambien copia el shim PowerShell.
 
 El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`) a menos que uses `--force`.
 
+Notas de robustez (2026-06):
+
+- `$HARNESS_HUB/.env` se **parsea** línea a línea (ya no se sourcea): un
+  `DB_PASSWORD` con metacaracteres no necesita quoting especial. Recomendado
+  igualmente: `chmod 600 ~/.harness-hub/.env`.
+- El estado por-instalación (`feature_list.json`, `progress/`) **no se
+  versiona** en este repo: cada proyecto mantiene el suyo y el instalador lo
+  siembra desde `templates/` solo si falta. Si actualizas el harness con
+  `git pull` y choca el estado, conserva SIEMPRE tu versión local.
+- El instalador se niega a escribir superficies en tu `$HOME` (protege
+  `.claude/settings.json` y agentes globales). Escape consciente:
+  `HARNESS_ALLOW_HOME_SURFACE=1`.
+
 ## Cuándo actualizar
 
 - Después de hacer `git pull` o `git fetch` en la carpeta `harness_process`.

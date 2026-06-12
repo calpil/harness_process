@@ -4,3 +4,7 @@ __pycache__/
 /rust/target/
 /harness
 /harness.exe
+# Estado vivo por-instalacion: nunca se versiona (cada proyecto tiene el suyo;
+# el instalador lo siembra desde templates/ si falta)
+/feature_list.json
+/progress/

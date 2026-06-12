@@ -72,14 +72,22 @@ test ! -e "$POSTGRES_PREFLIGHT/.harness_layout"
 
 POSTGRES_DEFAULT="$TMP_ROOT/postgres-default"
 copy_fixture "$POSTGRES_DEFAULT"
+# Credenciales SOLO via $HARNESS_HUB/.env, con un password lleno de
+# metacaracteres: el setup debe PARSEARLO (sourcearlo abortaba en silencio).
+mkdir -p "$TMP_ROOT/postgres-hub"
+cat > "$TMP_ROOT/postgres-hub/.env" <<'ENVEOF'
+# comentario y linea vacia a proposito
+
+DB_HOST=postgres.example
+DB_USER=harness
+DB_PASSWORD=we!rd)pa'ss$(word)&;`uh
+DB_SSL_MODE=require
+ENVEOF
 (
     cd "$TMP_ROOT"
+    env -u DB_HOST -u DB_USER -u DB_PASSWORD -u DB_NAME -u DB_SSL_MODE \
     HOME="$TMP_ROOT/home" \
     HARNESS_HUB="$TMP_ROOT/postgres-hub" \
-        DB_HOST=postgres.example \
-    DB_USER=harness \
-    DB_PASSWORD=secret \
-    DB_SSL_MODE=require \
     bash "$POSTGRES_DEFAULT/setup_harness.sh" \
         --root \
         --no-graphify \
