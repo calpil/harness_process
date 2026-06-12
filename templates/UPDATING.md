@@ -46,6 +46,33 @@ Notas de robustez (2026-06):
   versiona** en este repo: cada proyecto mantiene el suyo y el instalador lo
   siembra desde `templates/` solo si falta. Si actualizas el harness con
   `git pull` y choca el estado, conserva SIEMPRE tu versión local.
+
+### Migración única (2026-06): conflicto modify/delete al hacer pull
+
+Si tu clon instalado tenía un commit local con el estado vivo, el primer
+`git pull --rebase` tras esta versión choca con
+`CONFLICT (modify/delete): feature_list.json ...`. Es esperado y pasa UNA
+sola vez. Resuélvelo conservando tu estado (queda en disco, sin versionar):
+
+```bash
+# dentro del clon harness_process, con el rebase en conflicto:
+mkdir -p /tmp/harness-state-bkp progress
+cp -f feature_list.json /tmp/harness-state-bkp/ 2>/dev/null || true
+cp -f progress/current.md progress/history.md /tmp/harness-state-bkp/ 2>/dev/null || true
+
+git rm -q -f feature_list.json progress/current.md progress/history.md 2>/dev/null || true
+GIT_EDITOR=true git rebase --continue || git rebase --skip
+
+mkdir -p progress
+cp -f /tmp/harness-state-bkp/feature_list.json feature_list.json 2>/dev/null || true
+cp -f /tmp/harness-state-bkp/current.md progress/current.md 2>/dev/null || true
+cp -f /tmp/harness-state-bkp/history.md progress/history.md 2>/dev/null || true
+
+git status -sb   # limpio; tu backlog sigue en disco y ya no se versiona
+```
+
+Los pulls siguientes ya no chocan: el estado quedó fuera de git en ambos
+lados.
 - El instalador se niega a escribir superficies en tu `$HOME` (protege
   `.claude/settings.json` y agentes globales). Escape consciente:
   `HARNESS_ALLOW_HOME_SURFACE=1`.
