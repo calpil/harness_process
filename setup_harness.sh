@@ -529,7 +529,14 @@ track_action() {
     fi
 }
 
-# json_value removido (era python); se inlinan los comandos en los JSON de hooks.
+# Codifica un string como literal JSON (antes era python3; ahora bash puro).
+# Suficiente para los comandos de hooks: escapa backslash y comillas dobles.
+json_value() {
+    local s="$1"
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    printf '"%s"' "$s"
+}
 
 write_basic_agent_surface() {
     target="$1"
@@ -1223,7 +1230,10 @@ BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
 
 ensure_harness_not_committed
 
-if [ -f "$HARNESS_DIR/templates/harness_cli" ] || [ -f "$HARNESS_DIR/harness_cli" ]; then
+# templates/ presente => fuente normal; si no, distribucion aplanada (assets
+# junto a setup_harness.sh). OJO: probar SOLO dentro de templates/ — en flat
+# harness_cli vive en la raiz y no debe mandar ASSET_DIR a templates/.
+if [ -f "$HARNESS_DIR/templates/harness_cli" ]; then
     ASSET_DIR="$HARNESS_DIR/templates"
 else
     ASSET_DIR="$HARNESS_DIR"
@@ -1400,13 +1410,27 @@ if [ -f "$ENV_FILE" ]; then
     . "$ENV_FILE" 2>/dev/null || true
     set +a
 fi
+# Gate duro (decision usuario 2026-06-11: bloquear, igual que setup_harness.ps1):
+# sin credenciales del Hub no se instala NADA.
+MISSING_DB=""
 for key in DB_HOST DB_USER DB_PASSWORD; do
     if [ -z "${!key:-}" ]; then
-        log_warn "[preflight] Falta $key (PostgreSQL Hub). Configura en entorno o $ENV_FILE (el binario Rust lo usara en graph ops)."
-        # No exit: permite installs sin DB para features puras; graph fallara util cuando se use.
-        break
+        MISSING_DB="${MISSING_DB:+$MISSING_DB, }$key"
     fi
 done
+if [ -n "$MISSING_DB" ]; then
+    log_error "PostgreSQL es el Hub requerido. Faltan: $MISSING_DB."
+    log_info "Opcion A (solo esta sesion):"
+    log_info "    export DB_HOST=postgres.ejemplo.com DB_USER=usuario DB_PASSWORD=secreto"
+    log_info "Opcion B (persistente, recomendada): $ENV_FILE con una VAR=valor por linea:"
+    log_info "    DB_HOST=postgres.ejemplo.com"
+    log_info "    DB_USER=usuario"
+    log_info "    DB_PASSWORD=secreto"
+    log_info "    DB_NAME=mi_db          # opcional (default: postgres)"
+    log_info "    DB_SSL_MODE=require    # opcional (default: require)"
+    log_info "Luego re-ejecuta: ./setup_harness.sh"
+    exit 2
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
     log_warn "MODO DRY-RUN: no se realizaran escrituras ni instalaciones."
