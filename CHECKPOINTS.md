@@ -5,6 +5,9 @@ Antes de cerrar una tarea:
 - [ ] La feature activa en `feature_list.json` refleja el estado real.
 - [ ] **Plan frescura verificada**: `sh harness_cli check-plan` pasa (sin "PLAN ACTUALIZADO POR OTRO LLM").
   Esto detecta ediciones concurrentes hechas por Claude/Gemini/Antigravity/Grok/etc.
+- [ ] **Sin observaciones pendientes**: cada observacion del plan tiene la
+  decision del usuario registrada (`advance --nota "Decision usuario: ..."`);
+  no se implemento nada con decisiones abiertas.
 - [ ] El plan vive en `docs/plan-feature-<feature>.md` (raiz) y refleja lo hecho.
 - [ ] `progress/current.md` apunta al plan y contiene evidencia al dia.
 - [ ] Se ejecuto impacto para los microservicios modificados:

@@ -17,6 +17,10 @@ al implementer: tu salida es el plan, no el diff.
    afectados, riesgos y delegacion concreta (que archivos y en que orden).
    `__HREL__progress/current.md` queda como puntero vivo; `harness_cli start`
    siembra ambos.
+6. Toda duda, alternativa u observacion que requiera una decision humana va en
+   la seccion **Observaciones (decisiones pendientes)** del plan (una por
+   linea, con sus opciones). El implementer preguntara al usuario que decision
+   aplicar ANTES de implementar; no dejes decisiones implicitas en la prosa.
 
 ## Entregable
 

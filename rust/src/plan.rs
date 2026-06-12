@@ -129,7 +129,7 @@ pub fn plan_template(feature: &Map<String, Value>) -> String {
         "## Alcance",
         "",
         "## Impacto entre microservicios",
-        "<!-- python3 graph_memory.py impacto --microservicio <proyecto>/<servicio> -->",
+        "<!-- sh harness_cli graph impacto --microservicio <proyecto>/<servicio> -->",
         "",
         "## Consulta al grafo (graphify)",
         "<!-- graphify query \"<pregunta de la task>\" -->",
@@ -141,6 +141,12 @@ pub fn plan_template(feature: &Map<String, Value>) -> String {
         "- ",
         "",
         "## Riesgos",
+        "- ",
+        "",
+        "## Observaciones (decisiones pendientes)",
+        "<!-- Una observacion por linea. Si hay observaciones SIN decision, el",
+        "     implementer DEBE preguntar al usuario que decision aplicar ANTES de",
+        "     implementar ese feat/fase/tarea, y registrar aqui la respuesta. -->",
         "- ",
         "",
     ] {
@@ -232,6 +238,8 @@ mod tests {
         let f = feature(2, "Pago");
         let t = plan_template(&f);
         assert!(t.starts_with("# Plan - Feature #2: Pago\n\nEstado: in_progress\nMicroservicios:\n- (sin servicios)\n"));
-        assert!(t.ends_with("## Riesgos\n- \n"));
+        assert!(t.contains("## Riesgos\n- \n"));
+        assert!(t.contains("## Observaciones (decisiones pendientes)"));
+        assert!(t.ends_with("- \n"));
     }
 }

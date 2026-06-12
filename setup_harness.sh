@@ -554,6 +554,11 @@ bash "__HREL__harness_status.sh"
    ```
    Si está desactualizado, re-lee el plan en `docs/` y sincroniza con `advance`.
 
+0.5. Revisa la sección **Observaciones (decisiones pendientes)** del plan:
+   si hay observaciones sin decisión, **PREGUNTA AL USUARIO qué decisión
+   aplicar ANTES de implementar ese feat/fase/tarea** (no asumas) y registra
+   la respuesta: `sh "__HREL__harness_cli" advance --nota "Decision usuario: <...>"`.
+
 Antes de modificar codigo:
 
 1. Revisa el mapa: `sh "__HREL__harness_cli" graph mapa`.
@@ -652,6 +657,11 @@ bash "__HREL__harness_status.sh"
      completamente el plan en `docs/plan-feature-*.md`.
    - Luego sincroniza: `sh "__HREL__harness_cli" advance --nota "Re-sincronizado con plan actualizado por otro agente"`.
    - Repite `check-plan` hasta que salga limpio.
+
+0.5. Revisa **Observaciones (decisiones pendientes)** en el plan. Si hay
+   observaciones sin decisión tomada → **DETENTE y PREGUNTA AL USUARIO qué
+   decisión aplicar** antes de implementar ese feat/fase/tarea. Registra la
+   respuesta: `sh "__HREL__harness_cli" advance --nota "Decision usuario: <...>"`.
 
 Antes de tocar codigo, arquitectura o dependencias entre servicios, en ESTE
 orden:

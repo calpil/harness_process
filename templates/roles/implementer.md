@@ -17,6 +17,13 @@ Implementas UNA unidad concreta del plan del lider.
      `sh "__HREL__harness_cli" advance --nota "Re-sincronizado con plan actualizado por otro agente"`
    - Solo entonces continua con la implementacion.
 
+0.5. Revisa la seccion **Observaciones (decisiones pendientes)** del plan.
+   Si hay observaciones SIN decision tomada: **DETENTE y pregunta al usuario
+   que decision aplicar** (presenta las opciones) ANTES de implementar ese
+   feat/fase/tarea. No asumas ni elijas por el. Registra la respuesta:
+   `sh "__HREL__harness_cli" advance --nota "Decision usuario: <decision>"`
+   y refleja la decision en el plan.
+
 1. Lee el plan en `docs/plan-feature-<id>-<slug>.md` (apuntado desde
    `__HREL__progress/current.md`) y, si lo necesitas, tu rol en
    `__HREL__roles/implementer.md`.
@@ -44,5 +51,8 @@ Implementas UNA unidad concreta del plan del lider.
 - **Nunca implementes sin haber pasado `harness_cli check-plan` en este turno.**
   Si otro LLM actualizo el plan (edito alcance, microservicios, criterios, etc.),
   tu trabajo anterior puede quedar obsoleto o en conflicto.
+- **Nunca implementes un feat/fase/tarea con observaciones sin decision del
+  usuario.** Las dudas/alternativas del plan se resuelven preguntando, no
+  asumiendo.
 - No cierres la feature: eso es del reviewer mas los checkpoints.
 - Sin firmas de IA en commits; `commit_guard.sh` las bloquea.

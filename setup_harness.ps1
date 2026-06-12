@@ -543,8 +543,12 @@ Before changing code:
 2. Check affected services with `... harness_cli.ps1 graph impacto --microservicio <project/service>`.
 3. Query `graphify-out/graph.json` when it exists.
 4. Run `... harness_cli.ps1 check-plan`.
-5. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
-6. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
+5. Check the plan section "Observaciones (decisiones pendientes)": if any
+   observation has no decision yet, ASK THE USER which decision to apply
+   BEFORE implementing that feature/phase/task, then record it with
+   `... harness_cli.ps1 advance --nota "Decision usuario: <...>"`.
+6. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
+7. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
 
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;
