@@ -8,3 +8,4 @@ __pycache__/
 # el instalador lo siembra desde templates/ si falta)
 /feature_list.json
 /progress/
+/graphify-out*
