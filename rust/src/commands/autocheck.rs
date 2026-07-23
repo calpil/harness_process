@@ -10,6 +10,7 @@ use crate::paths::HarnessPaths;
 use crate::plan::update_plan_sig;
 use crate::progress::{log, touch_autocheck_stamp};
 use crate::pycompat::{mtime_f64, py_str};
+use crate::spec::update_spec_sig;
 
 pub fn run(paths: &HarnessPaths, no_graphify: bool) -> anyhow::Result<()> {
     if let Err(exc) = inner(paths, no_graphify) {
@@ -63,14 +64,16 @@ fn inner(paths: &HarnessPaths, no_graphify: bool) -> anyhow::Result<()> {
     );
     log(paths, &format!("autocheck feature #{feature_id} {nota}"))?;
     hub_register("advance", "in_progress", &format!("feature-{feature_id}"), &nota);
-    // Si el plan fue uno de los cambiados, refresca su firma para que futuros
-    // implementers vean que fue actualizado (posiblemente por otro LLM).
+    // Si el plan (o el spec) fue uno de los cambiados, refresca sus firmas
+    // para que futuros implementers vean que fue actualizado (posiblemente
+    // por otro LLM). Sigue best-effort: nunca bloquea.
     if changed
         .iter()
         .any(|c| c.contains("plan-feature") || c.ends_with(".md"))
     {
         let feature = feature_mut(&mut data, idx)?;
         update_plan_sig(paths, feature);
+        update_spec_sig(paths, feature);
         save_features(paths, &data)?;
     }
     if !no_graphify {

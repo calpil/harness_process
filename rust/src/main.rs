@@ -13,6 +13,7 @@ mod paths;
 mod plan;
 mod progress;
 mod pycompat;
+mod spec;
 
 use std::process::ExitCode;
 

@@ -62,6 +62,12 @@ pub enum Command {
         #[arg(long)]
         feature: Option<String>,
     },
+    /// Gate SDD: exit 2 si el spec esta stale o (regla activa) sin aprobar
+    #[command(name = "check-spec")]
+    CheckSpec {
+        #[arg(long)]
+        feature: Option<String>,
+    },
     /// Agrega una feature al backlog
     Add {
         #[arg(long)]
@@ -161,6 +167,9 @@ pub fn run() -> anyhow::Result<()> {
         Command::Nudge => commands::nudge::run(&HarnessPaths::resolve()?),
         Command::CheckPlan { feature } => {
             commands::check_plan::run(&HarnessPaths::resolve()?, feature.as_deref())
+        }
+        Command::CheckSpec { feature } => {
+            commands::check_spec::run(&HarnessPaths::resolve()?, feature.as_deref())
         }
         Command::Add {
             name,

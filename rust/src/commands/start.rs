@@ -11,6 +11,7 @@ use crate::paths::HarnessPaths;
 use crate::plan::{update_plan_sig, write_plan};
 use crate::progress::{log, now_stamp, touch_autocheck_stamp};
 use crate::pycompat::{py_str, relpath};
+use crate::spec::{update_spec_sig, write_spec};
 
 pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
     let mut data = load_features(paths)?;
@@ -33,7 +34,7 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         feature.insert("started_at".to_string(), json!(now_stamp()));
     }
     save_features(paths, &data)?;
-    let (rel_plan, feature_id, feature_name, services, meta_name) = {
+    let (rel_plan, rel_spec, feature_id, feature_name, services, meta_name) = {
         let feature = feature_mut(&mut data, idx)?;
         let plan = write_plan(paths, feature)?;
         let rel_plan = relpath(&plan, &paths.repo_root)
@@ -42,6 +43,14 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
             .into_owned();
         // Capturar firma del plan para detectar ediciones por otros LLMs
         update_plan_sig(paths, feature);
+        // Spec SDD: se siembra SIEMPRE (nace draft); el gate lo controla solo
+        // la regla require_spec_approved. Firma igual que el plan.
+        let spec = write_spec(paths, feature)?;
+        let rel_spec = relpath(&spec, &paths.repo_root)
+            .unwrap_or_else(|| spec.clone())
+            .to_string_lossy()
+            .into_owned();
+        update_spec_sig(paths, feature);
         let services: Vec<String> = feature
             .get("microservicios")
             .and_then(Value::as_array)
@@ -55,6 +64,7 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
             .to_string();
         (
             rel_plan,
+            rel_spec,
             py_str(feature.get("id")),
             py_str(feature.get("name")),
             services,
@@ -65,7 +75,8 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
     std::fs::create_dir_all(&paths.progress)?;
     let mut current = format!("# Feature #{feature_id}: {feature_name}\n\n");
     current.push_str("Estado: in_progress\n");
-    current.push_str(&format!("Plan: {rel_plan}\n\n"));
+    current.push_str(&format!("Plan: {rel_plan}\n"));
+    current.push_str(&format!("Spec: {rel_spec}\n\n"));
     current.push_str("Microservicios:\n");
     for service in &services {
         current.push_str(&format!("- {service}\n"));
@@ -84,5 +95,12 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
     touch_autocheck_stamp(paths); // linea base: el plan recien creado no dispara autocheck
     println!("Feature #{feature_id} iniciada. Plan: {rel_plan}");
     println!("  (firma del plan registrada para deteccion de actualizaciones por otros agentes)");
+    println!("Spec (draft) generado: {rel_spec}");
+    println!(
+        "  Completa recorridos y AC-n; pide al USUARIO aprobarlo editando `Estado: approved`."
+    );
+    println!(
+        "  Con la regla require_spec_approved activa, advance y close --status done bloquean sin esa aprobacion."
+    );
     Ok(())
 }

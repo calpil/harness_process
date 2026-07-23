@@ -3,12 +3,15 @@
 use std::io::Write;
 
 use crate::exit::Exit;
-use crate::features::{active_feature_index, feature_mut, load_features, save_features};
+use crate::features::{
+    active_feature_index, feature_at, feature_mut, load_features, save_features,
+};
 use crate::memories::update_memories;
 use crate::paths::HarnessPaths;
 use crate::plan::{plan_path, update_plan_sig};
 use crate::progress::{log, now_stamp, touch_autocheck_stamp};
 use crate::pycompat::py_str;
+use crate::spec::{spec_gate, update_spec_sig};
 
 pub fn run(
     paths: &HarnessPaths,
@@ -31,17 +34,26 @@ pub fn run(
         }
         (py_str(feature.get("id")), plan_path(paths, feature))
     };
+    // Gate SDD: con la regla require_spec_approved activa, el spec debe estar
+    // aprobado por el USUARIO antes de registrar avances de implementacion.
+    {
+        let Some(feature) = feature_at(&data, idx).as_object() else {
+            anyhow::bail!("feature_list.json: feature invalida");
+        };
+        spec_gate(paths, &data, feature)?;
+    }
     let stamp = now_stamp();
     // 1) Plan: deja rastro del hito en el cuerpo del plan (append, no pisa).
     if plan.exists() {
         let mut f = std::fs::OpenOptions::new().append(true).open(&plan)?;
         write!(f, "\n### Avance {stamp}\n{nota}\n")?;
     }
-    // Actualizar firma del plan (por si el avance modifico el archivo o el
-    // lider edito entre turnos)
+    // Actualizar firmas de plan y spec (por si el avance modifico el archivo,
+    // el lider edito entre turnos o el usuario aprobo el spec)
     {
         let feature = feature_mut(&mut data, idx)?;
         update_plan_sig(paths, feature);
+        update_spec_sig(paths, feature);
     }
     save_features(paths, &data)?;
     // 2) current.md: suma el avance a la evidencia (append, no reescribe).

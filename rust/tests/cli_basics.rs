@@ -82,7 +82,7 @@ fn close_should_reject_invalid_status_with_usage_exit_two() {
 }
 
 #[test]
-fn start_should_create_plan_sign_it_and_check_plan_should_pass() {
+fn start_should_create_plan_and_spec_sign_both_and_check_plan_should_pass() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin)
         .args(["add", "--name", "Pago QR"])
@@ -93,13 +93,21 @@ fn start_should_create_plan_sign_it_and_check_plan_should_pass() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Feature #1 iniciada. Plan: docs/plan-feature-1-pago-qr.md"))
+        .stdout(predicate::str::contains("Spec (draft) generado: docs/spec-feature-1-pago-qr.md"))
         .stderr(predicate::str::contains("El Memory Hub PostgreSQL requiere: DB_HOST, DB_USER, DB_PASSWORD"));
     assert!(dir.path().join("docs/plan-feature-1-pago-qr.md").exists());
+    // AC-1: el spec nace plano junto al plan y en draft
+    let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-pago-qr.md")).unwrap();
+    assert!(spec.contains("Estado: draft"));
+    assert!(spec.contains("## Criterios de aceptacion (Given/When/Then)"));
+    // current.md referencia el spec ademas del plan
+    let current = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
+    assert!(current.contains("Plan: docs/plan-feature-1-pago-qr.md\nSpec: docs/spec-feature-1-pago-qr.md\n"));
     cmd(&bin)
         .arg("check-plan")
         .assert()
         .success()
-        .stdout("Plan fresco (sin cambios desde la ultima firma registrada).\n[OK] Plan fresco para implementacion.\n");
+        .stdout("Plan fresco (sin cambios desde la ultima firma registrada).\nSpec fresco (sin cambios desde la ultima firma registrada).\n[spec] Estado: draft\n[OK] Plan fresco para implementacion.\n");
 }
 
 #[test]
@@ -132,6 +140,127 @@ fn start_should_reject_second_in_progress_feature() {
         .assert()
         .code(1)
         .stderr("Ya hay feature in_progress: #1 Uno\n");
+}
+
+/// Activa la regla require_spec_approved en el feature_list.json del sandbox
+/// (el gate SDD es opt-in: add/start no la escriben solos).
+fn enable_spec_rule(harness_dir: &Path) {
+    let path = harness_dir.join("feature_list.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    data.as_object_mut().unwrap().insert(
+        "rules".to_string(),
+        serde_json::json!({"require_spec_approved": true}),
+    );
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+}
+
+#[test]
+fn check_spec_should_exit_one_without_active_feature() {
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .code(1)
+        .stderr("No hay feature in_progress. Inicia una: harness.py start --feature <id>\n");
+}
+
+#[test]
+fn check_spec_should_pass_informing_when_rule_is_off() {
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    // Sin la regla (compat instalaciones previas): rc=0 pero informa el estado
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Regla require_spec_approved apagada"))
+        .stdout(predicate::str::contains("draft"));
+}
+
+#[test]
+fn check_plan_should_exit_two_when_spec_edited_by_another_agent() {
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    // Otro LLM edita el spec; el plan sigue fresco: stdout distingue cual fue
+    let mut content = std::fs::read_to_string(&spec).unwrap();
+    content.push_str("\n## Cambio de otro agente\n");
+    std::fs::write(&spec, content).unwrap();
+    let past = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+    filetime::set_file_mtime(&spec, past).unwrap();
+    cmd(&bin)
+        .arg("check-plan")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("Plan fresco"))
+        .stdout(predicate::str::contains("SPEC ACTUALIZADO POR OTRO LLM"));
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("SPEC ACTUALIZADO POR OTRO LLM"));
+}
+
+#[test]
+fn spec_gate_should_block_advance_and_close_done_until_user_approves() {
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    // Spec draft + regla activa: advance y close --status done bloquean
+    cmd(&bin)
+        .args(["advance", "--nota", "intento", "--no-graphify"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("[GATE] Spec sin aprobar"));
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("[GATE] Spec sin aprobar"));
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("[GATE] Spec sin aprobar"));
+    // El usuario aprueba (draft -> approved): advance pasa y re-firma el spec
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    let approved = std::fs::read_to_string(&spec)
+        .unwrap()
+        .replace("Estado: draft", "Estado: approved");
+    std::fs::write(&spec, approved).unwrap();
+    cmd(&bin)
+        .args(["advance", "--nota", "ok", "--no-graphify"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Avance registrado en feature #1"));
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[OK] Spec aprobado y fresco"));
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"));
+}
+
+#[test]
+fn close_blocked_should_pass_without_approved_spec() {
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    // Valvula de escape: blocked/pending no exigen spec aprobado
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "aparcada"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como blocked."));
 }
 
 #[test]

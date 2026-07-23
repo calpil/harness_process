@@ -4,12 +4,13 @@ use std::io::Write;
 
 use serde_json::{Value, json};
 
-use crate::features::{feature_mut, find_feature_index, load_features, save_features};
+use crate::features::{feature_at, feature_mut, find_feature_index, load_features, save_features};
 use crate::memories::update_memories;
 use crate::paths::HarnessPaths;
 use crate::plan::{plan_path, slugify};
 use crate::progress::{log, now_stamp};
 use crate::pycompat::{py_str, relpath};
+use crate::spec::{close_requires_spec, spec_gate};
 
 pub fn run(
     paths: &HarnessPaths,
@@ -19,6 +20,15 @@ pub fn run(
 ) -> anyhow::Result<()> {
     let mut data = load_features(paths)?;
     let idx = find_feature_index(&data, fid)?;
+    // Gate SDD: cerrar como done exige spec aprobado por el usuario; se valida
+    // ANTES de mutar la feature. blocked/pending no gatean (valvula de escape
+    // para abortar/aparcar).
+    if close_requires_spec(status) {
+        let Some(feature) = feature_at(&data, idx).as_object() else {
+            anyhow::bail!("feature_list.json: feature invalida");
+        };
+        spec_gate(paths, &data, feature)?;
+    }
     let stamp = now_stamp();
     let note_text = note.unwrap_or_default().to_string();
     let (plan, feature_id, feature_name, slug) = {

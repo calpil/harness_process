@@ -6,6 +6,7 @@ use crate::features::{active_indices, feature_status, features_slice, load_featu
 use crate::paths::HarnessPaths;
 use crate::plan::{get_plan_sig, is_plan_stale};
 use crate::pycompat::py_str;
+use crate::spec::{is_spec_stale, spec_state};
 
 pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
     let data = load_features(paths)?;
@@ -71,6 +72,13 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
                 println!("  [plan] #{} fresco", py_str(f.get("id")));
             }
         }
+        // Estado del spec SDD (draft/approved/ausente) + frescura multi-LLM.
+        let spec_fresh = if is_spec_stale(paths, f) { "STALE" } else { "fresco" };
+        println!(
+            "  [spec] #{} {} ({spec_fresh})",
+            py_str(f.get("id")),
+            spec_state(paths, f).label()
+        );
     }
     Ok(())
 }

@@ -68,7 +68,8 @@ pub fn update_plan_sig(paths: &HarnessPaths, feature: &mut Map<String, Value>) {
     }
 }
 
-fn sig_mtime(sig: &Map<String, Value>) -> f64 {
+/// mtime de una firma (compartido con spec.rs: misma tolerancia de drift).
+pub(crate) fn sig_mtime(sig: &Map<String, Value>) -> f64 {
     sig.get("mtime").and_then(Value::as_f64).unwrap_or(0.0)
 }
 
