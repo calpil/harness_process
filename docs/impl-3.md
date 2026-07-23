@@ -242,9 +242,98 @@ Riesgos para el reviewer:
   mensaje claro (no hay bootstrap especial como el de `UPDATING.md`, y el plan
   no lo pide).
 
-## U4 - Roles, templates espejados y docs (pendiente)
+## U4 - Roles, templates espejados y docs (AC-5, AC-7)
 
--
+Archivos:
+
+- `templates/roles/leader.md` (+ espejo `roles/leader.md`): nuevo paso 5 —
+  completar el spec que `start` genero (`docs/spec-feature-<id>-<slug>.md`:
+  recorridos P1/P2, AC-n en Given/When/Then, no funcionales, fuera de alcance)
+  ANTES del plan; el paso 6 (plan) exige que cada item de la Delegacion CITE su
+  AC-n; el lider NO aprueba el spec (lo deja en draft y pide aprobacion al
+  usuario); spec y plan cumplen `docs/constitution.md`. Entregable y Reglas
+  actualizados (AC-5).
+- `templates/roles/implementer.md` (+ `roles/implementer.md`): nuevo paso 0.2
+  junto al 0.5 de Observaciones: `sh "__HREL__harness_cli" check-spec` limpio
+  antes de implementar; si el spec sigue en draft => DETENTE y pide al usuario
+  aprobar; PROHIBIDO tocar la linea `Estado:`; paso 4 y "Reporte minimo" exigen
+  indicar que AC-n cubre cada cambio; nueva regla anti-draft (AC-5).
+- `templates/roles/reviewer.md` (+ `roles/reviewer.md`): verificar spec aprobado
+  y fresco (`check-spec` rc=0), evidencia POR AC-n (tabla AC -> evidencia/test),
+  plan trazado al spec, cumplimiento de `docs/constitution.md`; el veredicto
+  LISTA los AC (AC-1..AC-n) ademas del global (AC-5).
+- `templates/roles/README.md` (+ `roles/README.md`): diagrama del flujo con la
+  caja USUARIO (aprueba spec draft->approved) entre LIDER e IMPLEMENTER; el LIDER
+  escribe `docs/spec-*` + `docs/plan-*` (cita AC-n); nota bajo el diagrama y fila
+  `leader` de la tabla ("Escribe en" = `docs/spec-* + docs/plan-*`) actualizadas.
+  Diagrama regenerado con alineacion de columnas verificada (AC-5, AC-7).
+- `CHECKPOINTS.md` + `templates/CHECKPOINTS.md` (identicos, `diff` vacio): dos
+  checkboxes nuevos — spec aprobado y fresco (`check-spec` pasa) y evidencia por
+  AC-n en el review (AC-5, AC-7).
+- `README.md` (raiz): nueva seccion "Spec-Driven Development (SDD)" — `start`
+  genera spec draft + plan, gate `require_spec_approved`, subcomando `check-spec`,
+  constitution sembrada por el instalador (AC-7).
+- `UPDATING.md` + `templates/UPDATING.md` (DIVERGEN a proposito): en "Que se
+  actualiza" se suman constitution seed, subcomando `check-spec` y gate de spec;
+  nueva seccion "Spec-Driven Development (opt-in en instalaciones existentes)"
+  con el paso manual `"require_spec_approved": true` en `rules` (el seed es
+  solo-si-falta). El contenido SDD nuevo es IDENTICO en ambos; la divergencia
+  pre-existente (Notas de robustez / Migracion 2026-06, solo en el template) se
+  conserva intacta (AC-7).
+- `AGENTS.md` (raiz): "Orden de trabajo" con spec draft -> aprobacion del usuario
+  -> implementacion (5 pasos con gate); "Archivos principales" suma
+  `docs/constitution.md` y `docs/spec-feature-<id>-<slug>.md` (AC-7).
+- `docs/architecture.md` (raiz): arquitectura real del harness (binario Rust con
+  `commands/`, `plan.rs`, `spec.rs`, gates y exit codes 0/1/2; instaladores;
+  superficies; Memory Hub; layouts; flujo SDD). `templates/docs/architecture.md`:
+  un solo bullet apuntando a constitution/specs (sigue siendo esqueleto) (AC-7).
+
+Decisiones:
+
+- Regla de mantenedor respetada: se editaron PRIMERO los `templates/roles/*.md`
+  (placeholder `__HREL__`) y luego se regeneraron los `roles/*.md` con
+  `for f in leader implementer reviewer README; do sed 's|__HREL__|harness_process/|g' templates/roles/$f.md > roles/$f.md; done`.
+  Las rutas del `docs/` de la RAIZ (`docs/constitution.md`, `docs/spec-*`,
+  `docs/plan-*`, `docs/impl-*`) NO llevan `__HREL__` (no son del arnes), asi que
+  el espejo las deja intactas.
+- CHECKPOINTS se mantiene identico entre raiz y template (se edito la raiz y se
+  copio al template con `cp`).
+- UPDATING se edito conscientemente en AMBOS (raiz y template) con el mismo
+  contenido SDD; la divergencia pre-existente es intencional y no se toco.
+- `docs/architecture.md` de la raiz se lleno con la arquitectura real (este repo
+  fuente no tiene microservicios); el template queda como esqueleto con un bullet
+  SDD, para no imponer la arquitectura del harness a los proyectos destino.
+- El diagrama ASCII de README (roles) se construyo con un helper para garantizar
+  el alineado de columnas (`^`/`|`/`+` en col 9 y 97; filas de 97 chars).
+- No se corrio `advance`, no se toco el `feature_list.json` vivo ni la linea
+  `Estado:` del spec (fuera del alcance de U4).
+
+Verificaciones (salida real):
+
+- Espejado roles:
+  `for f in leader implementer reviewer README; do diff <(sed 's|__HREL__|harness_process/|g' templates/roles/$f.md) roles/$f.md; done`
+  => los 4 `OK` (diff vacio).
+- `grep -l "__HREL__" roles/*.md` => vacio (la raiz no tiene el placeholder).
+- `diff CHECKPOINTS.md templates/CHECKPOINTS.md` => vacio (identicos).
+- `diff UPDATING.md templates/UPDATING.md` => NO vacio (40 lineas: solo las
+  secciones template-only 2026-06); el contenido SDD nuevo NO aparece en el diff
+  (identico en ambos).
+- `grep -rn "check-spec|AC-n|constitution" roles/ AGENTS.md README.md CHECKPOINTS.md`
+  => 36 coincidencias (referencias nuevas presentes).
+- `HARNESS_REPO_ROOT=/Users/alan/harness_process bash harness_check.sh` => rc=0
+  (`[plan] #3 fresco`, `[spec] #3 draft (fresco)`, "Harness Check limpio").
+
+Riesgos para el reviewer:
+
+- El spec sigue en `Estado: draft` y la regla `require_spec_approved` sigue
+  APAGADA en el feature_list vivo: por eso `check-spec`/`harness_check.sh` pasan
+  hoy. El gate real se ejercita en U5 (fixture) y al cierre (tras la aprobacion
+  de Alan y la activacion de la regla).
+- Los cuerpos de subagentes `.claude/.codex/.gemini` se ensamblan desde
+  `roles/*.md` (ya actualizados aqui); descripciones/superficies de los
+  instaladores se cubrieron en U3.
+- Alineacion del diagrama ASCII de `roles/README.md`: si un editor recorta
+  espacios finales, revisar el bloque de codigo (columnas verificadas al aplicar).
 
 ## U5 - Smoke tests (pendiente)
 

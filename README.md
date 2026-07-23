@@ -177,6 +177,32 @@ comportamiento se espeja en `rust/src/` en el mismo commit y
 `bash tests/parity_smoke.sh` debe pasar antes de push (compara ambas
 implementaciones paso a paso). Detalles en `templates/UPDATING.md`.
 
+## Spec-Driven Development (SDD)
+
+Cada feature arranca con un spec antes de tocar codigo (inspirado en spec-kit,
+adaptado y en layout plano):
+
+- `sh harness_cli start --feature <id>` genera, ademas del plan,
+  `docs/spec-feature-<id>-<slug>.md` en el `docs/` de la RAIZ (junto a los
+  planes, sin carpetas `specs/NNN/`) con `Estado: draft`: recorridos de usuario
+  priorizados (P1/P2), criterios de aceptacion AC-n en Given/When/Then, no
+  funcionales y fuera de alcance.
+- El LIDER completa el spec y el plan (cada item de la Delegacion cita su AC-n);
+  el USUARIO lo aprueba editando `Estado: draft` -> `Estado: approved`. Ningun
+  agente puede auto-aprobar.
+- Gate `require_spec_approved`: con la regla `"require_spec_approved": true` en
+  `rules` de `feature_list.json` y el spec sin aprobar, `advance`,
+  `close --status done` y `harness_check.sh` bloquean con mensaje accionable.
+  Sin la regla (o en `false`) el gate queda apagado (compat con instalaciones
+  previas).
+- `sh harness_cli check-spec` reporta el estado del gate (exit 0 aprobado o
+  regla apagada, 1 sin feature activa, 2 spec stale o sin aprobar con la regla
+  activa); `check-plan` vigila la frescura de spec y plan frente a ediciones de
+  otros LLMs.
+- `docs/constitution.md` (principios del proyecto) lo siembra el instalador
+  (`setup_harness.sh` / `setup_harness.ps1`) solo si falta y nunca lo pisa;
+  specs y planes deben cumplirlo y el reviewer lo verifica.
+
 ## Verificacion
 
 ```bash

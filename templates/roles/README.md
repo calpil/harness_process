@@ -9,24 +9,28 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
   __HREL__feature_list.json
             |
             v
-   +-----------+    plan en        +--------------+   evidencia en   +------------+
-   |  LIDER    |--> docs/plan-* --> | IMPLEMENTER  |--> docs/impl-* -->| REVIEWER   |
-   | (planner) |                    | (1 unidad)   |                  | (verifica) |
-   +-----------+                    +--------------+                  +------------+
-        ^                                                                   |
-        |                       changes_requested                           |
-        +-------------------------------------------------------------------+
-                                       |
-                             approved + checkpoints OK
-                                       v
-                        harness_check.sh limpio  ->  cierre
+   +-----------+  spec+plan   +-----------+  aprueba  +--------------+  evidencia  +------------+
+   |  LIDER    |-> docs/  --->|  USUARIO  |-> draft ->| IMPLEMENTER  |-> docs/  -->| REVIEWER   |
+   | (planner) |  spec-* +    | (aprueba) |  approved | (1 unidad)   |  impl-*     | (verifica) |
+   | cita AC-n |  plan-*      |  el spec  |           |              |             |            |
+   +-----------+              +-----------+           +--------------+             +------------+
+        ^                                                                                       |
+        |                                   changes_requested                                   |
+        +---------------------------------------------------------------------------------------+
+                                          |
+                              approved + checkpoints OK
+                                          v
+                         harness_check.sh limpio  ->  cierre
 ```
+
+Entre el LIDER y el IMPLEMENTER, el USUARIO aprueba el spec (`Estado: draft -> approved`);
+ningun agente puede auto-aprobar y el gate `check-spec` bloquea hasta esa aprobacion.
 
 ## Roles
 
 | Rol         | Cuando usarlo                             | Tools (Claude)          | Escribe en                |
 |-------------|-------------------------------------------|-------------------------|---------------------------|
-| leader      | Al iniciar: alcance, impacto, plan        | Read, Grep, Glob, Bash  | docs/plan-feature-<f>.md  |
+| leader      | Al iniciar: spec (AC-n) + plan            | Read, Grep, Glob, Bash  | docs/spec-* + docs/plan-* |
 | implementer | Escribir o modificar una unidad de codigo | Read, Edit, Write, Bash | docs/impl-<f>.md          |
 | reviewer    | Antes de cerrar: tests, impacto, gates    | Read, Grep, Glob, Bash  | docs/review-<f>.md        |
 

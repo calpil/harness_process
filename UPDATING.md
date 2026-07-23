@@ -52,6 +52,36 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - El binario Rust `harness` (recompilado con cargo si está disponible; sin cargo, `harness_cli` usa el fallback Python automáticamente)
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
+- `docs/constitution.md` (sembrada solo si falta; nunca pisa la del usuario)
+- El subcomando `harness_cli check-spec` y el gate de spec aprobado
+  (`require_spec_approved`) en `advance`, `close --status done` y
+  `harness_check.sh`
+
+## Spec-Driven Development (opt-in en instalaciones existentes)
+
+Desde esta versión, `setup_harness.sh` / `setup_harness.ps1` siembran
+`docs/constitution.md` (solo si falta) y `harness_cli` incorpora el subcomando
+`check-spec` y el gate de spec aprobado. En instalaciones **nuevas** la regla
+llega activada desde `templates/feature_list.json`.
+
+En instalaciones **existentes** el gate queda **apagado por defecto**: el
+`feature_list.json` de cada proyecto no se versiona ni se pisa, y el seed es
+solo-si-falta, así que re-correr el instalador NO agrega la regla. Para activar
+el gate hay que editar a mano el `feature_list.json` del proyecto y agregar la
+regla a `rules`:
+
+```json
+{
+  "rules": {
+    "require_spec_approved": true
+  }
+}
+```
+
+Con la regla activa, `advance`, `close --status done` y `harness_check.sh`
+exigen un spec `docs/spec-feature-<id>-<slug>.md` con `Estado: approved` (solo
+el usuario aprueba; ningún agente auto-aprueba). Sin la regla, el flujo sigue
+como antes (gate apagado, compatibilidad total).
 
 ## Mantenimiento Rust only (post feature #2)
 
