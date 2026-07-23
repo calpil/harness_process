@@ -38,6 +38,22 @@ if [ -f "$HARNESS_DIR/feature_list.json" ]; then
         fi
         # rc=1 (sin feature) u otros: no incrementamos failures para este gate
     fi
+
+    # Gate de spec aprobado (Spec-Driven Development).
+    # check-spec sale con:
+    #   0 = OK (regla require_spec_approved apagada, o spec aprobado y fresco)
+    #   2 = spec stale, o regla activa con spec ausente/draft/no aprobado → fallo
+    #   1 = sin feature in_progress (no lo tratamos como fallo aquí)
+    if sh "$HARNESS_DIR/harness_cli" check-spec >/dev/null 2>&1; then
+        : # exit 0: regla apagada o spec aprobado y fresco
+    else
+        rc=$?
+        if [ "$rc" -eq 2 ]; then
+            echo "[!] Spec sin aprobar o modificado. Ejecuta 'sh harness_cli check-spec'; si esta en draft, pide al USUARIO aprobarlo (Estado: approved) antes de continuar." >&2
+            failures=$((failures + 1))
+        fi
+        # rc=1 (sin feature) u otros: no incrementamos failures para este gate
+    fi
 fi
 
 if [ -f "$HARNESS_DIR/CHECKPOINTS.md" ] && [ ! -s "$HARNESS_DIR/progress/current.md" ]; then
@@ -84,6 +100,15 @@ if [ -d "$HARNESS_DIR/roles" ]; then
             failures=$((failures + 1))
         fi
     done
+fi
+
+# Constitution del proyecto: vive en el docs/ de la RAIZ (junto a planes y
+# specs) y el instalador la siembra solo si falta. Mismo criterio que el bloque
+# de roles ([ -d roles ] = instalacion completa) para no romper instalaciones
+# minimas sin esa capa.
+if [ -d "$HARNESS_DIR/roles" ] && [ ! -f "$REPO_ROOT/docs/constitution.md" ]; then
+    echo "[!] Falta docs/constitution.md (principios del proyecto). Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para sembrarla." >&2
+    failures=$((failures + 1))
 fi
 
 if [ "$failures" -gt 0 ]; then

@@ -117,9 +117,32 @@ Riesgos para el reviewer:
 - `nudge.rs` no vigila el spec (el plan U1 no lo pide; el aviso multi-LLM del
   spec vive en check-plan/check-spec/status).
 
-## U2 - Gates de shell + regla + constitution (pendiente)
+## U2 - Gates de shell + regla + constitution (AC-3, AC-4)
 
--
+Archivos:
+
+- `templates/docs/constitution.md` (NUEVO): principios no negociables en 6
+  articulos (calidad/tests primero; specs aprobadas antes de implementar;
+  trazabilidad AC-n; seguridad/observabilidad minimas; decisiones del usuario
+  mandan; puente a ADRs: "ninguna dependencia nueva de runtime sin ADR").
+  Nota explicita "documento del USUARIO: sembrado una vez, nunca pisado". (AC-4)
+- `docs/constitution.md` (raiz de este repo): copia ajustada al harness. (AC-4)
+- `harness_check.sh` + `templates/harness_check.sh` (identicos, `diff` vacio):
+  (a) gate check-spec tras el bloque check-plan (rc 2 => failure accionable;
+  rc 1 => no falla); (b) check de existencia de `$REPO_ROOT/docs/constitution.md`
+  gateado por `[ -d roles ]` (misma condicion de instalacion completa que el
+  bloque de roles, para no romper instalaciones minimas). (AC-3, AC-4)
+- `templates/feature_list.json`: `"require_spec_approved": true` en `rules`. La
+  regla del feature_list VIVO de este repo se activa al cierre (tras aprobacion
+  del spec por Alan), no aqui. (AC-3)
+
+Verificaciones:
+
+- `HARNESS_REPO_ROOT=/Users/alan/harness_process bash harness_check.sh` => rc=0
+  limpio (check-spec rc=0 porque la regla viva sigue apagada + spec draft;
+  constitution ahora existe).
+- `diff harness_check.sh templates/harness_check.sh` => vacio (espejados).
+- `templates/feature_list.json` valida como JSON.
 
 ## U3 - Instaladores (pendiente)
 
