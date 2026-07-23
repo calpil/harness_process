@@ -144,9 +144,103 @@ Verificaciones:
 - `diff harness_check.sh templates/harness_check.sh` => vacio (espejados).
 - `templates/feature_list.json` valida como JSON.
 
-## U3 - Instaladores (pendiente)
+## U3 - Instaladores (AC-4, AC-5)
 
--
+Archivos:
+
+- `setup_harness.sh`:
+  - `required_assets` (bloque `WITH_SUBAGENTS`): + `docs/constitution.md`, para
+    que el gate de recursos exija el asset antes de instalar (AC-4).
+  - mkdirs del layout: `[ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "$SURFACE_DIR/docs"`
+    con el helper `do_mkdir` existente; la constitution vive en el docs/ de la
+    RAIZ (SURFACE_DIR), que en subdir puede no existir aun (AC-4).
+  - Siembra NO destructiva (junto a la de `feature_list.json`/`progress`, dentro
+    del `if [ "$WITH_SUBAGENTS" -eq 1 ]`):
+    `if [ ! -f "$SURFACE_DIR/docs/constitution.md" ]; then install_asset "docs/constitution.md" "$SURFACE_DIR/docs/constitution.md"; fi`.
+    Usa el mismo helper `install_asset` (con destino explicito) que el resto del
+    script; solo-si-falta, no pisa la del usuario. NO se agrega a la lista
+    `generated` (no se respalda ni regenera) (AC-4).
+  - Heredoc `write_agent_surface` (superficie completa): nuevo paso `0.2` en
+    "ANTES DE IMPLEMENTAR CODIGO": `sh "__HREL__harness_cli" check-spec`; `start`
+    genera spec+plan y `check-plan`/`check-spec` vigilan AMBOS; si el spec sigue
+    en `Estado: draft` => DETENTE y pide al USUARIO aprobar `docs/spec-feature-*.md`
+    (`Estado: approved`), PROHIBIDO auto-aprobar o tocar la linea `Estado:`; spec
+    y plan deben cumplir `docs/constitution.md`. En "Archivos principales" sumados
+    `docs/constitution.md` (RAIZ) y `docs/spec-feature-<id>-<slug>.md` (RAIZ)
+    (AC-5).
+  - Heredoc `write_basic_agent_surface` (superficie basica): version corta del
+    paso `0.2` (check-spec + mencion a constitution y spec draft) (AC-5).
+  - Descripciones de subagentes: `desc_leader` menciona "spec + plan con AC-n";
+    `desc_rev` menciona "evidencia por AC". `desc_impl` sin cambios (el plan solo
+    pide leader y reviewer) (AC-5).
+  - "Comandos utiles": linea `sh ${HREL}harness_cli check-spec` en el listado
+    general y en el bloque de subagentes (AC-5).
+  - `HARNESS_VERSION`: `2026.06-harness-process` -> `2026.07-harness-process`
+    (bump trivial y consistente, opcional del plan).
+- `setup_harness.ps1` (paridad CONCEPTUAL, no literal):
+  - `Assert-HarnessAssets` (bloque `WithSubagents`): + `docs/constitution.md`
+    (AC-4).
+  - Bloque principal: `Ensure-Directory` de `(Join-Path $script:SurfaceDir "docs")`
+    en el loop de dirs con subagentes; siembra if-missing con destino EXPLICITO
+    (`Install-HarnessAssetIfMissing` solo apunta a `HarnessDir`, no sirve):
+    `$constitutionDest = Join-Path $script:SurfaceDir "docs/constitution.md"` +
+    `if (-not (Test-Path -LiteralPath $constitutionDest)) { Install-HarnessAsset -Asset "docs/constitution.md" -Destination $constitutionDest }`,
+    dentro del `if ($script:WithSubagents)` de siembra, fuera de `$generatedAssets`
+    (AC-4).
+  - `Write-AgentSurface`: nuevo paso `check-spec` (renumerado 1..8) con referencia
+    a spec (`docs/spec-feature-*.md`, aprobar `Estado: approved`, never self-approve)
+    y a `docs/constitution.md` (AC-5).
+  - `Write-AgentDefinitions`: `leader` = "spec + plan with AC-n"; `reviewer` =
+    "per-AC evidence" (AC-5).
+  - `$script:HarnessVersion`: `2026.06` -> `2026.07-harness-process`.
+
+Decisiones:
+
+- La siembra de la constitution NO entra en `generated`/`$generatedAssets`: es
+  documento del usuario, se instala solo-si-falta y un reinstall no lo respalda
+  ni lo pisa (mismo criterio que `feature_list.json`/`progress`).
+- Destino explicito `$SURFACE_DIR/docs/constitution.md` (no el default
+  `$HARNESS_DIR/$asset` de `install_asset`): en layout subdir la constitution
+  vive en el docs/ de la RAIZ (padre), no en el docs/ interno del arnes.
+- En root layout `SURFACE_DIR == HARNESS_DIR`, asi que el mkdir y la siembra son
+  idempotentes; `install_asset` ya evita copiar `source == destination`.
+- ASSET_DIR resuelve a `templates/` en instalacion normal (y a la raiz en
+  distribucion aplanada); `docs/constitution.md` existe en ambos (`templates/`
+  la generica que se siembra, raiz la del harness), por lo que el gate de
+  `required_assets`/`Assert-HarnessAssets` pasa en las dos rutas.
+- No se corrio `setup_harness.sh` ni `setup_harness.ps1` en este checkout
+  (footgun del marker subdir): validacion por `bash -n` + revision manual del
+  ps1 (no hay `pwsh` en el entorno).
+
+Verificaciones:
+
+- `bash -n setup_harness.sh` => rc=0 (sintaxis limpia).
+- `grep -n "constitution" setup_harness.sh setup_harness.ps1` => en sh:
+  `required_assets` (1428), comentario del mkdir (1532) + linea
+  `do_mkdir "$SURFACE_DIR/docs"` (1534), siembra if-missing (1875-1876),
+  superficies (597, 713, 866); en ps1: `Assert-HarnessAssets` (359), surface
+  (564), siembra if-missing (1194-1196).
+- `grep -n "check-spec" setup_harness.sh setup_harness.ps1` => sh: ambas
+  superficies (594 basica, 706/709 completa) + "Comandos utiles" (2046, 2063);
+  ps1: `Write-AgentSurface` paso 5 (560).
+- Siembra de constitution FUERA de `generated` (sh, `init.sh..UPDATING.md` sin
+  constitution) y de `$generatedAssets` (ps1, `CHECKPOINTS.md..roles/reviewer.md`
+  sin constitution): confirmado por inspeccion de ambos arrays.
+- ps1: bloque de siembra bien anidado y cerrado (`if ($script:WithSubagents) {`
+  cierra en 1198 antes de `Build-HarnessBinary`); lista de `Write-AgentSurface`
+  renumerada 1..8 sin huecos.
+
+Riesgos para el reviewer:
+
+- `setup_harness.ps1` no se ejecuto (sin `pwsh` en el entorno): revision manual;
+  la ejecucion Windows real queda para cuando haya entorno (como en feature #1).
+- Los cuerpos de los subagentes `.claude/.codex/.gemini` se ensamblan desde
+  `roles/*.md` (spec aprobado + AC-n): eso lo cubre U4; aqui solo cambian las
+  descripciones (frontmatter) y las superficies.
+- Si alguien actualiza solo `setup_harness.sh`/`.ps1` sin copiar
+  `templates/docs/constitution.md`, el gate de `required_assets` falla con
+  mensaje claro (no hay bootstrap especial como el de `UPDATING.md`, y el plan
+  no lo pide).
 
 ## U4 - Roles, templates espejados y docs (pendiente)
 

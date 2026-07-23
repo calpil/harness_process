@@ -46,7 +46,7 @@ DRY_RUN=0
 RESET=0
 JSON_OUTPUT=0
 LOG_FILE=""
-HARNESS_VERSION="2026.06-harness-process"
+HARNESS_VERSION="2026.07-harness-process"
 LOCK_FILE=""
 # Contadores para reporte de idempotencia
 COUNT_BACKED_UP=0
@@ -589,6 +589,14 @@ bash "__HREL__harness_status.sh"
    ```
    Si está desactualizado, re-lee el plan en `docs/` y sincroniza con `advance`.
 
+0.2. **Spec aprobado (obligatorio antes de implementar):**
+   ```bash
+   sh "__HREL__harness_cli" check-spec
+   ```
+   `start` genera el spec (`docs/spec-feature-*.md`) junto al plan y debe cumplir
+   `docs/constitution.md`. Si sigue en `Estado: draft`, **DETENTE** y pide al
+   USUARIO que lo apruebe (`Estado: approved`); PROHIBIDO auto-aprobar.
+
 0.5. Revisa la sección **Observaciones (decisiones pendientes)** del plan:
    si hay observaciones sin decisión, **PREGUNTA AL USUARIO qué decisión
    aplicar ANTES de implementar ese feat/fase/tarea** (no asumas) y registra
@@ -692,6 +700,17 @@ bash "__HREL__harness_status.sh"
      completamente el plan en `docs/plan-feature-*.md`.
    - Luego sincroniza: `sh "__HREL__harness_cli" advance --nota "Re-sincronizado con plan actualizado por otro agente"`.
    - Repite `check-plan` hasta que salga limpio.
+
+0.2. **Spec aprobado (obligatorio antes de implementar):**
+   ```bash
+   sh "__HREL__harness_cli" check-spec
+   ```
+   - `start` genera el spec (`docs/spec-feature-<id>-<slug>.md`) ADEMAS del plan,
+     y `check-plan`/`check-spec` vigilan AMBOS contra ediciones de otros LLMs.
+   - Si el spec sigue en `Estado: draft` → **DETENTE** y pide al USUARIO que
+     apruebe `docs/spec-feature-*.md` (`Estado: approved`). PROHIBIDO auto-aprobar
+     o tocar la linea `Estado:`.
+   - El spec y el plan deben cumplir `docs/constitution.md`.
 
 0.5. Revisa **Observaciones (decisiones pendientes)** en el plan. Si hay
    observaciones sin decisión tomada → **DETENTE y PREGUNTA AL USUARIO qué
@@ -844,6 +863,11 @@ Archivos principales:
 - `docs/` (RAIZ del proyecto): planes, investigaciones y evidencia durable
   (`plan-feature-<f>.md`, `impl-<f>.md`, `review-<f>.md`), junto a los docs del
   equipo.
+- `docs/constitution.md` (RAIZ): principios del proyecto; los specs y planes
+  deben cumplirlo y el reviewer lo verifica.
+- `docs/spec-feature-<id>-<slug>.md` (RAIZ): spec de la feature (recorridos
+  priorizados y criterios AC-n); debe estar `Estado: approved` antes de
+  implementar.
 - `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
 - `__HREL__progress/history.md`: bitacora append-only.
 - `__HREL__docs/architecture.md`: mapa de arquitectura.
@@ -1401,6 +1425,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "docs/architecture.md"
         "docs/conventions.md"
         "docs/verification.md"
+        "docs/constitution.md"
         "roles/README.md"
         "roles/leader.md"
         "roles/implementer.md"
@@ -1504,6 +1529,9 @@ do_mkdir() {
 
 do_mkdir ".claude"
 [ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "roles" && do_mkdir "docs" && do_mkdir "progress"
+# La constitution vive en el docs/ de la RAIZ (SURFACE_DIR). En layout subdir el
+# padre puede no tener docs/ todavia; en root es el mismo que "docs" (idempotente).
+[ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "$SURFACE_DIR/docs"
 do_mkdir "$SURFACE_DIR/.claude"
 do_mkdir "$SURFACE_DIR/.codex"
 do_mkdir "$SURFACE_DIR/.gemini"
@@ -1800,9 +1828,9 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     }
 
     # Descripciones compartidas por las tres superficies de subagentes nativos.
-    desc_leader="Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en docs/ de la raiz. No implementa codigo."
+    desc_leader="Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el spec + plan con AC-n en docs/ de la raiz. No implementa codigo."
     desc_impl="Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia durable en docs/ de la raiz. Usalo para escribir o modificar codigo."
-    desc_rev="Verifica tests, impacto, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en docs/ de la raiz. Solo lectura; no implementa."
+    desc_rev="Verifica tests, impacto, evidencia por AC, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en docs/ de la raiz. Solo lectura; no implementa."
 
     # --- Claude Code: .claude/agents/*.md (frontmatter + cuerpo de rol) ----------
     build_claude_agent leader      leader      claude-fable-5    max "Read, Grep, Glob, Bash"              "$desc_leader"
@@ -1839,6 +1867,13 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
 
     if [ ! -f progress/history.md ]; then
         install_asset "progress/history.md"
+    fi
+
+    # Constitution del proyecto: documento del USUARIO. Se siembra en el docs/ de
+    # la RAIZ (SURFACE_DIR) SOLO si falta; un reinstall NUNCA lo pisa. Por eso NO
+    # se lista en 'generated' (no se respalda ni se regenera).
+    if [ ! -f "$SURFACE_DIR/docs/constitution.md" ]; then
+        install_asset "docs/constitution.md" "$SURFACE_DIR/docs/constitution.md"
     fi
 
     install_asset "docs/architecture.md"
@@ -2008,6 +2043,7 @@ log_info "  bash ${HREL}harness_check.sh"
 log_info "  sh ${HREL}harness_cli graph mapa"
 log_info "  sh ${HREL}harness_cli status"
 log_info "  sh ${HREL}harness_cli check-plan     # <-- OBLIGATORIO antes de implementar (detecta planes actualizados por otros LLMs)"
+log_info "  sh ${HREL}harness_cli check-spec     # <-- spec aprobado (Estado: approved) antes de implementar"
 log_info "  bin/harness-codex"
 log_info "  bin/harness-gemini"
 log_info "  bin/harness-grok"
@@ -2024,6 +2060,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     log_info "  sh ${HREL}harness_cli add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""
     log_info "  sh ${HREL}harness_cli start --feature 1"
     log_info "  sh ${HREL}harness_cli check-plan     # verifica si otro LLM actualizo el plan"
+    log_info "  sh ${HREL}harness_cli check-spec     # spec aprobado antes de implementar"
     log_info "  sh ${HREL}harness_cli close --feature 1 --status done"
 fi
 

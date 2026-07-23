@@ -32,7 +32,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:HarnessVersion = "2026.06-harness-process"
+$script:HarnessVersion = "2026.07-harness-process"
 $script:WithSubagents = -not $NoSubagents
 $script:InstallGraphify = -not $NoGraphify
 $script:InstallGraphifySkills = -not $NoGraphifySkills
@@ -356,6 +356,7 @@ function Assert-HarnessAssets {
             "docs/architecture.md",
             "docs/conventions.md",
             "docs/verification.md",
+            "docs/constitution.md",
             "roles/README.md",
             "roles/leader.md",
             "roles/implementer.md",
@@ -556,12 +557,17 @@ Before changing code:
 2. Check affected services with `... harness_cli.ps1 graph impacto --microservicio <project/service>`.
 3. Query `graphify-out/graph.json` when it exists.
 4. Run `... harness_cli.ps1 check-plan`.
-5. Check the plan section "Observaciones (decisiones pendientes)": if any
+5. Run `... harness_cli.ps1 check-spec`: `start` generates the spec next to the
+   plan (`docs/spec-feature-<id>-<slug>.md`) and both are watched against edits
+   by other LLMs. If the spec is still `Estado: draft`, STOP and ask the USER to
+   approve `docs/spec-feature-*.md` (`Estado: approved`); never self-approve.
+   Specs and plans must comply with `docs/constitution.md`.
+6. Check the plan section "Observaciones (decisiones pendientes)": if any
    observation has no decision yet, ASK THE USER which decision to apply
    BEFORE implementing that feature/phase/task, then record it with
    `... harness_cli.ps1 advance --nota "Decision usuario: <...>"`.
-6. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
-7. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
+7. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
+8. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
 
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;
@@ -596,9 +602,9 @@ function Write-AgentDefinitions {
     Write-HarnessText -Path $rolesReadme -Content $rolesReadmeBody
 
     $descriptions = @{
-        leader = "Coordinates scope, impact, and the durable plan. Does not implement code."
+        leader = "Coordinates scope, impact, and the durable spec + plan with AC-n. Does not implement code."
         implementer = "Implements one concrete unit from the plan and records durable evidence."
-        reviewer = "Verifies tests, impact, checkpoints, and Git state before closure."
+        reviewer = "Verifies tests, impact, per-AC evidence, checkpoints, and Git state before closure."
     }
     foreach ($role in @("leader", "implementer", "reviewer")) {
         $rolePath = Join-Path $script:HarnessDir "roles/$role.md"
@@ -1133,6 +1139,7 @@ try {
             (Join-Path $script:HarnessDir "roles"),
             (Join-Path $script:HarnessDir "docs"),
             (Join-Path $script:HarnessDir "progress"),
+            (Join-Path $script:SurfaceDir "docs"),
             (Join-Path $script:SurfaceDir ".claude/agents"),
             (Join-Path $script:SurfaceDir ".codex/agents"),
             (Join-Path $script:SurfaceDir ".gemini/agents")
@@ -1179,6 +1186,14 @@ try {
     if ($script:WithSubagents) {
         foreach ($asset in @("feature_list.json", "progress/current.md", "progress/history.md")) {
             Install-HarnessAssetIfMissing -Asset $asset
+        }
+        # Constitution del proyecto: documento del USUARIO. Se siembra en el docs/
+        # de la RAIZ (SurfaceDir) SOLO si falta; un reinstall NUNCA lo pisa (por eso
+        # no esta en $generatedAssets). Install-HarnessAssetIfMissing apunta a
+        # HarnessDir, asi que aqui se usa un destino explicito bajo SurfaceDir.
+        $constitutionDest = Join-Path $script:SurfaceDir "docs/constitution.md"
+        if (-not (Test-Path -LiteralPath $constitutionDest)) {
+            Install-HarnessAsset -Asset "docs/constitution.md" -Destination $constitutionDest
         }
     }
 
