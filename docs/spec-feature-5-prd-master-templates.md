@@ -1,6 +1,7 @@
 # Spec - Feature #5: prd_master_templates
 
-Estado: draft
+Estado: approved
+Aprobado: 2026-07-24T22:58:15Z por USUARIO (confirmacion explicita) - Alan aprobo el spec #5 en el chat (2026-07-24); normalizacion del sello tras aprobacion manual previa
 Plan: docs/plan-feature-5-prd-master-templates.md
 Constitution: docs/constitution.md
 

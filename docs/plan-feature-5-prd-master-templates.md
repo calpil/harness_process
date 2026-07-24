@@ -121,3 +121,6 @@ Orden: U1 -> U2 -> U3 -> U5 (verificar sh) -> U4 -> U6 -> U7.
 - Sin decisiones abiertas. La implementacion avanza por indicacion explicita del
   usuario CON el gate activo (spec en `draft`); falta su aprobacion para poder
   registrar `advance` y cerrar la feature.
+
+---
+Cerrado: 2026-07-24T22:22:58Z - status=pending - Aparcada: implementada y commiteada (4c71f30); espera aprobacion del spec con el flujo nuevo de la feature #6
