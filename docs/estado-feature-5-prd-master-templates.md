@@ -1,5 +1,5 @@
 # Estado archivado - Feature #5: prd_master_templates
-Cerrada: 2026-07-24T22:22:58Z - status=pending - Aparcada: implementada y commiteada (4c71f30); espera aprobacion del spec con el flujo nuevo de la feature #6
+Cerrada: 2026-07-24T23:07:29Z - status=done - Planillas maestras PRD/SDD en docs/prd/; AC-6 (pwsh) pendiente de corrida en Windows
 
 ---
 
@@ -14,3 +14,4 @@ Microservicios:
 
 Evidencia:
 - 
+- 2026-07-24T23:05:37Z Reviewer: veredicto approved en docs/review-5.md (AC-1..AC-10 verificados; AC-6 Windows estatico). Preflight AC-5 re-ejecutado: exit 2
