@@ -352,6 +352,16 @@ guidance, config file, shellcheck-ready, shebang portable, reporte idempotencia.
 USAGE
 }
 
+# Docs GENERADOS por el instalador (plantillas de templates/docs/). Viven en el
+# docs/ de la RAIZ del proyecto (SURFACE_DIR), junto a docs/constitution.md y a
+# los artefactos SDD (spec-*/plan-*). La constitution NO esta en esta lista: es
+# documento del usuario, se siembra solo si falta y nunca se respalda ni se borra.
+HARNESS_DOCS=(
+    "architecture.md"
+    "conventions.md"
+    "verification.md"
+)
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --with-subagents) WITH_SUBAGENTS=1 ;;
@@ -489,19 +499,24 @@ if [ "$RESET" -eq 1 ]; then
         "$HARNESS_DIR/.harness_layout"
         "$HARNESS_DIR/.harness_backend"
         "$HARNESS_DIR/roles"
-        # Solo los docs GENERADOS por el instalador (desde templates/docs/). NO
-        # barremos docs/ entero: en layout root HARNESS_DIR==SURFACE_DIR, y eso
-        # borraria la constitution del usuario ("un reinstall NUNCA lo pisa") y
-        # los artefactos de feature (spec-*/plan-*/impl-*/review-*), que son tu
-        # trabajo, no superficie generada.
-        "$HARNESS_DIR/docs/architecture.md"
-        "$HARNESS_DIR/docs/conventions.md"
-        "$HARNESS_DIR/docs/verification.md"
         "$HARNESS_DIR/progress"
         "$HARNESS_DIR/CHECKPOINTS.md"
         "$HARNESS_DIR/feature_list.json"
         # (post-migracion Rust: ya no hay graph_memory.py / harness.py que preservar)
     )
+    # Solo los docs GENERADOS por el instalador (desde templates/docs/), en el
+    # docs/ de la RAIZ. NO barremos docs/ entero: ahi conviven la constitution
+    # del usuario ("un reinstall NUNCA lo pisa") y los artefactos de feature
+    # (spec-*/plan-*/impl-*/review-*), que son tu trabajo, no superficie
+    # generada. Se agregan tambien las rutas viejas del arnes para que un reset
+    # limpie instalaciones anteriores a la migracion (en layout root ambas
+    # coinciden y el bucle simplemente no encuentra el duplicado).
+    for harness_doc in "${HARNESS_DOCS[@]}"; do
+        reset_targets+=(
+            "$SURFACE_DIR/docs/$harness_doc"
+            "$HARNESS_DIR/docs/$harness_doc"
+        )
+    done
 
     for t in "${reset_targets[@]}"; do
         if [ -e "$t" ]; then
@@ -877,9 +892,9 @@ Archivos principales:
   implementar.
 - `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
 - `__HREL__progress/history.md`: bitacora append-only.
-- `__HREL__docs/architecture.md`: mapa de arquitectura.
-- `__HREL__docs/conventions.md`: convenciones del equipo.
-- `__HREL__docs/verification.md`: comandos de validacion.
+- `docs/architecture.md` (RAIZ): mapa de arquitectura.
+- `docs/conventions.md` (RAIZ): convenciones del equipo.
+- `docs/verification.md` (RAIZ): comandos de validacion.
 
 Los documentos durables (plan, investigacion, evidencia) se escriben en `docs/`
 de la raiz; `__HREL__progress/` guarda solo el estado vivo. Una respuesta corta
@@ -1466,6 +1481,40 @@ install_asset() {
     COUNT_CREATED=$((COUNT_CREATED + 1))
 }
 
+# Migracion de instalaciones anteriores a la feature #4: los docs del arnes
+# vivian en <harness>/docs/. Ahora viven en el docs/ de la RAIZ, junto a la
+# constitution y a los artefactos SDD. Regla (decision usuario 2026-07-24):
+# se MUEVEN solo si en la raiz no existen; si ya existen, no se pisa nada y se
+# avisa. En layout root las dos rutas son la misma y la funcion es un no-op.
+migrate_harness_docs() {
+    [ "$HARNESS_DIR" = "$SURFACE_DIR" ] && return 0
+    [ -d "$HARNESS_DIR/docs" ] || return 0
+    for harness_doc in "${HARNESS_DOCS[@]}"; do
+        old="$HARNESS_DIR/docs/$harness_doc"
+        new="$SURFACE_DIR/docs/$harness_doc"
+        [ -f "$old" ] || continue
+        if [ -e "$new" ]; then
+            log_warn "Migracion: $new ya existe; se conserva intacto y NO se pisa (queda la copia vieja en $old)."
+            COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+            continue
+        fi
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] migraria docs del arnes: $old -> $new"
+            COUNT_CREATED=$((COUNT_CREATED + 1))
+            continue
+        fi
+        mkdir -p "$(dirname "$new")"
+        mv "$old" "$new"
+        log_info "Migrado al docs/ de la raiz: docs/$harness_doc (antes en $old)"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+    done
+    # Si docs/ del arnes quedo vacio tras la migracion, se elimina. rmdir falla
+    # (y se ignora) si el usuario dejo ahi otros archivos suyos.
+    if [ "$DRY_RUN" -eq 0 ]; then
+        rmdir "$HARNESS_DIR/docs" 2>/dev/null || true
+    fi
+}
+
 for command_name in bash cp git sed; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         log_error "Comando requerido no disponible: $command_name"
@@ -1535,10 +1584,14 @@ do_mkdir() {
 }
 
 do_mkdir ".claude"
-[ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "roles" && do_mkdir "docs" && do_mkdir "progress"
-# La constitution vive en el docs/ de la RAIZ (SURFACE_DIR). En layout subdir el
-# padre puede no tener docs/ todavia; en root es el mismo que "docs" (idempotente).
+[ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "roles" && do_mkdir "progress"
+# TODA la documentacion del proceso (constitution, docs del arnes, specs y
+# planes) vive en el docs/ de la RAIZ (SURFACE_DIR). En layout subdir el padre
+# puede no tener docs/ todavia; en root es el mismo directorio (idempotente).
 [ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "$SURFACE_DIR/docs"
+# Con el docs/ de la raiz ya creado, mover lo que haya quedado de instalaciones
+# anteriores (no-op en instalaciones nuevas y en layout root).
+migrate_harness_docs
 do_mkdir "$SURFACE_DIR/.claude"
 do_mkdir "$SURFACE_DIR/.codex"
 do_mkdir "$SURFACE_DIR/.gemini"
@@ -1587,9 +1640,6 @@ generated=(
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     generated+=(
         "CHECKPOINTS.md"
-        "docs/architecture.md"
-        "docs/conventions.md"
-        "docs/verification.md"
         "roles/README.md"
         "roles/leader.md"
         "roles/implementer.md"
@@ -1598,11 +1648,16 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # feature_list.json, progress/current.md e history.md NO se listan aqui: son
     # estado vivo (backlog, bitacora, tarea en curso), no plantillas. Se crean
     # solo si faltan (mas abajo) para no pisarlos al reinstalar.
+    # Los docs del arnes tampoco: viven en el docs/ de la RAIZ y se respaldan por
+    # ruta absoluta mas abajo (el array 'generated' es relativo a HARNESS_DIR).
 fi
 
 for f in "${generated[@]}"; do
     backup_file "$f"
 done
+# Los docs del arnes NO se respaldan aqui: como la constitution, se siembran solo
+# si faltan y un reinstall no los pisa (solo --force los reemplaza, y --force es
+# justamente "sobrescribe sin crear backup").
 # Las superficies LLM pueden vivir en el padre (subdir).
 backup_file "$SURFACE_DIR/CLAUDE.md"
 backup_file "$SURFACE_DIR/AGENTS.md"
@@ -1883,9 +1938,21 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         install_asset "docs/constitution.md" "$SURFACE_DIR/docs/constitution.md"
     fi
 
-    install_asset "docs/architecture.md"
-    install_asset "docs/conventions.md"
-    install_asset "docs/verification.md"
+    # Docs del arnes: viven en el docs/ de la RAIZ (SURFACE_DIR), junto a la
+    # constitution, los specs y los planes. En layout root SURFACE_DIR ==
+    # HARNESS_DIR y el destino es el mismo de siempre.
+    # Se siembran SOLO si faltan (decision usuario 2026-07-24): ya comparten
+    # carpeta con la documentacion del equipo, y un docs/conventions.md propio no
+    # se pisa nunca en un reinstall. Para refrescar la plantilla: borrar el
+    # archivo y reinstalar, o usar --force (que por contrato sobrescribe sin
+    # backup).
+    for harness_doc in "${HARNESS_DOCS[@]}"; do
+        if [ ! -f "$SURFACE_DIR/docs/$harness_doc" ] || [ "$FORCE" -eq 1 ]; then
+            install_asset "docs/$harness_doc" "$SURFACE_DIR/docs/$harness_doc"
+        else
+            COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        fi
+    done
 
     write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi

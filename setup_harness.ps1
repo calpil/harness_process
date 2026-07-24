@@ -71,6 +71,16 @@ else {
 }
 $script:SurfaceDir = $script:RepoRoot
 
+# Docs GENERADOS por el instalador (plantillas de templates/docs/). Viven en el
+# docs/ de la RAIZ del proyecto (SurfaceDir), junto a docs/constitution.md y a
+# los artefactos SDD (spec-*/plan-*). La constitution NO esta en esta lista: es
+# documento del usuario y tiene su propio tratamiento.
+$script:HarnessDocs = @(
+    "architecture.md",
+    "conventions.md",
+    "verification.md"
+)
+
 # Guardrail: nunca escribir superficies en el HOME del usuario (pisaria
 # .claude/settings.json y agentes globales). Escape: HARNESS_ALLOW_HOME_SURFACE=1.
 if ($env:HARNESS_ALLOW_HOME_SURFACE -ne "1") {
@@ -273,6 +283,51 @@ function Ensure-Directory {
     }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
     $script:Counters.created++
+}
+
+# Migracion de instalaciones anteriores a la feature #4: los docs del arnes
+# vivian en <harness>/docs/. Ahora viven en el docs/ de la RAIZ, junto a la
+# constitution y a los artefactos SDD. Regla (decision usuario 2026-07-24): se
+# MUEVEN solo si en la raiz no existen; si ya existen, no se pisa nada y se
+# avisa. En layout root las dos rutas son la misma y la funcion es un no-op.
+# Paridad exacta con migrate_harness_docs() de setup_harness.sh.
+function Move-HarnessDocsToRoot {
+    if ([IO.Path]::GetFullPath($script:HarnessDir) -eq [IO.Path]::GetFullPath($script:SurfaceDir)) {
+        return
+    }
+    $legacyDir = Join-Path $script:HarnessDir "docs"
+    if (-not (Test-Path -LiteralPath $legacyDir)) {
+        return
+    }
+    foreach ($harnessDoc in $script:HarnessDocs) {
+        $old = Join-Path $legacyDir $harnessDoc
+        $new = Join-Path $script:SurfaceDir "docs/$harnessDoc"
+        if (-not (Test-Path -LiteralPath $old -PathType Leaf)) {
+            continue
+        }
+        if (Test-Path -LiteralPath $new) {
+            Write-HarnessLog WARN "Migration: $new already exists; kept intact and NOT overwritten (old copy stays at $old)."
+            $script:Counters.skipped++
+            continue
+        }
+        if ($DryRun) {
+            Write-HarnessLog INFO "[DRY-RUN] Would migrate harness doc: $old -> $new"
+            $script:Counters.created++
+            continue
+        }
+        $parent = Split-Path -Parent $new
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        Move-Item -LiteralPath $old -Destination $new
+        Write-HarnessLog INFO "Migrated to the root docs/: docs/$harnessDoc (was at $old)"
+        $script:Counters.created++
+    }
+    # Si docs/ del arnes quedo vacio, se elimina. Si el usuario dejo ahi otros
+    # archivos suyos, se conserva tal cual.
+    if (-not $DryRun) {
+        if (-not (Get-ChildItem -LiteralPath $legacyDir -Force)) {
+            Remove-Item -LiteralPath $legacyDir -Force
+        }
+    }
 }
 
 function Write-HarnessText {
@@ -1057,17 +1112,22 @@ function Invoke-HarnessReset {
     )
     $targets += @(
         (Join-Path $script:HarnessDir "roles"),
-        # Solo los docs GENERADOS (desde templates/docs/). NO barremos docs/
-        # entero: en layout root HarnessDir==SurfaceDir y eso borraria la
-        # constitution del usuario ("un reinstall NUNCA lo pisa") y los
-        # artefactos de feature (spec-*/plan-*/impl-*/review-*).
-        (Join-Path $script:HarnessDir "docs/architecture.md"),
-        (Join-Path $script:HarnessDir "docs/conventions.md"),
-        (Join-Path $script:HarnessDir "docs/verification.md"),
         (Join-Path $script:HarnessDir "progress"),
         (Join-Path $script:HarnessDir "CHECKPOINTS.md"),
         (Join-Path $script:HarnessDir "feature_list.json")
     )
+    # Solo los docs GENERADOS (desde templates/docs/), en el docs/ de la RAIZ. NO
+    # barremos docs/ entero: ahi conviven la constitution del usuario ("un
+    # reinstall NUNCA lo pisa") y los artefactos de feature
+    # (spec-*/plan-*/impl-*/review-*). Se agregan tambien las rutas viejas del
+    # arnes para limpiar instalaciones anteriores a la migracion (en layout root
+    # ambas coinciden y el duplicado simplemente no existe).
+    foreach ($harnessDoc in $script:HarnessDocs) {
+        $targets += @(
+            (Join-Path $script:SurfaceDir "docs/$harnessDoc"),
+            (Join-Path $script:HarnessDir "docs/$harnessDoc")
+        )
+    }
     foreach ($relative in $targets) {
         $target = if ([IO.Path]::IsPathRooted($relative)) {
             $relative
@@ -1150,9 +1210,11 @@ try {
         Ensure-Directory -Path $directory
     }
     if ($script:WithSubagents) {
+        # TODA la documentacion del proceso (constitution, docs del arnes, specs y
+        # planes) vive en el docs/ de la RAIZ (SurfaceDir). El arnes ya no crea su
+        # propio docs/; en layout root ambos son el mismo directorio.
         foreach ($directory in @(
             (Join-Path $script:HarnessDir "roles"),
-            (Join-Path $script:HarnessDir "docs"),
             (Join-Path $script:HarnessDir "progress"),
             (Join-Path $script:SurfaceDir "docs"),
             (Join-Path $script:SurfaceDir ".claude/agents"),
@@ -1162,6 +1224,12 @@ try {
             Ensure-Directory -Path $directory
         }
     }
+    # Con el docs/ de la raiz ya creado, mover lo que haya quedado de
+    # instalaciones anteriores. Fuera del guard de subagentes (igual que
+    # migrate_harness_docs en setup_harness.sh): una instalacion previa pudo
+    # dejar docs aunque ahora se instale con -NoSubagents. No-op en
+    # instalaciones nuevas y en layout root.
+    Move-HarnessDocsToRoot
 
     $layoutMarker = Join-Path $script:HarnessDir ".harness_layout"
     $backendMarker = Join-Path $script:HarnessDir ".harness_backend"
@@ -1182,11 +1250,11 @@ try {
         "UPDATING.md"
     )
     if ($script:WithSubagents) {
+        # Los docs del arnes NO se listan aqui: viven en el docs/ de la RAIZ y,
+        # como la constitution, se siembran solo si faltan (no se respaldan ni se
+        # regeneran en cada reinstall).
         $generatedAssets += @(
             "CHECKPOINTS.md",
-            "docs/architecture.md",
-            "docs/conventions.md",
-            "docs/verification.md",
             "roles/README.md",
             "roles/leader.md",
             "roles/implementer.md",
@@ -1209,6 +1277,19 @@ try {
         $constitutionDest = Join-Path $script:SurfaceDir "docs/constitution.md"
         if (-not (Test-Path -LiteralPath $constitutionDest)) {
             Install-HarnessAsset -Asset "docs/constitution.md" -Destination $constitutionDest
+        }
+        # Docs del arnes: mismo criterio que la constitution (decision usuario
+        # 2026-07-24). Comparten carpeta con la documentacion del equipo, asi que
+        # se siembran SOLO si faltan y un reinstall no pisa un docs/conventions.md
+        # propio. Para refrescar la plantilla: borrar el archivo, o usar -Force
+        # (que por contrato sobrescribe sin backup).
+        foreach ($harnessDoc in $script:HarnessDocs) {
+            $docDest = Join-Path $script:SurfaceDir "docs/$harnessDoc"
+            if ((-not (Test-Path -LiteralPath $docDest)) -or $Force) {
+                Install-HarnessAsset -Asset "docs/$harnessDoc" -Destination $docDest
+            } else {
+                $script:Counters.skipped++
+            }
         }
     }
 

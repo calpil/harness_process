@@ -14,7 +14,7 @@ Verificas calidad, impacto y criterios de cierre. NO implementas.
 
 - Impacto ejecutado para cada servicio modificado:
   `sh "harness_process/harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
-- Tests relevantes ejecutados y en verde (ver `harness_process/docs/verification.md`).
+- Tests relevantes ejecutados y en verde (ver `docs/verification.md`).
 - Frontends validados cuando aplique: `bash "harness_process/validate_ui.sh" <url>`.
 - `graphify query` usado, o justificacion si no hay grafo.
 - Plan archivado en `docs/` de la raiz y al dia con lo implementado.

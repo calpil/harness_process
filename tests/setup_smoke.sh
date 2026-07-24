@@ -183,6 +183,15 @@ test -d "$SUBDIR_HARNESS/templates"
 grep -qx 'postgres' "$SUBDIR_HARNESS/.harness_backend"
 # Constitution SDD en el docs/ de la RAIZ multi-repo, NO en la subcarpeta del arnes.
 test -f "$SUBDIR_ROOT/docs/constitution.md"
+# Feature #4 / AC-1: TODA la doc del proceso vive en el docs/ de la RAIZ. Los tres
+# docs del arnes se instalan ahi y la subcarpeta ya no tiene docs/ propio.
+test -f "$SUBDIR_ROOT/docs/architecture.md"
+test -f "$SUBDIR_ROOT/docs/conventions.md"
+test -f "$SUBDIR_ROOT/docs/verification.md"
+test ! -e "$SUBDIR_HARNESS/docs/architecture.md"
+test ! -e "$SUBDIR_HARNESS/docs/conventions.md"
+test ! -e "$SUBDIR_HARNESS/docs/verification.md"
+test ! -d "$SUBDIR_HARNESS/docs"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq 'harness_process/harness_cli" graph mapa' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
@@ -205,6 +214,11 @@ printf 'contenido previo\n' > "$SUBDIR_ROOT/AGENTS.md"
 # solo-si-falta. Un sentinel debe SOBREVIVIR al reinstall de abajo.
 CONST_SENTINEL="SENTINEL-CONSTITUTION-NO-PISA-$$"
 printf '\n<!-- %s -->\n' "$CONST_SENTINEL" >> "$SUBDIR_ROOT/docs/constitution.md"
+# Feature #4 / AC-4 (reinstall): los docs del arnes comparten carpeta con la
+# documentacion del equipo, asi que siguen la misma regla que la constitution
+# (sembrar solo-si-falta). Un sentinel debe SOBREVIVIR al reinstall.
+DOCS_SENTINEL="SENTINEL-DOCS-ARNES-NO-PISA-$$"
+printf '\n<!-- %s -->\n' "$DOCS_SENTINEL" >> "$SUBDIR_ROOT/docs/conventions.md"
 CUSTOM_BKP="$TMP_ROOT/custom-backups"
 (
     cd "$SUBDIR_HARNESS"
@@ -224,6 +238,35 @@ CUSTOM_BKP="$TMP_ROOT/custom-backups"
 find "$CUSTOM_BKP" -type f -name 'AGENTS.md.bak.*' -print -quit | grep -q .
 # El reinstall NO pisa la constitution existente: el sentinel sigue ahi.
 grep -q "$CONST_SENTINEL" "$SUBDIR_ROOT/docs/constitution.md"
+# Feature #4 / AC-4: tampoco pisa los docs del arnes ya presentes en la raiz.
+grep -q "$DOCS_SENTINEL" "$SUBDIR_ROOT/docs/conventions.md"
+
+# --- Feature #4 / AC-3 + AC-4: migracion de instalaciones previas -----------
+# Fixture con los docs del arnes en la ubicacion VIEJA (<harness>/docs/). El
+# instalador debe MOVER los que faltan en la raiz y CONSERVAR intacto (sin pisar
+# ni mover encima) el que el equipo ya tiene en la raiz.
+MIGRATE_ROOT="$TMP_ROOT/migrate-layout"
+MIGRATE_HARNESS="$MIGRATE_ROOT/harness_process"
+copy_fixture "$MIGRATE_HARNESS"
+mkdir -p "$MIGRATE_HARNESS/docs" "$MIGRATE_ROOT/docs"
+printf 'VIEJO-ARCHITECTURE\n' > "$MIGRATE_HARNESS/docs/architecture.md"
+printf 'VIEJO-VERIFICATION\n' > "$MIGRATE_HARNESS/docs/verification.md"
+printf 'VIEJO-CONVENTIONS\n' > "$MIGRATE_HARNESS/docs/conventions.md"
+TEAM_SENTINEL="SENTINEL-CONVENTIONS-DEL-EQUIPO-$$"
+printf '%s\n' "$TEAM_SENTINEL" > "$MIGRATE_ROOT/docs/conventions.md"
+run_setup "$MIGRATE_HARNESS" > "$TMP_ROOT/migrate.log" 2>&1
+# AC-3: los que faltaban en la raiz se movieron con su contenido (no se
+# regeneraron desde la plantilla) y desaparecieron de la subcarpeta.
+grep -qx 'VIEJO-ARCHITECTURE' "$MIGRATE_ROOT/docs/architecture.md"
+grep -qx 'VIEJO-VERIFICATION' "$MIGRATE_ROOT/docs/verification.md"
+test ! -e "$MIGRATE_HARNESS/docs/architecture.md"
+test ! -e "$MIGRATE_HARNESS/docs/verification.md"
+# AC-4: el doc del equipo en la raiz queda intacto y la copia vieja se conserva
+# (no se pisa ni se borra nada); ademas el instalador lo avisa.
+grep -qx "$TEAM_SENTINEL" "$MIGRATE_ROOT/docs/conventions.md"
+grep -qx 'VIEJO-CONVENTIONS' "$MIGRATE_HARNESS/docs/conventions.md"
+grep -q 'ya existe' "$TMP_ROOT/migrate.log"
+grep -q 'Migrado al docs/ de la raiz' "$TMP_ROOT/migrate.log"
 
 # --- E2E: gate de spec (SDD) con el binario ya sembrado --------------------
 # Fixture root-layout dedicado. La regla require_spec_approved la trae el
@@ -313,6 +356,11 @@ copy_fixture "$RESET_TEST"
 test -f "$RESET_TEST/docs/constitution.md"
 RESET_SENTINEL="SENTINEL-CONSTITUTION-RESET-$$"
 printf '\n<!-- %s -->\n' "$RESET_SENTINEL" >> "$RESET_TEST/docs/constitution.md"
+# Feature #4 / AC-6: los artefactos de feature comparten carpeta con los docs
+# generados; el reset NO puede llevarselos por delante.
+printf '# spec\n' > "$RESET_TEST/docs/spec-feature-1-demo.md"
+printf '# plan\n' > "$RESET_TEST/docs/plan-feature-1-demo.md"
+printf '# review\n' > "$RESET_TEST/docs/review-1.md"
 # Ahora reset (respalda y limpia SOLO las superficies/docs generados)
 (
     cd "$RESET_TEST"
@@ -327,6 +375,15 @@ grep -q "$RESET_SENTINEL" "$RESET_TEST/docs/constitution.md" \
 # ...pero SI limpia los docs generados (architecture.md viene de templates/docs/).
 test ! -f "$RESET_TEST/docs/architecture.md" \
     || { echo "[FALLO] reset no limpio el doc generado architecture.md"; exit 1; }
+test ! -f "$RESET_TEST/docs/conventions.md" \
+    || { echo "[FALLO] reset no limpio el doc generado conventions.md"; exit 1; }
+test ! -f "$RESET_TEST/docs/verification.md" \
+    || { echo "[FALLO] reset no limpio el doc generado verification.md"; exit 1; }
+# Feature #4 / AC-6: los artefactos de feature sobreviven al reset.
+for artifact in spec-feature-1-demo.md plan-feature-1-demo.md review-1.md; do
+    test -f "$RESET_TEST/docs/$artifact" \
+        || { echo "[FALLO] reset borro el artefacto de feature $artifact"; exit 1; }
+done
 # Reinstall tras reset: la siembra if-missing tampoco pisa la constitution.
 (
     cd "$RESET_TEST"
@@ -366,4 +423,5 @@ test -x "$RUST_TEST/harness"
 sh "$RUST_TEST/harness_cli" status | grep '^Backlog:' >/dev/null
 echo "[Ok] binario Rust compilado por el setup e integrado via harness_cli."
 
+echo "[Ok] docs del arnes en el docs/ de la RAIZ: destino, migracion, no-pisa y reset."
 echo "[Ok] setup smoke: Rust-only, gate de credenciales, layouts, reinstall, dry-run, version, reset."

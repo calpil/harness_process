@@ -203,6 +203,35 @@ adaptado y en layout plano):
   (`setup_harness.sh` / `setup_harness.ps1`) solo si falta y nunca lo pisa;
   specs y planes deben cumplirlo y el reviewer lo verifica.
 
+## Documentacion del proceso: toda en el `docs/` de la RAIZ
+
+Con el arnes en una subcarpeta (`<proyecto>/harness_process/`, layout por
+defecto), TODA la documentacion del proceso vive en el `docs/` de la RAIZ del
+proyecto, junto a los docs del equipo:
+
+```
+miproyecto/
+|-- docs/
+|   |-- constitution.md              principios del proyecto (documento del usuario)
+|   |-- architecture.md              mapa de arquitectura
+|   |-- conventions.md               convenciones del equipo
+|   |-- verification.md              comandos de validacion
+|   |-- spec-feature-<id>-<slug>.md  spec de la feature (AC-n)
+|   |-- plan-feature-<id>-<slug>.md  plan del lider
+|   `-- impl-<id>.md / review-<id>.md
+`-- harness_process/                 binario, roles, progress/ (estado vivo)
+```
+
+Los cuatro docs base se siembran **solo si faltan** y un reinstall **nunca los
+pisa**: si tu equipo ya tiene un `docs/conventions.md`, queda intacto. Para
+refrescar una plantilla, borra el archivo y reinstala (o usa `--force`, que por
+contrato sobrescribe sin backup). `--reset` limpia solo los tres docs generados
+y conserva la constitution y los artefactos de feature.
+
+Instalaciones anteriores que tengan esos docs en `harness_process/docs/` se
+migran solas al reinstalar: se mueven a la raiz si alli no existen, y si ya
+existen no se pisa nada (el instalador avisa y deja la copia vieja donde esta).
+
 ## Verificacion
 
 ```bash

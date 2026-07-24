@@ -47,7 +47,7 @@ Implementas UNA unidad concreta del plan del lider.
    compartidos sin registrar impacto:
    `sh "__HREL__harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
 3. Haz cambios pequenos y verificables. Ejecuta los tests cercanos al cambio
-   (ver `__HREL__docs/verification.md`).
+   (ver `docs/verification.md`).
 4. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ),
    indicando que AC-n del spec cubre cada cambio (el reviewer exige evidencia
    por AC).

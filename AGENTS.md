@@ -29,9 +29,9 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   cumplen; el reviewer los verifica).
 - `docs/spec-feature-<id>-<slug>.md`: spec de la feature con AC-n
   (Given/When/Then); se aprueba (draft -> approved) antes de implementar.
-- `docs/architecture.md`: mapa de arquitectura.
-- `docs/conventions.md`: convenciones del equipo.
-- `docs/verification.md`: comandos de validacion.
+- `docs/architecture.md` (RAIZ): mapa de arquitectura.
+- `docs/conventions.md` (RAIZ): convenciones del equipo.
+- `docs/verification.md` (RAIZ): comandos de validacion.
 - `.claude/agents/leader.md`: rol lider.
 - `.claude/agents/implementer.md`: rol implementador.
 - `.claude/agents/reviewer.md`: rol revisor.

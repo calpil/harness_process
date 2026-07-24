@@ -53,6 +53,8 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
 - `docs/constitution.md` (sembrada solo si falta; nunca pisa la del usuario)
+- `docs/architecture.md`, `docs/conventions.md` y `docs/verification.md` en el
+  `docs/` de la **raíz** del proyecto (mismo criterio: solo si faltan)
 - El subcomando `harness_cli check-spec` y el gate de spec aprobado
   (`require_spec_approved`) en `advance`, `close --status done` y
   `harness_check.sh`
@@ -82,6 +84,33 @@ Con la regla activa, `advance`, `close --status done` y `harness_check.sh`
 exigen un spec `docs/spec-feature-<id>-<slug>.md` con `Estado: approved` (solo
 el usuario aprueba; ningún agente auto-aprueba). Sin la regla, el flujo sigue
 como antes (gate apagado, compatibilidad total).
+
+## Docs del arnés en el `docs/` de la raíz (migración automática)
+
+Desde esta versión, `docs/architecture.md`, `docs/conventions.md` y
+`docs/verification.md` se instalan en el `docs/` de la **raíz del proyecto**,
+junto a `docs/constitution.md`, los specs y los planes. Antes vivían en
+`<proyecto>/harness_process/docs/`, partiendo la documentación en dos lugares.
+
+**No hay que hacer nada manualmente.** Al re-correr el instalador
+(`setup_harness.sh` o `setup_harness.ps1`):
+
+- Si el doc está en `harness_process/docs/` y **no** existe en el `docs/` de la
+  raíz, se **mueve** (conserva tu contenido, no se regenera desde la plantilla) y
+  el instalador lo informa con una línea `Migrado al docs/ de la raiz: ...`.
+- Si **ya existe** en la raíz, no se pisa nada: se conserva tu archivo, la copia
+  vieja queda donde está y el instalador avisa con un `WARN`.
+- Si `harness_process/docs/` queda vacío tras la migración, se elimina.
+
+Además cambió el criterio de refresco: estos tres docs ahora se siembran
+**solo si faltan** (igual que la constitution), porque comparten carpeta con la
+documentación del equipo y un `docs/conventions.md` propio no debe perderse en un
+reinstall. Para refrescar una plantilla: borra el archivo y reinstala, o usa
+`--force` (que por contrato sobrescribe **sin** backup).
+
+`--reset` sigue limpiando solo lo generado —los tres docs, en su ubicación nueva
+y en la vieja— y conserva la constitution y los artefactos de feature
+(`spec-*`, `plan-*`, `impl-*`, `review-*`).
 
 ## Mantenimiento Rust only (post feature #2)
 

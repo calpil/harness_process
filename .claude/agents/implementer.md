@@ -32,7 +32,7 @@ Implementas UNA unidad concreta del plan del lider.
    compartidos sin registrar impacto:
    `sh "harness_process/harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
 3. Haz cambios pequenos y verificables. Ejecuta los tests cercanos al cambio
-   (ver `harness_process/docs/verification.md`).
+   (ver `docs/verification.md`).
 4. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ).
 5. Registra hitos intermedios con
    `sh "harness_process/harness_cli" advance --nota "<que avanzaste>"`: mueve hub,

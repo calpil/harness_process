@@ -100,8 +100,17 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   `templates/`. Regla de mantenedor: `templates/` y la raiz se mantienen
   espejados; `roles/*.md` es el espejo de `templates/roles/*.md` con el
   placeholder `__HREL__` sustituido por la ruta relativa del arnes.
-- La constitution se siembra en el `docs/` de la RAIZ (`SURFACE_DIR/docs`),
-  fuera de la lista de assets regenerables (no se respalda ni se pisa).
+- TODA la documentacion del proceso se instala en el `docs/` de la RAIZ
+  (`SURFACE_DIR/docs`): `constitution.md` mas los tres docs del arnes
+  (`architecture.md`, `conventions.md`, `verification.md`, lista `HARNESS_DOCS` /
+  `$script:HarnessDocs`). Ninguno esta en los assets regenerables: se siembran
+  solo-si-faltan, no se respaldan y un reinstall no los pisa (solo `--force`).
+  El arnes ya no crea un `docs/` propio.
+- Migracion: `migrate_harness_docs()` (sh) / `Move-HarnessDocsToRoot` (ps1)
+  mueven los docs que quedaron en `<harness>/docs/` de instalaciones previas,
+  solo cuando faltan en la raiz; si ya existen, avisan y no pisan nada.
+- `--reset` borra los tres docs generados en ambas ubicaciones (nueva y vieja) y
+  conserva la constitution y los artefactos de feature.
 
 ## Memory Hub
 
@@ -112,9 +121,9 @@ El hub usa exclusivamente PostgreSQL; se accede bajo `harness graph <cmd>`
 ## Layouts
 
 - `subdir` (por defecto): el arnes vive en `harness_process/` dentro de la raiz
-  multi-repo y escribe superficies en el directorio padre; el `docs/` interno del
-  arnes queda gitignorado, por eso constitution/spec/plan viven en el `docs/` de
-  la RAIZ.
+  multi-repo y escribe superficies en el directorio padre. Toda la documentacion
+  del proceso (constitution, docs del arnes, spec y plan) vive en el `docs/` de
+  la RAIZ; el arnes no tiene `docs/` propio.
 - `root`: el arnes se instala directamente en la raiz (`SURFACE_DIR == HARNESS_DIR`).
 
 ## Riesgos conocidos
