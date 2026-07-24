@@ -1,6 +1,6 @@
 # Spec - Feature #3: spec_driven_development
 
-Estado: draft
+Estado: approved
 Plan: docs/plan-feature-3-spec-driven-development.md
 Constitution: docs/constitution.md
 
