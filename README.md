@@ -137,8 +137,8 @@ Ejemplo dry-run:
 El Harness Process se actualiza **re-correndo el instalador**. Esto es intencional y explicito:
 
 - Las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `LLM.md`) y los subagentes se generan desde los heredocs del instalador.
-- Los scripts (`harness_cli`, `harness.py`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
-- El binario Rust `harness` se compila desde `rust/` con cargo (si esta disponible) y `harness_cli` lo prefiere sobre el fallback Python.
+- Los scripts (`harness_cli`, `harness_check.sh`, roles, etc.) se copian desde `templates/`.
+- El binario Rust `harness` se compila desde `rust/` con cargo (requerido); `harness_cli` despacha exclusivamente a el.
 
 Para recibir mejoras (nuevo protocolo de `check-plan`, recordatorios de planes actualizados por otros LLMs, fixes, nuevas opciones, etc.):
 
@@ -161,21 +161,21 @@ El instalador la agrega automáticamente a `.gitignore` del proyecto. El harness
 
 No existe (ni se recomienda) un comando magico `harness_cli upgrade` dentro del proyecto. La forma correcta y explícita de actualizar es volver a ejecutar el instalador desde la carpeta fuente de `harness_process`.
 
-## harness_cli: binario Rust + fallback Python
+## harness_cli: binario Rust
 
 Todos los hooks, scripts y docs invocan `sh .../harness_cli <cmd>`:
 
-- Si existe el binario `harness` (o `harness.exe` en Windows), lo ejecuta.
-  Es un solo ejecutable multi-OS (macOS/Windows/Linux) con los comandos de
-  ciclo de vida al tope (`status`, `start`, `check-plan`, ...) y el Memory
-  Hub bajo `harness graph <cmd>` (`mapa`, `impacto`, `vincular`, ...).
-- Si no, cae a `python3 harness.py` / `graph_memory.py` (mismos comandos,
-  mismos mensajes, mismos exit codes).
+- `harness_cli` (sh/ps1) despacha exclusivamente al binario `harness` (o
+  `harness.exe` en Windows). Es un solo ejecutable multi-OS
+  (macOS/Windows/Linux) con los comandos de ciclo de vida al tope (`status`,
+  `start`, `check-plan`, `check-spec`, ...) y el Memory Hub bajo
+  `harness graph <cmd>` (`mapa`, `impacto`, `vincular`, ...).
+- Sin el binario (cargo/rustup ausente) `harness_cli` falla pidiendo compilar;
+  no hay fallback Python desde la feature #2.
 
-Regla de mantenedor: los `.py` son el oraculo; cualquier cambio de
-comportamiento se espeja en `rust/src/` en el mismo commit y
-`bash tests/parity_smoke.sh` debe pasar antes de push (compara ambas
-implementaciones paso a paso). Detalles en `templates/UPDATING.md`.
+Regla de mantenedor: cualquier cambio de comportamiento vive en `rust/src/` con
+sus tests (`cargo test`, `cargo clippy -- -D warnings`) verdes antes de push.
+Detalles en `templates/UPDATING.md`.
 
 ## Spec-Driven Development (SDD)
 
@@ -212,7 +212,6 @@ bash harness_check.sh
 
 # Suites del repo fuente
 bash tests/setup_smoke.sh     # instalador (layouts, hooks, build-on-setup)
-bash tests/parity_smoke.sh    # paridad Rust vs Python (oraculo)
 (cd rust && cargo clippy --all-targets -- -D warnings && cargo test)
 ```
 

@@ -49,7 +49,7 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - Superficies de instrucciones (CLAUDE.md, AGENTS.md, etc.)
 - Subagentes nativos (`.claude/agents/`, `.codex/agents/`, `.gemini/agents/`)
 - Scripts del arnés (`harness_cli`, `harness_check.sh`, `harness_status.sh`, roles, etc.)
-- El binario Rust `harness` (recompilado con cargo si está disponible; sin cargo, `harness_cli` usa el fallback Python automáticamente)
+- El binario Rust `harness` (recompilado con cargo, requerido; sin cargo/rustup `harness_cli` falla pidiendo instalarlo y re-correr el setup)
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
 - `docs/constitution.md` (sembrada solo si falta; nunca pisa la del usuario)

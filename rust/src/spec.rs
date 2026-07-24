@@ -400,6 +400,30 @@ mod tests {
     }
 
     #[test]
+    fn spec_gate_should_block_unrecognized_estado_when_rule_is_on() {
+        // Fail-closed: un `Estado:` no reconocido (ni draft ni approved) NO abre
+        // el gate; solo `approved` lo hace. Cubre el camino SpecState::Other,
+        // que antes solo se probaba a nivel de spec_state, no del gate.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let f = feature(1, "demo");
+        let data = json!({"rules": {"require_spec_approved": true}});
+        write_spec(&paths, &f).unwrap();
+        let p = spec_path(&paths, &f);
+        let other = std::fs::read_to_string(&p)
+            .unwrap()
+            .replace("Estado: draft", "Estado: pendiente");
+        std::fs::write(&p, other).unwrap();
+        assert_eq!(spec_state(&paths, &f), SpecState::Other);
+        let err = spec_gate(&paths, &data, &f).unwrap_err();
+        assert_eq!(err.code, 1);
+        let msg = err.message.unwrap();
+        assert!(msg.contains("spec-feature-1-demo.md"));
+        assert!(msg.contains("desconocido"));
+        assert!(msg.contains("Estado: approved"));
+    }
+
+    #[test]
     fn close_requires_spec_should_gate_only_done() {
         // close --status done gatea; blocked/pending son la valvula de escape
         assert!(close_requires_spec("done"));

@@ -428,3 +428,62 @@ Riesgos para el reviewer:
   activa la regla y cierra la feature tras la aprobacion de Alan (`Estado: approved`).
 - `tests/setup_smoke.ps1` no se ejecuto (sin pwsh): la ejecucion Windows real queda
   pendiente de entorno, como en feature #1.
+
+## U6 - Correcciones de la revisión adversarial (AC-3, AC-4, AC-7)
+
+Revisión multi-agente (6 dimensiones × verificación por refutación): 3 hallazgos
+CONFIRMED (1 high, 1 medium, 1 low) corregidos aquí; 2 REFUTED correctamente
+descartados; la dimensión shell-gate se re-revisó a mano (harness_check.sh) sin
+hallazgos (el bloque check-spec es clon fiel del de check-plan; rc capturado en la
+rama `else` de un `if`; `set -e` no aborta por `if`/`||`; MODE respetado).
+
+Archivos:
+
+- `setup_harness.ps1` (HIGH, paridad de plataforma => AC-3): el stop-hook de
+  PowerShell (`Write-PowerShellHookRuntime`, rama stop) corría solo `check-plan`,
+  nunca `check-spec`, dejando el gate DURO `require_spec_approved` SIN aplicar en
+  Windows; además `& $cli` no lanza excepción con exit!=0 (harness_cli.ps1 hace
+  `exit $LASTEXITCODE`), así que el bloque de block nunca disparaba ni por
+  staleness. Fix: correr `check-plan` Y `check-spec`, probar `$LASTEXITCODE` tras
+  cada uno y `throw` en 2 para que el `catch` emita la decisión de block (paridad
+  con harness_check.sh en la superficie sh).
+- `setup_harness.sh` + `setup_harness.ps1` (MEDIUM, integridad de datos => AC-4):
+  `--reset` barría `$HARNESS_DIR/docs` entero; en layout ROOT
+  (HARNESS_DIR==SURFACE_DIR) eso borraba la `docs/constitution.md` del usuario y el
+  reinstall la reemplazaba por la plantilla, violando "un reinstall NUNCA lo pisa"
+  (con `--force`, pérdida sin backup). Fix: el reset elimina solo los docs
+  GENERADOS (architecture.md, conventions.md, verification.md), preservando la
+  constitution y los artefactos de feature (spec-*/plan-*/impl-*/review-*).
+- `README.md` + `UPDATING.md` + `templates/UPDATING.md` (LOW, coherencia => AC-7):
+  deuda viva de la feature #2 — se eliminaron las menciones al "fallback Python"
+  ya inexistente, el oráculo `.py` y el comando roto `bash tests/parity_smoke.sh`
+  (archivo ausente). El texto queda alineado con "Mantenimiento Rust only".
+- `rust/src/spec.rs` (rigor de tests => AC-6): nuevo test
+  `spec_gate_should_block_unrecognized_estado_when_rule_is_on` que ejercita el
+  camino fail-closed `SpecState::Other` (p.ej. `Estado: pendiente`) por el gate,
+  antes solo cubierto a nivel de `spec_state`.
+- `tests/setup_smoke.sh` (AC-6): el bloque de reset ahora prueba la garantía real:
+  una constitution con sentinel del usuario SOBREVIVE al `--reset` y al reinstall
+  posterior (root), y los docs generados SÍ se limpian.
+
+Hallazgos REFUTED (no eran defectos):
+
+- "check-plan exit 2 ahora también significa spec stale y los consumidores tragan
+  stdout": FALSO — harness_status.sh usa `2>/dev/null` (solo stderr); el stdout con
+  el mensaje distintivo del spec fluye a la terminal.
+- "SpecState::Other nunca se prueba bajo regla activa": la observación de cobertura
+  era cierta pero no es un defecto de comportamiento (el código ya es fail-closed);
+  aun así se cerró la brecha con el test nuevo de arriba.
+
+Verificaciones (todas en verde):
+
+- `(cd rust && cargo test)` => 35 unit + 14 integración, 0 fallos.
+- `(cd rust && cargo clippy --all-targets -- -D warnings)` => limpio.
+- `bash -n setup_harness.sh` y `bash -n tests/setup_smoke.sh` => OK.
+- `bash tests/setup_smoke.sh` => rc 0 (incluye la nueva aserción reset+constitution).
+- `HARNESS_REPO_ROOT=... bash harness_check.sh` => rc 0.
+- Espejado templates/ ↔ raíz intacto (harness_check, CHECKPOINTS, roles).
+- Binario raíz refrescado a 0.3.0.
+
+Nota de entorno: el fix HIGH del hook ps1 y el fix del reset ps1 no se ejecutaron
+en Windows (sin pwsh); revisión manual + paridad conceptual con la superficie sh.

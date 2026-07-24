@@ -489,7 +489,14 @@ if [ "$RESET" -eq 1 ]; then
         "$HARNESS_DIR/.harness_layout"
         "$HARNESS_DIR/.harness_backend"
         "$HARNESS_DIR/roles"
-        "$HARNESS_DIR/docs"
+        # Solo los docs GENERADOS por el instalador (desde templates/docs/). NO
+        # barremos docs/ entero: en layout root HARNESS_DIR==SURFACE_DIR, y eso
+        # borraria la constitution del usuario ("un reinstall NUNCA lo pisa") y
+        # los artefactos de feature (spec-*/plan-*/impl-*/review-*), que son tu
+        # trabajo, no superficie generada.
+        "$HARNESS_DIR/docs/architecture.md"
+        "$HARNESS_DIR/docs/conventions.md"
+        "$HARNESS_DIR/docs/verification.md"
         "$HARNESS_DIR/progress"
         "$HARNESS_DIR/CHECKPOINTS.md"
         "$HARNESS_DIR/feature_list.json"

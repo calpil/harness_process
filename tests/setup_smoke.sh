@@ -299,7 +299,7 @@ test ! -f "$DRY_TEST/.harness_layout"   # nada debe haberse escrito
 VERSION_OUT=$(bash "$REPO_ROOT/setup_harness.sh" --version)
 test -n "$VERSION_OUT"
 
-# Reset basico en temp (no debe fallar)
+# Reset en temp: NO debe borrar la constitution del usuario (layout root).
 RESET_TEST="$TMP_ROOT/reset-test"
 copy_fixture "$RESET_TEST"
 (
@@ -309,7 +309,11 @@ copy_fixture "$RESET_TEST"
         DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
     bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1 || true
 )
-# Ahora reset
+# La constitution es un documento del USUARIO: se sembro y el usuario la edita.
+test -f "$RESET_TEST/docs/constitution.md"
+RESET_SENTINEL="SENTINEL-CONSTITUTION-RESET-$$"
+printf '\n<!-- %s -->\n' "$RESET_SENTINEL" >> "$RESET_TEST/docs/constitution.md"
+# Ahora reset (respalda y limpia SOLO las superficies/docs generados)
 (
     cd "$RESET_TEST"
     HOME="$TMP_ROOT/home" \
@@ -317,9 +321,24 @@ copy_fixture "$RESET_TEST"
         DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
     bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity --reset >/dev/null 2>&1
 )
-# Despues de reset, al menos las superficies principales deberian haber sido tocadas (pueden no existir si reset limpio todo)
-# El test solo verifica que el comando no exploto y que backup se genero en algun lado
+# Garantia "un reinstall NUNCA lo pisa": el reset conserva la constitution editada.
+grep -q "$RESET_SENTINEL" "$RESET_TEST/docs/constitution.md" \
+    || { echo "[FALLO] reset borro la constitution del usuario (layout root)"; exit 1; }
+# ...pero SI limpia los docs generados (architecture.md viene de templates/docs/).
+test ! -f "$RESET_TEST/docs/architecture.md" \
+    || { echo "[FALLO] reset no limpio el doc generado architecture.md"; exit 1; }
+# Reinstall tras reset: la siembra if-missing tampoco pisa la constitution.
+(
+    cd "$RESET_TEST"
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$TMP_ROOT/reset-hub" \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+    bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1 || true
+)
+grep -q "$RESET_SENTINEL" "$RESET_TEST/docs/constitution.md" \
+    || { echo "[FALLO] reinstall tras reset piso la constitution del usuario"; exit 1; }
 find "$RESET_TEST/bkp" -type f -name '*.bak.*' | head -1 | grep -q . || echo "[info] reset genero backups esperados (o carpeta limpia)"
+echo "[Ok] reset preserva la constitution del usuario (root) y limpia docs generados."
 
 # --- Binario Rust: build real durante el setup (sin binario sembrado) -------
 RUST_TEST="$TMP_ROOT/rust-binary"

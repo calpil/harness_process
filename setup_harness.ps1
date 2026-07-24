@@ -696,7 +696,16 @@ function Invoke-HarnessEvent {
         "^(stop|Stop|AfterAgent|SessionEnd|SessionStop)$" {
             if (__WITH_SUBAGENTS__ -eq 1) {
                 & $cli autocheck
+                # Paridad con harness_check.sh (superficie sh): el Stop aplica
+                # AMBOS gates, plan y spec. harness_cli.ps1 delega en harness.exe
+                # con `exit $LASTEXITCODE`; `& $cli` NO lanza excepcion con exit
+                # != 0, asi que probamos el codigo a mano y lanzamos para que el
+                # bloque `catch` emita la decision de block (exit 2 = stale, o
+                # regla require_spec_approved activa con spec sin aprobar).
                 & $cli check-plan
+                if ($LASTEXITCODE -eq 2) { throw "Plan desactualizado (modificado por otro LLM). Re-lee el plan antes de continuar." }
+                & $cli check-spec
+                if ($LASTEXITCODE -eq 2) { throw "Spec sin aprobar o modificado. Si esta en draft, pide al USUARIO aprobarlo (Estado: approved) antes de continuar." }
             }
             & $cli status
         }
@@ -1048,7 +1057,13 @@ function Invoke-HarnessReset {
     )
     $targets += @(
         (Join-Path $script:HarnessDir "roles"),
-        (Join-Path $script:HarnessDir "docs"),
+        # Solo los docs GENERADOS (desde templates/docs/). NO barremos docs/
+        # entero: en layout root HarnessDir==SurfaceDir y eso borraria la
+        # constitution del usuario ("un reinstall NUNCA lo pisa") y los
+        # artefactos de feature (spec-*/plan-*/impl-*/review-*).
+        (Join-Path $script:HarnessDir "docs/architecture.md"),
+        (Join-Path $script:HarnessDir "docs/conventions.md"),
+        (Join-Path $script:HarnessDir "docs/verification.md"),
         (Join-Path $script:HarnessDir "progress"),
         (Join-Path $script:HarnessDir "CHECKPOINTS.md"),
         (Join-Path $script:HarnessDir "feature_list.json")
