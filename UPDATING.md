@@ -55,6 +55,8 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - `docs/constitution.md` (sembrada solo si falta; nunca pisa la del usuario)
 - `docs/architecture.md`, `docs/conventions.md` y `docs/verification.md` en el
   `docs/` de la **raíz** del proyecto (mismo criterio: solo si faltan)
+- `docs/prd/PRD-master.md` y `docs/prd/SDD-master.md` (planillas maestras del
+  proyecto; solo si faltan, y `--reset` no las borra)
 - El subcomando `harness_cli check-spec` y el gate de spec aprobado
   (`require_spec_approved`) en `advance`, `close --status done` y
   `harness_check.sh`
@@ -111,6 +113,32 @@ reinstall. Para refrescar una plantilla: borra el archivo y reinstala, o usa
 `--reset` sigue limpiando solo lo generado —los tres docs, en su ubicación nueva
 y en la vieja— y conserva la constitution y los artefactos de feature
 (`spec-*`, `plan-*`, `impl-*`, `review-*`).
+
+## Planillas maestras PRD y SDD (`docs/prd/`)
+
+Desde esta versión el instalador siembra dos planillas para proyectos que
+arrancan de cero, en el `docs/prd/` de la **raíz del proyecto**:
+
+- `docs/prd/PRD-master.md` — qué se construye y por qué: problema, usuarios y
+  jobs-to-be-done, métricas de éxito, alcance y no-objetivos, restricciones,
+  recorridos P1/P2, tabla **Hitos → features** (cada fila se carga al backlog con
+  `harness_cli add`), riesgos y decisiones abiertas.
+- `docs/prd/SDD-master.md` — cómo se construye, a nivel proyecto: arquitectura
+  objetivo, stack, contratos entre componentes, decisiones técnicas tipo ADR,
+  datos, no funcionales, estrategia de verificación, riesgos y decisiones
+  abiertas. Es distinto de `docs/architecture.md`, que mapea lo que **ya** existe.
+
+Garantías (mismo criterio que `docs/constitution.md`):
+
+- Se siembran **solo si faltan**. Un reinstall nunca las pisa, y **ni `--force`**
+  las sobrescribe: lo que hay escrito ahí es tu proyecto, no una plantilla
+  refrescable.
+- **`--reset` no las borra.** No son superficie generada del arnés. Los tres docs
+  del arnés (`architecture.md`, `conventions.md`, `verification.md`) sí se
+  limpian con `--reset`; `docs/prd/` no.
+
+En instalaciones existentes aparecen al re-correr el instalador, sin tocar nada
+de lo que ya tengas.
 
 ## Mantenimiento Rust only (post feature #2)
 

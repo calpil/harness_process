@@ -362,6 +362,16 @@ HARNESS_DOCS=(
     "verification.md"
 )
 
+# Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
+# documentos del USUARIO: se siembran una sola vez si faltan, no se respaldan, no
+# se regeneran y NO entran en los reset targets (a diferencia de HARNESS_DOCS,
+# que son plantillas del arnes y si se limpian con --reset). Un proyecto que
+# arranca de cero las completa antes de cargar su primera feature al backlog.
+PRD_DOCS=(
+    "PRD-master.md"
+    "SDD-master.md"
+)
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --with-subagents) WITH_SUBAGENTS=1 ;;
@@ -506,11 +516,13 @@ if [ "$RESET" -eq 1 ]; then
     )
     # Solo los docs GENERADOS por el instalador (desde templates/docs/), en el
     # docs/ de la RAIZ. NO barremos docs/ entero: ahi conviven la constitution
-    # del usuario ("un reinstall NUNCA lo pisa") y los artefactos de feature
-    # (spec-*/plan-*/impl-*/review-*), que son tu trabajo, no superficie
-    # generada. Se agregan tambien las rutas viejas del arnes para que un reset
-    # limpie instalaciones anteriores a la migracion (en layout root ambas
-    # coinciden y el bucle simplemente no encuentra el duplicado).
+    # del usuario ("un reinstall NUNCA lo pisa"), las planillas maestras de
+    # docs/prd/ (PRD y SDD del proyecto: NO se listan aqui a proposito, son tu
+    # documento, no superficie del arnes) y los artefactos de feature
+    # (spec-*/plan-*/impl-*/review-*), que son tu trabajo. Se agregan tambien las
+    # rutas viejas del arnes para que un reset limpie instalaciones anteriores a
+    # la migracion (en layout root ambas coinciden y el bucle simplemente no
+    # encuentra el duplicado).
     for harness_doc in "${HARNESS_DOCS[@]}"; do
         reset_targets+=(
             "$SURFACE_DIR/docs/$harness_doc"
@@ -892,6 +904,11 @@ Archivos principales:
   implementar.
 - `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
 - `__HREL__progress/history.md`: bitacora append-only.
+- `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto (problema,
+  metricas, alcance, hitos); sus hitos alimentan `feature_list.json`. Para
+  proyectos que arrancan de cero, se completa antes de la primera feature.
+- `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
+  proyecto (distinta de `docs/architecture.md`, que mapea lo que YA existe).
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
 - `docs/conventions.md` (RAIZ): convenciones del equipo.
 - `docs/verification.md` (RAIZ): comandos de validacion.
@@ -1448,6 +1465,8 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "docs/conventions.md"
         "docs/verification.md"
         "docs/constitution.md"
+        "docs/prd/PRD-master.md"
+        "docs/prd/SDD-master.md"
         "roles/README.md"
         "roles/leader.md"
         "roles/implementer.md"
@@ -1589,6 +1608,8 @@ do_mkdir ".claude"
 # planes) vive en el docs/ de la RAIZ (SURFACE_DIR). En layout subdir el padre
 # puede no tener docs/ todavia; en root es el mismo directorio (idempotente).
 [ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "$SURFACE_DIR/docs"
+# Planillas maestras del proyecto (PRD/SDD) en su propia subcarpeta.
+[ "$WITH_SUBAGENTS" -eq 1 ] && do_mkdir "$SURFACE_DIR/docs/prd"
 # Con el docs/ de la raiz ya creado, mover lo que haya quedado de instalaciones
 # anteriores (no-op en instalaciones nuevas y en layout root).
 migrate_harness_docs
@@ -1949,6 +1970,17 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     for harness_doc in "${HARNESS_DOCS[@]}"; do
         if [ ! -f "$SURFACE_DIR/docs/$harness_doc" ] || [ "$FORCE" -eq 1 ]; then
             install_asset "docs/$harness_doc" "$SURFACE_DIR/docs/$harness_doc"
+        else
+            COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        fi
+    done
+
+    # Planillas maestras PRD/SDD: documentos del USUARIO. Se siembran SOLO si
+    # faltan y ni --force las pisa: a diferencia de las plantillas del arnes,
+    # aqui lo que hay escrito es el proyecto en si (no una plantilla refrescable).
+    for prd_doc in "${PRD_DOCS[@]}"; do
+        if [ ! -f "$SURFACE_DIR/docs/prd/$prd_doc" ]; then
+            install_asset "docs/prd/$prd_doc" "$SURFACE_DIR/docs/prd/$prd_doc"
         else
             COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
         fi

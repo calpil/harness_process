@@ -192,6 +192,15 @@ test ! -e "$SUBDIR_HARNESS/docs/architecture.md"
 test ! -e "$SUBDIR_HARNESS/docs/conventions.md"
 test ! -e "$SUBDIR_HARNESS/docs/verification.md"
 test ! -d "$SUBDIR_HARNESS/docs"
+# Feature #5 / AC-1: planillas maestras PRD y SDD en docs/prd/ de la RAIZ.
+test -f "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+test -f "$SUBDIR_ROOT/docs/prd/SDD-master.md"
+test ! -d "$SUBDIR_HARNESS/docs/prd"
+# AC-7 / AC-8: las planillas traen las secciones que las hacen utiles.
+grep -q '^## 7. Hitos -> features' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+grep -q 'harness_cli add' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+grep -q '^## 4. Decisiones tecnicas' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
+grep -q 'docs/architecture.md' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq 'harness_process/harness_cli" graph mapa' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
@@ -219,6 +228,9 @@ printf '\n<!-- %s -->\n' "$CONST_SENTINEL" >> "$SUBDIR_ROOT/docs/constitution.md
 # (sembrar solo-si-falta). Un sentinel debe SOBREVIVIR al reinstall.
 DOCS_SENTINEL="SENTINEL-DOCS-ARNES-NO-PISA-$$"
 printf '\n<!-- %s -->\n' "$DOCS_SENTINEL" >> "$SUBDIR_ROOT/docs/conventions.md"
+# Feature #5 / AC-3: el PRD del proyecto es del USUARIO; el reinstall no lo pisa.
+PRD_SENTINEL="SENTINEL-PRD-NO-PISA-$$"
+printf '\n<!-- %s -->\n' "$PRD_SENTINEL" >> "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 CUSTOM_BKP="$TMP_ROOT/custom-backups"
 (
     cd "$SUBDIR_HARNESS"
@@ -240,6 +252,8 @@ find "$CUSTOM_BKP" -type f -name 'AGENTS.md.bak.*' -print -quit | grep -q .
 grep -q "$CONST_SENTINEL" "$SUBDIR_ROOT/docs/constitution.md"
 # Feature #4 / AC-4: tampoco pisa los docs del arnes ya presentes en la raiz.
 grep -q "$DOCS_SENTINEL" "$SUBDIR_ROOT/docs/conventions.md"
+# Feature #5 / AC-3: el PRD ya escrito sobrevive intacto al reinstall.
+grep -q "$PRD_SENTINEL" "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 
 # --- Feature #4 / AC-3 + AC-4: migracion de instalaciones previas -----------
 # Fixture con los docs del arnes en la ubicacion VIEJA (<harness>/docs/). El
@@ -361,6 +375,12 @@ printf '\n<!-- %s -->\n' "$RESET_SENTINEL" >> "$RESET_TEST/docs/constitution.md"
 printf '# spec\n' > "$RESET_TEST/docs/spec-feature-1-demo.md"
 printf '# plan\n' > "$RESET_TEST/docs/plan-feature-1-demo.md"
 printf '# review\n' > "$RESET_TEST/docs/review-1.md"
+# Feature #5 / AC-4: las planillas maestras se sembraron y el usuario las
+# completo; el reset NO puede borrarlas (no son superficie generada).
+test -f "$RESET_TEST/docs/prd/PRD-master.md"
+test -f "$RESET_TEST/docs/prd/SDD-master.md"
+PRD_RESET_SENTINEL="SENTINEL-PRD-RESET-$$"
+printf '\n<!-- %s -->\n' "$PRD_RESET_SENTINEL" >> "$RESET_TEST/docs/prd/PRD-master.md"
 # Ahora reset (respalda y limpia SOLO las superficies/docs generados)
 (
     cd "$RESET_TEST"
@@ -384,6 +404,12 @@ for artifact in spec-feature-1-demo.md plan-feature-1-demo.md review-1.md; do
     test -f "$RESET_TEST/docs/$artifact" \
         || { echo "[FALLO] reset borro el artefacto de feature $artifact"; exit 1; }
 done
+# Feature #5 / AC-4: las planillas maestras PRD/SDD sobreviven al reset, con el
+# contenido que escribio el usuario.
+grep -q "$PRD_RESET_SENTINEL" "$RESET_TEST/docs/prd/PRD-master.md" \
+    || { echo "[FALLO] reset borro o piso el PRD del proyecto"; exit 1; }
+test -f "$RESET_TEST/docs/prd/SDD-master.md" \
+    || { echo "[FALLO] reset borro el SDD master del proyecto"; exit 1; }
 # Reinstall tras reset: la siembra if-missing tampoco pisa la constitution.
 (
     cd "$RESET_TEST"
@@ -424,4 +450,5 @@ sh "$RUST_TEST/harness_cli" status | grep '^Backlog:' >/dev/null
 echo "[Ok] binario Rust compilado por el setup e integrado via harness_cli."
 
 echo "[Ok] docs del arnes en el docs/ de la RAIZ: destino, migracion, no-pisa y reset."
+echo "[Ok] planillas maestras docs/prd/ (PRD + SDD): siembra, no-pisa y supervivencia al reset."
 echo "[Ok] setup smoke: Rust-only, gate de credenciales, layouts, reinstall, dry-run, version, reset."

@@ -4,8 +4,8 @@ Estado: in_progress
 Microservicios:
 - harness
 
-Spec: docs/spec-feature-4-harness-docs-to-root-docs.md (Estado: draft — PENDIENTE
-de aprobacion del USUARIO; hasta entonces NADIE implementa)
+Spec: docs/spec-feature-4-harness-docs-to-root-docs.md (Estado: approved por el
+USUARIO el 2026-07-24)
 Constitution: docs/constitution.md
 
 ## Alcance
@@ -142,3 +142,9 @@ U1-U5 esten estables, para portar una sola vez.
 - Sin decisiones pendientes abiertas: la implementacion avanzo por decision
   explicita del usuario CON el gate activo (spec en `Estado: draft`). Falta la
   aprobacion del USUARIO para poder registrar `advance` y cerrar la feature.
+
+### Avance 2026-07-24T20:51:09Z
+Feature #4 implementada: docs del arnes en el docs/ de la raiz (U1-U8), smoke sh verde, ps1 portado sin ejecutar
+
+---
+Cerrado: 2026-07-24T20:53:14Z - status=done - 

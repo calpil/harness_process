@@ -81,6 +81,16 @@ $script:HarnessDocs = @(
     "verification.md"
 )
 
+# Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
+# documentos del USUARIO: se siembran una sola vez si faltan, no se respaldan, no
+# se regeneran y NO entran en los reset targets (a diferencia de HarnessDocs, que
+# son plantillas del arnes y si se limpian con -Reset). Paridad con PRD_DOCS de
+# setup_harness.sh.
+$script:PrdDocs = @(
+    "PRD-master.md",
+    "SDD-master.md"
+)
+
 # Guardrail: nunca escribir superficies en el HOME del usuario (pisaria
 # .claude/settings.json y agentes globales). Escape: HARNESS_ALLOW_HOME_SURFACE=1.
 if ($env:HARNESS_ALLOW_HOME_SURFACE -ne "1") {
@@ -412,6 +422,8 @@ function Assert-HarnessAssets {
             "docs/conventions.md",
             "docs/verification.md",
             "docs/constitution.md",
+            "docs/prd/PRD-master.md",
+            "docs/prd/SDD-master.md",
             "roles/README.md",
             "roles/leader.md",
             "roles/implementer.md",
@@ -1118,7 +1130,9 @@ function Invoke-HarnessReset {
     )
     # Solo los docs GENERADOS (desde templates/docs/), en el docs/ de la RAIZ. NO
     # barremos docs/ entero: ahi conviven la constitution del usuario ("un
-    # reinstall NUNCA lo pisa") y los artefactos de feature
+    # reinstall NUNCA lo pisa"), las planillas maestras de docs/prd/ (PRD y SDD
+    # del proyecto: NO se listan aqui a proposito, son documento del usuario) y
+    # los artefactos de feature
     # (spec-*/plan-*/impl-*/review-*). Se agregan tambien las rutas viejas del
     # arnes para limpiar instalaciones anteriores a la migracion (en layout root
     # ambas coinciden y el duplicado simplemente no existe).
@@ -1217,6 +1231,7 @@ try {
             (Join-Path $script:HarnessDir "roles"),
             (Join-Path $script:HarnessDir "progress"),
             (Join-Path $script:SurfaceDir "docs"),
+            (Join-Path $script:SurfaceDir "docs/prd"),
             (Join-Path $script:SurfaceDir ".claude/agents"),
             (Join-Path $script:SurfaceDir ".codex/agents"),
             (Join-Path $script:SurfaceDir ".gemini/agents")
@@ -1287,6 +1302,17 @@ try {
             $docDest = Join-Path $script:SurfaceDir "docs/$harnessDoc"
             if ((-not (Test-Path -LiteralPath $docDest)) -or $Force) {
                 Install-HarnessAsset -Asset "docs/$harnessDoc" -Destination $docDest
+            } else {
+                $script:Counters.skipped++
+            }
+        }
+        # Planillas maestras PRD/SDD: documentos del USUARIO. Se siembran SOLO si
+        # faltan y ni -Force las pisa: a diferencia de las plantillas del arnes,
+        # aqui lo escrito es el proyecto en si, no una plantilla refrescable.
+        foreach ($prdDoc in $script:PrdDocs) {
+            $prdDest = Join-Path $script:SurfaceDir "docs/prd/$prdDoc"
+            if (-not (Test-Path -LiteralPath $prdDest)) {
+                Install-HarnessAsset -Asset "docs/prd/$prdDoc" -Destination $prdDest
             } else {
                 $script:Counters.skipped++
             }

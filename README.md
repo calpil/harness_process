@@ -216,11 +216,36 @@ miproyecto/
 |   |-- architecture.md              mapa de arquitectura
 |   |-- conventions.md               convenciones del equipo
 |   |-- verification.md              comandos de validacion
+|   |-- prd/
+|   |   |-- PRD-master.md            que se construye y por que (planilla)
+|   |   `-- SDD-master.md            como se construye, a nivel proyecto (planilla)
 |   |-- spec-feature-<id>-<slug>.md  spec de la feature (AC-n)
 |   |-- plan-feature-<id>-<slug>.md  plan del lider
 |   `-- impl-<id>.md / review-<id>.md
 `-- harness_process/                 binario, roles, progress/ (estado vivo)
 ```
+
+### Proyectos que arrancan de cero: `docs/prd/`
+
+`docs/prd/PRD-master.md` y `docs/prd/SDD-master.md` son planillas para completar
+antes de cargar la primera feature. El flujo queda encadenado:
+
+```
+docs/prd/PRD-master.md   (hitos priorizados)
+        |  sh harness_cli add --name <slug> --service <svc> --acceptance "<criterio>"
+        v
+feature_list.json        (backlog ejecutable)
+        |  sh harness_cli start --feature <id>
+        v
+docs/spec-feature-<id>-<slug>.md  +  docs/plan-feature-<id>-<slug>.md
+        |  aprobacion del usuario (Estado: approved)
+        v
+implementacion -> docs/impl-<id>.md -> docs/review-<id>.md
+```
+
+`docs/prd/` son documentos **tuyos**: se siembran una sola vez si faltan, ningun
+reinstall los pisa y **`--reset` no los borra** (a diferencia de los tres docs del
+arnes, que si se limpian por ser plantillas regenerables).
 
 Los cuatro docs base se siembran **solo si faltan** y un reinstall **nunca los
 pisa**: si tu equipo ya tiene un `docs/conventions.md`, queda intacto. Para

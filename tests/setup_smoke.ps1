@@ -114,13 +114,28 @@ exit 0
     foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc")) "Harness doc $harnessDoc was not seeded into the root docs/."
     }
+    # Feature #5 / AC-2: las planillas maestras PRD y SDD se siembran en docs/prd/.
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md")) "PRD-master.md was not seeded into docs/prd/."
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md")) "SDD-master.md was not seeded into docs/prd/."
+    # Feature #5 / AC-7 + AC-8: traen las secciones que las hacen utiles.
+    $prdText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw
+    Assert-True ($prdText -match '## 7\. Hitos -> features') "PRD-master.md is missing the milestones-to-features table."
+    Assert-True ($prdText -match 'harness_cli add') "PRD-master.md does not link milestones to the backlog command."
+    $sddText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md") -Raw
+    Assert-True ($sddText -match '## 4\. Decisiones tecnicas') "SDD-master.md is missing the technical decisions section."
+    Assert-True ($sddText -match 'docs/architecture\.md') "SDD-master.md does not distinguish itself from docs/architecture.md."
+
     # Feature #4 / AC-4 (reinstall): comparten carpeta con la documentacion del
     # equipo, asi que se siembran solo-si-faltan y un reinstall NO los pisa.
     $docsSentinel = "SENTINEL-DOCS-ARNES-NO-PISA-PS"
     Add-Content -LiteralPath (Join-Path $fixture "docs/conventions.md") -Value "<!-- $docsSentinel -->"
+    # Feature #5 / AC-3: el PRD del proyecto es del USUARIO; el reinstall no lo pisa.
+    $prdSentinel = "SENTINEL-PRD-NO-PISA-PS"
+    Add-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Value "<!-- $prdSentinel -->"
     & (Join-Path $fixture "setup_harness.ps1") `
         -Root -NoGraphify -NoGraphifySkills -NoAntigravity -CargoTargetDir $cargoTarget
     Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/conventions.md") -Raw) -match $docsSentinel) "Reinstall overwrote a harness doc already present in the root docs/."
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match $prdSentinel) "Reinstall overwrote the project's PRD."
 
     # Feature #4 / AC-6: los artefactos de feature comparten carpeta con los docs
     # generados y el reset NO puede llevarselos por delante.
@@ -137,6 +152,10 @@ exit 0
     foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md")) {
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc"))) "Reset did not clean the generated doc $harnessDoc."
     }
+    # Feature #5 / AC-4: las planillas maestras NO son superficie generada y
+    # sobreviven al reset con el contenido que escribio el usuario.
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match $prdSentinel) "Reset removed or overwrote the project's PRD."
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md")) "Reset removed the project's SDD master."
 
     # --- Feature #4 / AC-1 + AC-3 + AC-4: layout subdir y migracion -----------
     # El arnes vive en <raiz>/harness_process y los docs deben quedar en
@@ -157,6 +176,11 @@ exit 0
 
     # AC-1: destino raiz, y la subcarpeta del arnes ya no tiene esos docs.
     Assert-True (Test-Path -LiteralPath (Join-Path $subdirRoot "docs/constitution.md")) "Constitution was not seeded into the multi-repo root docs/."
+    # Feature #5 / AC-1: las planillas maestras van al docs/prd/ de la RAIZ, no a
+    # la subcarpeta del arnes.
+    Assert-True (Test-Path -LiteralPath (Join-Path $subdirRoot "docs/prd/PRD-master.md")) "PRD-master.md was not seeded into the multi-repo root docs/prd/."
+    Assert-True (Test-Path -LiteralPath (Join-Path $subdirRoot "docs/prd/SDD-master.md")) "SDD-master.md was not seeded into the multi-repo root docs/prd/."
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $subdirHarness "docs/prd"))) "docs/prd/ was created inside the harness subfolder."
     # AC-3: se movio el contenido viejo (no se regenero desde la plantilla).
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/architecture.md") -Raw).Trim() -eq "VIEJO-ARCHITECTURE") "architecture.md was not migrated with its content."
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/verification.md") -Raw).Trim() -eq "VIEJO-VERIFICATION") "verification.md was not migrated with its content."
@@ -166,7 +190,7 @@ exit 0
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/conventions.md") -Raw) -match $teamSentinel) "Migration overwrote the team's conventions.md in the root docs/."
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirHarness "docs/conventions.md") -Raw).Trim() -eq "VIEJO-CONVENTIONS") "Migration removed the old copy instead of keeping it."
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, harness docs in root docs/ (seed, migration, no-overwrite), and reset."
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, and reset."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

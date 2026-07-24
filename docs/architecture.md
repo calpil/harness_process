@@ -66,6 +66,11 @@ son best-effort y NUNCA bloquean (tragan errores y re-firman en segundo plano).
 Inspirado en spec-kit, adaptado y con **layout plano** (specs junto a los planes
 en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
 
+0. (Proyecto nuevo) El USUARIO completa `docs/prd/PRD-master.md` (que se
+   construye y por que) y `docs/prd/SDD-master.md` (como, a nivel proyecto). La
+   tabla "Hitos -> features" del PRD se carga al backlog con `harness_cli add`.
+   Paso opcional: ningun gate lo exige, y las planillas no las genera ni vigila
+   el binario, solo las siembra el instalador.
 1. `harness_cli start --feature <id>` siembra SIEMPRE (aunque la regla este
    apagada) `docs/spec-feature-<id>-<slug>.md` con `Estado: draft` ademas del
    plan, y firma ambos (`last_spec_sig` reusa `plan::plan_signature`).
@@ -106,6 +111,11 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   `$script:HarnessDocs`). Ninguno esta en los assets regenerables: se siembran
   solo-si-faltan, no se respaldan y un reinstall no los pisa (solo `--force`).
   El arnes ya no crea un `docs/` propio.
+- Planillas maestras del proyecto: `docs/prd/PRD-master.md` y
+  `docs/prd/SDD-master.md` (listas `PRD_DOCS` / `$script:PrdDocs`) se siembran en
+  `SURFACE_DIR/docs/prd` solo-si-faltan. Son documentos del USUARIO: ni `--force`
+  las pisa y NO figuran en los reset targets, a diferencia de `HARNESS_DOCS`, que
+  son plantillas regenerables del arnes.
 - Migracion: `migrate_harness_docs()` (sh) / `Move-HarnessDocsToRoot` (ps1)
   mueven los docs que quedaron en `<harness>/docs/` de instalaciones previas,
   solo cuando faltan en la raiz; si ya existen, avisan y no pisan nada.

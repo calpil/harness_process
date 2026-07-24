@@ -29,6 +29,10 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   cumplen; el reviewer los verifica).
 - `docs/spec-feature-<id>-<slug>.md`: spec de la feature con AC-n
   (Given/When/Then); se aprueba (draft -> approved) antes de implementar.
+- `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto; sus hitos
+  alimentan `feature_list.json`.
+- `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
+  proyecto (distinta de `docs/architecture.md`, que mapea lo que ya existe).
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
 - `docs/conventions.md` (RAIZ): convenciones del equipo.
 - `docs/verification.md` (RAIZ): comandos de validacion.

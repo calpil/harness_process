@@ -1,6 +1,6 @@
 # Spec - Feature #4: harness_docs_to_root_docs
 
-Estado: draft
+Estado: approved
 Plan: docs/plan-feature-4-harness-docs-to-root-docs.md
 Constitution: docs/constitution.md
 
