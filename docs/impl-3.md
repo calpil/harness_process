@@ -335,6 +335,96 @@ Riesgos para el reviewer:
 - Alineacion del diagrama ASCII de `roles/README.md`: si un editor recorta
   espacios finales, revisar el bloque de codigo (columnas verificadas al aplicar).
 
-## U5 - Smoke tests (pendiente)
+## U5 - Smoke tests (AC-6)
 
--
+Archivos:
+
+- `tests/setup_smoke.sh`:
+  - ROOT_LAYOUT: `test -f "$ROOT_LAYOUT/docs/constitution.md"` (en root, RAIZ ==
+    harness dir) tras la instalacion (AC-4/AC-6).
+  - SUBDIR: `test -f "$SUBDIR_ROOT/docs/constitution.md"` — la constitution vive
+    en el docs/ de la RAIZ multi-repo, NO en la subcarpeta `harness_process/`
+    (verificado a mano: el harness subdir NO recibe la constitution) (AC-4/AC-6).
+  - No-pisa (idempotencia): antes del reinstall del bloque CUSTOM_BKP se anexa un
+    sentinel `SENTINEL-CONSTITUTION-NO-PISA-$$` a la constitution sembrada; tras
+    el reinstall `grep -q "$CONST_SENTINEL"` confirma que SOBREVIVE (el instalador
+    siembra solo-si-falta, no pisa el documento del usuario) (AC-4/AC-6).
+  - E2E del gate de spec con el binario ya sembrado (nuevo fixture root-layout
+    `SPEC_E2E` via `run_setup ... --root`): assert de que el template sembrado trae
+    `require_spec_approved: true`; `add --name demo` + `start --feature 1`; assert
+    `docs/spec-feature-1-demo.md` existe y contiene `^Estado: draft`; con la regla
+    activa `advance --nota "sin aprobar" --no-graphify` BLOQUEA (rc!=0, el gate
+    corre ANTES del hub) y `check-spec` da rc=2; se simula la aprobacion del
+    USUARIO con sed portable (`sed -i.bak 's/^Estado: draft/Estado: approved/' && rm -f *.bak`);
+    entonces `advance --nota "ok" --no-graphify` PASA (rc=0, el fallo de hub
+    best-effort no altera el exit code) y `check-spec` da rc=0. DB inalcanzable
+    con `DB_HOST=127.0.0.1 DB_PORT=9` (rechazo TCP instantaneo) y
+    `HARNESS_REPO_ROOT="$SPEC_E2E"` anclando el binario al fixture (AC-3/AC-6).
+- `tests/setup_smoke.ps1` (paridad minima; pwsh NO disponible en el entorno, como
+  en feature #1): assert de que el instalador declara `docs/constitution.md` como
+  required asset (`$installerText -match '"docs/constitution\.md"'`), de que el
+  asset del template existe y de que la constitution queda sembrada
+  (`docs/constitution.md`) tras la instalacion root; mensaje final actualizado
+  (AC-4/AC-6).
+
+Decisiones:
+
+- `sed` portable GNU/BSD: se usa la forma `sed -i.bak 's/.../.../' file && rm -f file.bak`
+  (el repo corre en macOS/darwin; `sed -i ''` de BSD y `sed -i` de GNU divergen).
+- E2E en fixture root DEDICADO (`SPEC_E2E`), no reusa ROOT_LAYOUT: evita interferir
+  con sus asserts (init.sh + svc-demo) y arranca con `features: []` => `add` da id 1.
+- `HARNESS_REPO_ROOT` explicito en cada llamada del E2E (helper `spec_cli()`): ancla
+  el binario al fixture y evita markers residuales del entorno (mismo criterio que
+  todo comando manual de este repo).
+- Asserts de exit code con captura explicita `rc=0; cmd || rc=$?; test "$rc" -eq N`
+  (compatible con `set -Eeuo pipefail`); los asserts de existencia siguen el estilo
+  del script (bare `test -f`/`grep -q` que abortan por `set -e`).
+- ps1: no se ejecuto (sin pwsh); asserts estaticos validados por lectura, la
+  ejecucion Windows real queda pendiente de entorno (paridad, como feature #1).
+- NO se toco el `feature_list.json` VIVO ni la linea `Estado:` del spec de la
+  feature #3, ni se corrio `advance` en este repo (fuera del alcance de U5; el
+  cierre y la activacion de la regla los hace el reviewer tras la aprobacion de Alan).
+
+Verificaciones (salida real):
+
+- `bash -n tests/setup_smoke.sh` => `SMOKE_SYNTAX_OK`.
+- `(cd rust && cargo test)` => `test result: ok. 34 passed` (unit) +
+  `test result: ok. 14 passed` (integracion `cli_basics.rs`) = 48 tests, 0 fallos.
+- `(cd rust && cargo clippy --all-targets -- -D warnings)` => rc=0, limpio.
+- `bash tests/setup_smoke.sh` => rc=0 (verde end-to-end). Hitos nuevos impresos:
+  `[Ok] gate de spec (SDD): draft bloquea advance/check-spec; aprobado abre;`
+  `constitution sembrada + no-pisa.` (los asserts de existencia ROOT/SUBDIR y del
+  sentinel son bare `test`/`grep` bajo `set -e`: si fallaran, el script abortaria
+  antes de ese `[Ok]`).
+- `HARNESS_REPO_ROOT=/Users/alan/harness_process bash harness_check.sh` => rc=0
+  (`[plan] #3 fresco`, `[spec] #3 draft (fresco)`, "Harness Check limpio").
+- `HARNESS_REPO_ROOT=/Users/alan/harness_process sh harness_cli check-spec` => rc=0
+  (regla apagada en el feature_list VIVO: "gate no aplica. Estado del spec: draft").
+- `... check-plan` => rc=0 (plan fresco; "[!] Spec sin firma previa" esperado: la
+  feature #3 arranco con el binario 0.2.0; la firma la crea el primer advance del
+  reviewer con el binario nuevo).
+- `... status` => rc=0 (`[plan] #3 fresco`, `[spec] #3 draft (fresco)`).
+
+Mapa AC-6:
+
+- Siembra de spec via `start` e2e (spec draft + gate) => bloque `SPEC_E2E`.
+- Siembra de constitution (root y subdir) + semantica no-pisa => asserts
+  ROOT_LAYOUT/SUBDIR + sentinel del bloque CUSTOM_BKP.
+- `cargo test` + `cargo clippy -- -D warnings` limpios con los tests de firma y
+  gate del spec (ya en U1) re-ejecutados aqui verdes.
+
+Hallazgos / bugs:
+
+- Ninguno. El binario (0.3.0) y ambos instaladores se comportaron EXACTAMENTE
+  segun el contrato del plan en el E2E: gate antes del hub, hub best-effort que no
+  altera exit codes, seed if-missing idempotente. No hizo falta corregir binario ni
+  instalador; todos los edits son del propio test.
+
+Riesgos para el reviewer:
+
+- El feature_list.json VIVO de este repo sigue con `require_spec_approved` APAGADA
+  (bootstrapping): por eso `check-spec`/`harness_check.sh` pasan hoy con el spec en
+  draft. El path regla=true se ejercita SOLO en el fixture `SPEC_E2E`. El reviewer
+  activa la regla y cierra la feature tras la aprobacion de Alan (`Estado: approved`).
+- `tests/setup_smoke.ps1` no se ejecuto (sin pwsh): la ejecucion Windows real queda
+  pendiente de entorno, como en feature #1.

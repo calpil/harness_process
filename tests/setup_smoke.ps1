@@ -101,11 +101,19 @@ exit 0
     Get-Content -LiteralPath (Join-Path $fixture ".codex/hooks.json") -Raw | ConvertFrom-Json | Out-Null
     Get-Content -LiteralPath (Join-Path $fixture ".gemini/settings.json") -Raw | ConvertFrom-Json | Out-Null
 
+    # SDD: la constitution es un required asset y el instalador la siembra en el
+    # docs/ de la RAIZ (en root layout, RAIZ == fixture). Paridad con el smoke sh;
+    # la ejecucion real en Windows queda pendiente de entorno (como en feature #1).
+    $installerText = Get-Content -LiteralPath (Join-Path $fixture "setup_harness.ps1") -Raw
+    Assert-True ($installerText -match '"docs/constitution\.md"') "Installer does not declare docs/constitution.md as a required asset."
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "templates/docs/constitution.md")) "Constitution template asset is missing from the distribution."
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/constitution.md")) "Constitution was not seeded by the installer."
+
     & (Join-Path $fixture "setup_harness.ps1") `
         -Root -NoGraphify -NoGraphifySkills -NoAntigravity -Reset
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture ".harness_layout"))) "Reset did not remove the layout marker."
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, and reset."
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, and reset."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

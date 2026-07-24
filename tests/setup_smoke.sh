@@ -143,6 +143,8 @@ test -f "$ROOT_LAYOUT/harness_cli.ps1"
 test -f "$ROOT_LAYOUT/AGENTS.md"
 test -f "$ROOT_LAYOUT/.codex/hooks.json"
 test -d "$ROOT_LAYOUT/templates"
+# Constitution SDD sembrada en el docs/ de la RAIZ (en root, RAIZ == harness dir).
+test -f "$ROOT_LAYOUT/docs/constitution.md"
 grep -qx 'postgres' "$ROOT_LAYOUT/.harness_backend"
 # Hooks y superficies deben invocar el shim, no python3 directo.
 grep -Fq 'harness_cli\" nudge' "$ROOT_LAYOUT/.claude/settings.json"
@@ -179,6 +181,8 @@ test -f "$SUBDIR_ROOT/AGENTS.md"
 test -f "$SUBDIR_ROOT/bin/harness-hook"
 test -d "$SUBDIR_HARNESS/templates"
 grep -qx 'postgres' "$SUBDIR_HARNESS/.harness_backend"
+# Constitution SDD en el docs/ de la RAIZ multi-repo, NO en la subcarpeta del arnes.
+test -f "$SUBDIR_ROOT/docs/constitution.md"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq 'harness_process/harness_cli" graph mapa' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
@@ -197,6 +201,10 @@ codex_start="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[
 )
 
 printf 'contenido previo\n' > "$SUBDIR_ROOT/AGENTS.md"
+# No-pisa: la constitution es documento del USUARIO; el instalador la siembra
+# solo-si-falta. Un sentinel debe SOBREVIVIR al reinstall de abajo.
+CONST_SENTINEL="SENTINEL-CONSTITUTION-NO-PISA-$$"
+printf '\n<!-- %s -->\n' "$CONST_SENTINEL" >> "$SUBDIR_ROOT/docs/constitution.md"
 CUSTOM_BKP="$TMP_ROOT/custom-backups"
 (
     cd "$SUBDIR_HARNESS"
@@ -214,6 +222,61 @@ CUSTOM_BKP="$TMP_ROOT/custom-backups"
         --no-antigravity
 )
 find "$CUSTOM_BKP" -type f -name 'AGENTS.md.bak.*' -print -quit | grep -q .
+# El reinstall NO pisa la constitution existente: el sentinel sigue ahi.
+grep -q "$CONST_SENTINEL" "$SUBDIR_ROOT/docs/constitution.md"
+
+# --- E2E: gate de spec (SDD) con el binario ya sembrado --------------------
+# Fixture root-layout dedicado. La regla require_spec_approved la trae el
+# template ya sembrado; el gate se ejercita de punta a punta. DB inalcanzable
+# (rechazo TCP instantaneo, mismo patron que el init.sh de ROOT_LAYOUT): el hub
+# es best-effort y NO altera los exit codes del gate. HARNESS_REPO_ROOT ancla el
+# binario al fixture (evita markers residuales del entorno).
+SPEC_E2E="$TMP_ROOT/spec-e2e"
+copy_fixture "$SPEC_E2E"
+run_setup "$SPEC_E2E" --root
+test -f "$SPEC_E2E/docs/constitution.md"
+# El template sembrado trae la regla activa (require_spec_approved: true).
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("rules",{}).get("require_spec_approved") is True else 1)' "$SPEC_E2E/feature_list.json"
+
+spec_cli() {
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$SPEC_E2E/.test-hub" \
+    HARNESS_REPO_ROOT="$SPEC_E2E" \
+    DB_HOST=127.0.0.1 \
+    DB_PORT=9 \
+    DB_USER=harness \
+    DB_PASSWORD=secret \
+    DB_NAME=harness \
+    DB_SSL_MODE=disable \
+    sh "$SPEC_E2E/harness_cli" "$@"
+}
+
+spec_cli add --name demo >/dev/null 2>&1
+spec_cli start --feature 1 >/dev/null 2>&1
+# start siembra el spec DRAFT en el docs/ de la RAIZ, junto al plan (layout plano).
+SPEC_FILE="$SPEC_E2E/docs/spec-feature-1-demo.md"
+test -f "$SPEC_FILE"
+grep -q '^Estado: draft' "$SPEC_FILE"
+
+# Regla activa + spec draft => advance BLOQUEA (el gate corre antes del hub).
+rc=0; spec_cli advance --nota "sin aprobar" --no-graphify >/dev/null 2>&1 || rc=$?
+test "$rc" -ne 0 || { echo "[!] advance debio bloquear con el spec en draft." >&2; exit 1; }
+# check-spec => rc 2 con el spec sin aprobar.
+rc=0; spec_cli check-spec >/dev/null 2>&1 || rc=$?
+test "$rc" -eq 2 || { echo "[!] check-spec debio dar rc=2 con spec draft (rc=$rc)." >&2; exit 1; }
+
+# Solo el USUARIO aprueba: el fixture SIMULA esa aprobacion con sed portable
+# (GNU/BSD: crea .bak y lo borra). En uso real los agentes NO tocan `Estado:`.
+sed -i.bak 's/^Estado: draft/Estado: approved/' "$SPEC_FILE" && rm -f "$SPEC_FILE.bak"
+grep -q '^Estado: approved' "$SPEC_FILE"
+
+# Aprobado => advance PASA (el fallo del hub best-effort no altera el exit code).
+rc=0; spec_cli advance --nota "ok" --no-graphify >/dev/null 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] advance debio pasar con el spec aprobado (rc=$rc)." >&2; exit 1; }
+# check-spec => rc 0 con el spec aprobado y fresco.
+rc=0; spec_cli check-spec >/dev/null 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] check-spec debio dar rc=0 con spec aprobado (rc=$rc)." >&2; exit 1; }
+echo "[Ok] gate de spec (SDD): draft bloquea advance/check-spec; aprobado abre; constitution sembrada + no-pisa."
 
 if bash "$REPO_ROOT/setup_harness.sh" --json-hub >/dev/null 2>&1; then
     echo "[!] --json-hub ya no debe estar soportado." >&2
