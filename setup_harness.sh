@@ -628,8 +628,10 @@ bash "__HREL__harness_status.sh"
    sh "__HREL__harness_cli" check-spec
    ```
    `start` genera el spec (`docs/spec-feature-*.md`) junto al plan y debe cumplir
-   `docs/constitution.md`. Si sigue en `Estado: draft`, **DETENTE** y pide al
-   USUARIO que lo apruebe (`Estado: approved`); PROHIBIDO auto-aprobar.
+   `docs/constitution.md`. Si sigue en `Estado: draft`, **DETENTE**: mostrale el
+   spec al USUARIO (contenido en el chat + abriselo en su editor), preguntale si
+   lo aprueba y solo con su SI registra:
+   `sh "__HREL__harness_cli" approve-spec --yes`. PROHIBIDO aprobar sin ese si.
 
 0.5. Revisa la sección **Observaciones (decisiones pendientes)** del plan:
    si hay observaciones sin decisión, **PREGUNTA AL USUARIO qué decisión
@@ -741,9 +743,12 @@ bash "__HREL__harness_status.sh"
    ```
    - `start` genera el spec (`docs/spec-feature-<id>-<slug>.md`) ADEMAS del plan,
      y `check-plan`/`check-spec` vigilan AMBOS contra ediciones de otros LLMs.
-   - Si el spec sigue en `Estado: draft` → **DETENTE** y pide al USUARIO que
-     apruebe `docs/spec-feature-*.md` (`Estado: approved`). PROHIBIDO auto-aprobar
-     o tocar la linea `Estado:`.
+   - Si el spec sigue en `Estado: draft` → **DETENTE** y ejecuta el ritual de
+     aprobacion: (1) lee el spec completo, (2) mostraselo al USUARIO en el chat y
+     abriselo en su editor (`open`/`xdg-open`/`start`), (3) preguntale si lo
+     aprueba, (4) solo con su SI:
+     `sh "__HREL__harness_cli" approve-spec --yes --nota "<como aprobo>"`.
+     PROHIBIDO aprobar sin ese si o editar la linea `Estado:` a mano.
    - El spec y el plan deben cumplir `docs/constitution.md`.
 
 0.5. Revisa **Observaciones (decisiones pendientes)** en el plan. Si hay
@@ -901,7 +906,8 @@ Archivos principales:
   deben cumplirlo y el reviewer lo verifica.
 - `docs/spec-feature-<id>-<slug>.md` (RAIZ): spec de la feature (recorridos
   priorizados y criterios AC-n); debe estar `Estado: approved` antes de
-  implementar.
+  implementar. El agente lo muestra, pregunta y registra el si del usuario con
+  `harness_cli approve-spec --yes`; nunca aprueba por su cuenta.
 - `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
 - `__HREL__progress/history.md`: bitacora append-only.
 - `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto (problema,
@@ -2150,6 +2156,7 @@ log_info "  sh ${HREL}harness_cli graph mapa"
 log_info "  sh ${HREL}harness_cli status"
 log_info "  sh ${HREL}harness_cli check-plan     # <-- OBLIGATORIO antes de implementar (detecta planes actualizados por otros LLMs)"
 log_info "  sh ${HREL}harness_cli check-spec     # <-- spec aprobado (Estado: approved) antes de implementar"
+log_info "  sh ${HREL}harness_cli approve-spec --yes  # <-- registra el SI del usuario (mostrale el spec y preguntale antes)"
 log_info "  bin/harness-codex"
 log_info "  bin/harness-gemini"
 log_info "  bin/harness-grok"
@@ -2167,6 +2174,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     log_info "  sh ${HREL}harness_cli start --feature 1"
     log_info "  sh ${HREL}harness_cli check-plan     # verifica si otro LLM actualizo el plan"
     log_info "  sh ${HREL}harness_cli check-spec     # spec aprobado antes de implementar"
+    log_info "  sh ${HREL}harness_cli approve-spec --yes  # registra el SI del usuario (mostrale el spec primero)"
     log_info "  sh ${HREL}harness_cli close --feature 1 --status done"
 fi
 

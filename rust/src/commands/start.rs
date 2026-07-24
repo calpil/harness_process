@@ -97,8 +97,9 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
     println!("  (firma del plan registrada para deteccion de actualizaciones por otros agentes)");
     println!("Spec (draft) generado: {rel_spec}");
     println!(
-        "  Completa recorridos y AC-n; pide al USUARIO aprobarlo editando `Estado: approved`."
+        "  Completa recorridos y AC-n; despues mostrale el spec al USUARIO, preguntale si lo"
     );
+    println!("  aprueba y con su SI registra: sh harness_cli approve-spec --yes");
     println!(
         "  Con la regla require_spec_approved activa, advance y close --status done bloquean sin esa aprobacion."
     );

@@ -109,6 +109,17 @@ exit 0
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "templates/docs/constitution.md")) "Constitution template asset is missing from the distribution."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/constitution.md")) "Constitution was not seeded by the installer."
 
+    # Feature #6 / AC-10 + AC-11: la superficie sembrada describe el ritual de
+    # aprobacion (mostrar el spec + preguntar + approve-spec --yes) y ya no la
+    # edicion manual de `Estado:`. Paridad con el bloque AC-10 del smoke sh.
+    $constitutionText = Get-Content -LiteralPath (Join-Path $fixture "docs/constitution.md") -Raw
+    Assert-True ($constitutionText -match 'approve-spec --yes') "Seeded constitution does not describe the approve-spec flow."
+    Assert-True (-not ($constitutionText -match 'auto-aprobar')) "Seeded constitution still carries the old manual-approval wording."
+    $checkText = Get-Content -LiteralPath (Join-Path $fixture "harness_check.sh") -Raw
+    Assert-True ($checkText -match 'approve-spec --yes') "Seeded harness_check.sh does not mention approve-spec."
+    $implementerText = Get-Content -LiteralPath (Join-Path $fixture "roles/implementer.md") -Raw
+    Assert-True ($implementerText -match 'approve-spec --yes') "Seeded implementer role does not describe the approval ritual."
+
     # Feature #4 / AC-2: en layout root los tres docs del arnes se siembran en el
     # docs/ de la RAIZ (que aqui es el propio fixture).
     foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md")) {
@@ -190,7 +201,7 @@ exit 0
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/conventions.md") -Raw) -match $teamSentinel) "Migration overwrote the team's conventions.md in the root docs/."
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirHarness "docs/conventions.md") -Raw).Trim() -eq "VIEJO-CONVENTIONS") "Migration removed the old copy instead of keeping it."
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, and reset."
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, and reset."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

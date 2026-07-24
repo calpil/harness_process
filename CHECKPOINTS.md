@@ -7,7 +7,8 @@ Antes de cerrar una tarea:
   Esto detecta ediciones concurrentes hechas por Claude/Gemini/Antigravity/Grok/etc.
 - [ ] **Spec aprobado y fresco**: `sh harness_cli check-spec` pasa
   (`Estado: approved` y sin ediciones multi-LLM sin refirmar). Solo el usuario
-  aprueba el spec (draft -> approved); ningun agente auto-aprueba.
+  aprueba el spec: el agente se lo muestra, le pregunta y registra su SI con
+  `harness_cli approve-spec --yes` (sello + re-firma). Ningun agente aprueba solo.
 - [ ] **Sin observaciones pendientes**: cada observacion del plan tiene la
   decision del usuario registrada (`advance --nota "Decision usuario: ..."`);
   no se implemento nada con decisiones abiertas.

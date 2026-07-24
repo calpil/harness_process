@@ -626,8 +626,10 @@ Before changing code:
 4. Run `... harness_cli.ps1 check-plan`.
 5. Run `... harness_cli.ps1 check-spec`: `start` generates the spec next to the
    plan (`docs/spec-feature-<id>-<slug>.md`) and both are watched against edits
-   by other LLMs. If the spec is still `Estado: draft`, STOP and ask the USER to
-   approve `docs/spec-feature-*.md` (`Estado: approved`); never self-approve.
+   by other LLMs. If the spec is still `Estado: draft`, STOP: SHOW the spec to the
+   USER (in the chat and opened in their editor), ASK whether they approve it, and
+   only with their explicit YES record it with
+   `... harness_cli.ps1 approve-spec --yes`; never approve on your own.
    Specs and plans must comply with `docs/constitution.md`.
 6. Check the plan section "Observaciones (decisiones pendientes)": if any
    observation has no decision yet, ASK THE USER which decision to apply
@@ -772,7 +774,7 @@ function Invoke-HarnessEvent {
                 & $cli check-plan
                 if ($LASTEXITCODE -eq 2) { throw "Plan desactualizado (modificado por otro LLM). Re-lee el plan antes de continuar." }
                 & $cli check-spec
-                if ($LASTEXITCODE -eq 2) { throw "Spec sin aprobar o modificado. Si esta en draft, pide al USUARIO aprobarlo (Estado: approved) antes de continuar." }
+                if ($LASTEXITCODE -eq 2) { throw "Spec sin aprobar o modificado. Si esta en draft, mostrale el spec al USUARIO, preguntale si lo aprueba y con su SI registra 'harness_cli.ps1 approve-spec --yes'." }
             }
             & $cli status
         }

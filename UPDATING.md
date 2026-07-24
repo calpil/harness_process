@@ -60,6 +60,8 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - El subcomando `harness_cli check-spec` y el gate de spec aprobado
   (`require_spec_approved`) en `advance`, `close --status done` y
   `harness_check.sh`
+- El subcomando `harness_cli approve-spec --yes`, que registra la aprobación del
+  usuario (sello + re-firma del spec)
 
 ## Spec-Driven Development (opt-in en instalaciones existentes)
 
@@ -83,9 +85,32 @@ regla a `rules`:
 ```
 
 Con la regla activa, `advance`, `close --status done` y `harness_check.sh`
-exigen un spec `docs/spec-feature-<id>-<slug>.md` con `Estado: approved` (solo
-el usuario aprueba; ningún agente auto-aprueba). Sin la regla, el flujo sigue
-como antes (gate apagado, compatibilidad total).
+exigen un spec `docs/spec-feature-<id>-<slug>.md` con `Estado: approved`. Sin la
+regla, el flujo sigue como antes (gate apagado, compatibilidad total).
+
+### Aprobación interactiva del spec (`approve-spec`)
+
+La aprobación dejó de ser una edición manual del Markdown. El agente ejecuta el
+**ritual de aprobación**: lee el spec, se lo **muestra** al usuario (contenido en
+el chat y abierto en su editor), le **pregunta** si lo aprueba y solo con su
+**sí** explícito lo **registra**:
+
+```bash
+sh harness_cli approve-spec --yes --nota "aprobado en el chat"
+```
+
+El comando escribe `Estado: approved`, inserta el sello
+`Aprobado: <fecha> por USUARIO (confirmacion explicita)` y **re-firma**
+`last_spec_sig`. Esa re-firma corrige un problema real del flujo manual: al
+editar el spec a mano cambiaba su hash y `check-spec` reportaba la aprobación del
+propio usuario como *"SPEC ACTUALIZADO POR OTRO LLM"*, obligando a un `advance`
+para resincronizar. Si ya aprobaste un spec a mano, correr `approve-spec --yes`
+lo re-firma y limpia esa falsa alarma sin duplicar el sello (es idempotente).
+
+La decisión sigue siendo **exclusivamente del usuario**: sin `--yes` el comando
+se niega (exit 2) y ningún agente puede aprobar por su cuenta. Exit codes: `0`
+aprobado o ya aprobado, `1` sin feature `in_progress`, `2` sin confirmación o
+spec ausente.
 
 ## Docs del arnés en el `docs/` de la raíz (migración automática)
 

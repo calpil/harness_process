@@ -250,6 +250,136 @@ fn spec_gate_should_block_advance_and_close_done_until_user_approves() {
 }
 
 #[test]
+fn approve_spec_should_refuse_without_explicit_user_confirmation() {
+    // AC-3: la barrera del Articulo 2 en codigo. Sin --yes no hay aprobacion,
+    // y el spec queda intacto en draft.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .arg("approve-spec")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains(
+            "[GATE] approve-spec exige la confirmacion explicita del USUARIO.",
+        ))
+        .stdout(predicate::str::contains(
+            "sh harness_cli approve-spec --yes",
+        ));
+    let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-demo.md")).unwrap();
+    assert!(spec.contains("Estado: draft"));
+    assert!(!spec.contains("Aprobado:"));
+}
+
+#[test]
+fn approve_spec_should_register_approval_and_leave_check_spec_clean() {
+    // AC-1 + AC-2 + AC-6: el agente registra el si del usuario, el spec queda
+    // approved con sello, y check-spec NO reporta la falsa alarma multi-LLM.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .args(["approve-spec", "--yes", "--nota", "aprobado en chat"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[OK] Aprobacion del USUARIO registrada: docs/spec-feature-1-demo.md (Estado: approved).",
+        ))
+        .stdout(predicate::str::contains("Firma del spec actualizada"));
+    let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-demo.md")).unwrap();
+    assert!(spec.contains("Estado: approved"));
+    assert!(spec.contains("por USUARIO (confirmacion explicita) - aprobado en chat"));
+    // AC-2: el gate sale limpio inmediatamente despues, sin advance de por medio
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[OK] Spec aprobado y fresco"));
+    // AC-6: rastro en la bitacora append-only
+    let history = std::fs::read_to_string(dir.path().join("hp/progress/history.md")).unwrap();
+    assert!(history.contains("approve-spec feature #1 estado=approved nota=aprobado en chat"));
+    // El gate de implementacion queda abierto: advance ya no bloquea
+    cmd(&bin)
+        .args(["advance", "--nota", "ok", "--no-graphify"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn approve_spec_should_be_idempotent() {
+    // AC-4: re-aprobar informa y no duplica el sello.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["approve-spec", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[OK] El spec ya estaba aprobado: docs/spec-feature-1-demo.md (sello no duplicado).",
+        ));
+    let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-demo.md")).unwrap();
+    assert_eq!(spec.matches("Aprobado: ").count(), 1);
+}
+
+#[test]
+fn approve_spec_should_exit_one_without_active_feature_and_two_without_spec() {
+    // AC-5: mismos exit codes que check-spec (1 sin feature, 2 sin spec).
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["approve-spec", "--yes"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("No hay feature in_progress"));
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    std::fs::remove_file(dir.path().join("docs/spec-feature-1-demo.md")).unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--yes"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains(
+            "[GATE] No existe el spec: docs/spec-feature-1-demo.md.",
+        ))
+        .stdout(predicate::str::contains("start --feature 1"));
+}
+
+#[test]
+fn approve_spec_should_resign_a_spec_approved_by_hand() {
+    // Rescate del flujo viejo: si el usuario ya edito `Estado: approved` a mano,
+    // el spec queda stale; approve-spec --yes re-firma y limpia la falsa alarma.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    let approved = std::fs::read_to_string(&spec)
+        .unwrap()
+        .replace("Estado: draft", "Estado: approved");
+    std::fs::write(&spec, approved).unwrap();
+    let past = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+    filetime::set_file_mtime(&spec, past).unwrap();
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("SPEC ACTUALIZADO POR OTRO LLM"));
+    cmd(&bin)
+        .args(["approve-spec", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ya estaba aprobado"));
+    cmd(&bin)
+        .arg("check-spec")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[OK] Spec aprobado y fresco"));
+}
+
+#[test]
 fn close_blocked_should_pass_without_approved_spec() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();

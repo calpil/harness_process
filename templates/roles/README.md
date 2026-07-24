@@ -23,8 +23,12 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
                          harness_check.sh limpio  ->  cierre
 ```
 
-Entre el LIDER y el IMPLEMENTER, el USUARIO aprueba el spec (`Estado: draft -> approved`);
-ningun agente puede auto-aprobar y el gate `check-spec` bloquea hasta esa aprobacion.
+Entre el LIDER y el IMPLEMENTER se ejecuta el **ritual de aprobacion**: el agente
+lee el spec, se lo MUESTRA al usuario (chat + editor), le PREGUNTA si lo aprueba
+y solo con su SI lo REGISTRA con `sh "__HREL__harness_cli" approve-spec --yes`
+(que sella quien/cuando y re-firma el spec para que `check-spec` no lo reporte
+como edicion de otro LLM). La decision es del usuario: ningun agente aprueba por
+su cuenta, y el gate `check-spec` bloquea hasta esa aprobacion.
 
 ## Roles
 

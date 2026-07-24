@@ -1,11 +1,13 @@
 //! Specs por feature (Spec-Driven Development) y gate de aprobacion.
 //! Espejo de plan.rs: la firma anti-conflicto multi-LLM REUSA
 //! `plan::plan_signature` (mismo dict path/mtime/size/hash) sobre la clave
-//! `last_spec_sig`. Solo el USUARIO aprueba un spec (draft -> approved);
-//! los agentes tienen PROHIBIDO auto-aprobarlo.
+//! `last_spec_sig`. La DECISION de aprobar (draft -> approved) es del USUARIO;
+//! el agente la registra con `approve-spec --yes` tras su si explicito y nunca
+//! por iniciativa propia.
 
 use std::path::PathBuf;
 
+use anyhow::Context;
 use serde_json::{Map, Value};
 
 use crate::exit::Exit;
@@ -130,8 +132,9 @@ pub fn spec_staleness_message(paths: &HarnessPaths, feature: &Map<String, Value>
     "Spec fresco (sin cambios desde la ultima firma registrada).".to_string()
 }
 
-/// Estado declarado del spec. La aprobacion (draft -> approved) es EXCLUSIVA
-/// del usuario; ningun agente puede editar la linea `Estado:`.
+/// Estado declarado del spec. La decision de aprobar (draft -> approved) es
+/// EXCLUSIVA del usuario; el agente solo la escribe via `approve_spec`, y solo
+/// despues de su confirmacion explicita.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecState {
     /// No existe el archivo del spec.
@@ -177,6 +180,72 @@ pub fn spec_state(paths: &HarnessPaths, feature: &Map<String, Value>) -> SpecSta
     SpecState::Other
 }
 
+/// Resultado de registrar la aprobacion del usuario (AC-1 / AC-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalOutcome {
+    /// Se escribio `Estado: approved` y se inserto el sello de aprobacion.
+    Registered,
+    /// Ya estaba aprobado: no se reescribe el archivo ni se duplica el sello.
+    AlreadyApproved,
+}
+
+/// Sello que acompana a `Estado: approved`: deja auditable quien aprobo, cuando
+/// y con que nota (el spec es la fuente de verdad; history.md lo espeja).
+pub fn approval_stamp_line(stamp: &str, nota: &str) -> String {
+    let base = format!("Aprobado: {stamp} por USUARIO (confirmacion explicita)");
+    match nota.trim() {
+        "" => base,
+        nota => format!("{base} - {nota}"),
+    }
+}
+
+/// Registra en el spec la aprobacion del USUARIO: reescribe la PRIMERA linea
+/// `Estado:` de la ventana de 10 lineas a `Estado: approved` e inserta el sello
+/// debajo. La DECISION sigue siendo del usuario; esta funcion solo la persiste
+/// despues de su confirmacion explicita (el comando la exige con `--yes`).
+/// Idempotente: si ya estaba aprobado no toca el archivo.
+pub fn approve_spec(
+    paths: &HarnessPaths,
+    feature: &Map<String, Value>,
+    stamp: &str,
+    nota: &str,
+) -> anyhow::Result<ApprovalOutcome> {
+    if spec_state(paths, feature) == SpecState::Approved {
+        return Ok(ApprovalOutcome::AlreadyApproved);
+    }
+    let path = spec_path(paths, feature);
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("no se pudo leer el spec: {}", path.display()))?;
+    let ends_with_newline = content.ends_with('\n');
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let stamp_line = approval_stamp_line(stamp, nota);
+    match lines
+        .iter()
+        .take(10)
+        .position(|l| l.trim().starts_with("Estado:"))
+    {
+        Some(i) => {
+            // Preserva la indentacion original: spec_state hace trim, y un spec
+            // escrito a mano puede tener margen.
+            let indent: String = lines[i].chars().take_while(|c| c.is_whitespace()).collect();
+            lines[i] = format!("{indent}Estado: approved");
+            lines.insert(i + 1, stamp_line);
+        }
+        None => {
+            // Spec sin linea `Estado:`: se siembra al tope (tras el titulo) para
+            // que caiga dentro de las 10 lineas que lee spec_state.
+            let at = usize::from(lines.first().is_some_and(|l| l.trim_start().starts_with('#')));
+            lines.splice(at..at, ["Estado: approved".to_string(), stamp_line]);
+        }
+    }
+    let mut out = lines.join("\n");
+    if ends_with_newline {
+        out.push('\n');
+    }
+    std::fs::write(&path, out)?;
+    Ok(ApprovalOutcome::Registered)
+}
+
 /// Lee `rules.require_spec_approved` (default false: gate apagado para
 /// instalaciones previas y features #1/#2).
 pub fn require_spec_approved(data: &Value) -> bool {
@@ -208,7 +277,7 @@ pub fn spec_gate(
     let path = spec_path(paths, feature);
     let rel = relpath(&path, &paths.repo_root).unwrap_or_else(|| path.clone());
     Err(Exit::msg(format!(
-        "[GATE] Spec sin aprobar: {} (estado: {}).\n    La regla require_spec_approved esta activa: completa el spec y pide al usuario\n    aprobarlo editando `Estado: approved` (solo el usuario aprueba; los agentes no).",
+        "[GATE] Spec sin aprobar: {} (estado: {}).\n    La regla require_spec_approved esta activa. Flujo de aprobacion:\n      1) Mostrale el spec al USUARIO (contenido en el chat + abriselo en su editor).\n      2) Preguntale si lo aprueba.\n      3) Solo con su SI: sh harness_cli approve-spec --yes\n    La decision es del usuario; el agente solo la registra.",
         rel.display(),
         state.label()
     )))
@@ -308,6 +377,90 @@ mod tests {
     }
 
     #[test]
+    fn approve_spec_should_write_approved_with_stamp_preserving_indent() {
+        // AC-1: la primera linea Estado: de la ventana pasa a approved y el
+        // sello queda justo debajo, sin perder el margen del spec original.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let f = feature(1, "demo");
+        std::fs::create_dir_all(&paths.plans).unwrap();
+        let p = spec_path(&paths, &f);
+        std::fs::write(&p, "# Spec\n  Estado: draft\nPlan: docs/plan.md\n").unwrap();
+        let outcome = approve_spec(&paths, &f, "2026-07-24T00:00:00Z", "").unwrap();
+        assert_eq!(outcome, ApprovalOutcome::Registered);
+        assert_eq!(spec_state(&paths, &f), SpecState::Approved);
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "# Spec\n  Estado: approved\nAprobado: 2026-07-24T00:00:00Z por USUARIO (confirmacion explicita)\nPlan: docs/plan.md\n"
+        );
+    }
+
+    #[test]
+    fn approve_spec_should_record_nota_in_the_stamp() {
+        // AC-6: la nota del usuario queda en el sello (auditoria en el spec).
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let f = feature(1, "demo");
+        write_spec(&paths, &f).unwrap();
+        approve_spec(&paths, &f, "2026-07-24T00:00:00Z", "  aprobado en chat  ").unwrap();
+        let text = std::fs::read_to_string(spec_path(&paths, &f)).unwrap();
+        assert!(text.contains(
+            "Aprobado: 2026-07-24T00:00:00Z por USUARIO (confirmacion explicita) - aprobado en chat\n"
+        ));
+    }
+
+    #[test]
+    fn approve_spec_should_be_idempotent_without_duplicating_the_stamp() {
+        // AC-4: re-aprobar no reescribe ni agrega un segundo sello.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let f = feature(1, "demo");
+        write_spec(&paths, &f).unwrap();
+        approve_spec(&paths, &f, "2026-07-24T00:00:00Z", "primera").unwrap();
+        let first = std::fs::read_to_string(spec_path(&paths, &f)).unwrap();
+        let outcome = approve_spec(&paths, &f, "2026-07-24T11:11:11Z", "segunda").unwrap();
+        assert_eq!(outcome, ApprovalOutcome::AlreadyApproved);
+        let second = std::fs::read_to_string(spec_path(&paths, &f)).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(second.matches("Aprobado: ").count(), 1);
+    }
+
+    #[test]
+    fn approve_spec_should_seed_estado_when_the_window_has_no_line() {
+        // Borde: spec sin linea Estado: (SpecState::Other). Se siembra tras el
+        // titulo para que caiga dentro de la ventana de 10 lineas.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let f = feature(1, "demo");
+        std::fs::create_dir_all(&paths.plans).unwrap();
+        let p = spec_path(&paths, &f);
+        std::fs::write(&p, "# Spec\ncuerpo sin estado\n").unwrap();
+        assert_eq!(spec_state(&paths, &f), SpecState::Other);
+        approve_spec(&paths, &f, "2026-07-24T00:00:00Z", "").unwrap();
+        assert_eq!(spec_state(&paths, &f), SpecState::Approved);
+        assert!(std::fs::read_to_string(&p).unwrap().starts_with(
+            "# Spec\nEstado: approved\nAprobado: 2026-07-24T00:00:00Z por USUARIO"
+        ));
+    }
+
+    #[test]
+    fn approve_spec_plus_resign_should_leave_the_spec_fresh() {
+        // AC-2 a nivel funcion: aprobar cambia el hash (stale), y la re-firma
+        // que hace el comando lo deja fresco. Sin esto, la aprobacion del propio
+        // usuario se reporta como "SPEC ACTUALIZADO POR OTRO LLM".
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let mut f = feature(1, "demo");
+        write_spec(&paths, &f).unwrap();
+        update_spec_sig(&paths, &mut f);
+        assert!(!is_spec_stale(&paths, &f));
+        approve_spec(&paths, &f, "2026-07-24T00:00:00Z", "").unwrap();
+        assert!(is_spec_stale(&paths, &f));
+        update_spec_sig(&paths, &mut f);
+        assert!(!is_spec_stale(&paths, &f));
+    }
+
+    #[test]
     fn is_spec_stale_should_tolerate_one_second_mtime_drift() {
         let dir = tempfile::tempdir().unwrap();
         let paths = paths_in(dir.path());
@@ -389,7 +542,9 @@ mod tests {
         let msg = err.message.unwrap();
         assert!(msg.contains("spec-feature-1-demo.md"));
         assert!(msg.contains("draft"));
-        assert!(msg.contains("Estado: approved"));
+        // El mensaje instruye el ritual de aprobacion, no la edicion manual.
+        assert!(msg.contains("Mostrale el spec al USUARIO"));
+        assert!(msg.contains("approve-spec --yes"));
         // el usuario aprueba: el gate abre
         let p = spec_path(&paths, &f);
         let approved = std::fs::read_to_string(&p)
@@ -420,7 +575,7 @@ mod tests {
         let msg = err.message.unwrap();
         assert!(msg.contains("spec-feature-1-demo.md"));
         assert!(msg.contains("desconocido"));
-        assert!(msg.contains("Estado: approved"));
+        assert!(msg.contains("approve-spec --yes"));
     }
 
     #[test]

@@ -19,9 +19,19 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
    priorizados (P1/P2, cada uno testeable de forma independiente), criterios de
    aceptacion AC-n en Given/When/Then, no funcionales (SLOs, seguridad,
    observabilidad) y fuera de alcance. El spec debe cumplir
-   `docs/constitution.md`. NO apruebas el spec: lo dejas en `Estado: draft` y
-   pides al USUARIO que lo apruebe (`Estado: approved`); PROHIBIDO auto-aprobar
-   o tocar la linea `Estado:`.
+   `docs/constitution.md`.
+5.1. Con el spec completo, ejecuta el **ritual de aprobacion** (no lo saltees, no
+   lo resumas en una linea):
+   1. Lee el spec entero.
+   2. MUESTRASELO al usuario: el contenido en el chat (completo, o los AC-n si
+      es muy largo) Y abriselo en su editor
+      (`open <ruta>` en macOS, `xdg-open` en Linux, `start` en Windows; `code
+      <ruta>` si usa VS Code).
+   3. PREGUNTALE explicitamente si lo aprueba, junto con las decisiones
+      pendientes que haya.
+   4. Solo con su SI: `sh "harness_process/harness_cli" approve-spec --yes --nota "<como aprobo>"`.
+   La decision es suya; vos solo la registras. PROHIBIDO correr `approve-spec`
+   sin ese si, o editar la linea `Estado:` a mano para saltear el flujo.
 6. Persiste el plan en `docs/plan-feature-<id>-<slug>.md` (en el `docs/` de la
    RAIZ del proyecto, junto a los PLAN-*.md del equipo): alcance, microservicios
    afectados, riesgos y delegacion concreta (que archivos y en que orden). Cada
@@ -36,8 +46,9 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
 ## Entregable
 
 - Feature activa identificada (una sola a la vez).
-- Spec `docs/spec-feature-<id>-<slug>.md` completo en `Estado: draft`, con AC-n
-  en Given/When/Then, pendiente de aprobacion del usuario.
+- Spec `docs/spec-feature-<id>-<slug>.md` completo, con AC-n en Given/When/Then,
+  mostrado al usuario y aprobado por el (`Estado: approved` + sello registrado
+  con `approve-spec`) o explicitamente pendiente de su respuesta.
 - Microservicios afectados, con su radio de impacto.
 - Riesgos conocidos.
 - Delegacion concreta (cada item cita su AC-n) y criterios de cierre para el
@@ -47,8 +58,9 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
 
 - No edites codigo fuente. Si hay que tocar contratos compartidos, registralo
   como impacto antes de delegar.
-- No apruebas el spec: la transicion `draft -> approved` es exclusiva del
-  usuario; ningun agente puede auto-aprobar.
+- No decides la aprobacion: la transicion `draft -> approved` la ordena el
+  usuario. Vos la pedis (mostrando el spec y preguntando) y la registras con
+  `approve-spec --yes`; nunca la asumis.
 - El spec y el plan deben cumplir `docs/constitution.md`.
 - Una respuesta corta en chat no reemplaza el spec ni el plan persistidos en
   `docs/`.

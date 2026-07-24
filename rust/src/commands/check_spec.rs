@@ -43,8 +43,10 @@ pub fn run(paths: &HarnessPaths, feature: Option<&str>) -> anyhow::Result<()> {
         rel.display(),
         state.label()
     );
-    println!(
-        "    Completa el spec y pide al USUARIO aprobarlo editando `Estado: approved` (solo el usuario aprueba; los agentes no)."
-    );
+    println!("    Completa el spec y aprobalo CON el usuario:");
+    println!("      1) Mostrale el spec (contenido en el chat + abriselo en su editor).");
+    println!("      2) Preguntale si lo aprueba.");
+    println!("      3) Solo con su SI: sh harness_cli approve-spec --yes");
+    println!("    La decision es del usuario; el agente solo la registra.");
     Err(Exit::code(2).into())
 }

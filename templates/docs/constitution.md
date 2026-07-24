@@ -18,8 +18,12 @@ cumplimiento antes de cada cierre.
 
 - Ninguna implementacion arranca sin spec (`docs/spec-feature-<id>-<slug>.md`)
   con `Estado: approved`.
-- Solo el USUARIO aprueba (edita `Estado: draft` -> `Estado: approved`); los
-  agentes tienen PROHIBIDO auto-aprobar o tocar la linea `Estado:`.
+- La DECISION de aprobar es exclusiva del USUARIO. El agente no decide: MUESTRA
+  el spec (contenido en el chat y abierto en el editor del usuario), PREGUNTA si
+  lo aprueba y solo con su SI explicito REGISTRA la aprobacion ejecutando
+  `harness_cli approve-spec --yes` (que sella quien/cuando y re-firma el spec).
+- PROHIBIDO aprobar sin ese si: ningun agente corre `approve-spec --yes` por
+  iniciativa propia, ni edita a mano la linea `Estado:` para saltear el flujo.
 
 ## Articulo 3 - Trazabilidad AC-n
 

@@ -82,9 +82,13 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
    valor trim + case-insensitive), `require_spec_approved(data)` (lee
    `rules.require_spec_approved`, default `false`), `close_requires_spec` (solo
    `done` gatea) y `spec_gate` (mensaje accionable: ruta, estado y accion).
-3. El LIDER completa spec y plan (cada item de la Delegacion cita su AC-n); el
-   USUARIO aprueba el spec editando `Estado: draft` -> `Estado: approved`. Ningun
-   agente puede auto-aprobar.
+3. El LIDER completa spec y plan (cada item de la Delegacion cita su AC-n) y
+   ejecuta el ritual de aprobacion: muestra el spec al USUARIO (chat + editor),
+   le pregunta y solo con su SI corre `approve-spec --yes`
+   (`commands/approve_spec.rs` + `spec::approve_spec`), que escribe
+   `Estado: approved`, inserta el sello `Aprobado: <stamp> por USUARIO ...` y
+   re-firma `last_spec_sig` para que la aprobacion no se lea como edicion de
+   otro LLM. Sin `--yes`: exit 2. Ningun agente aprueba por su cuenta.
 4. Con `require_spec_approved: true`, `advance`, `close --status done` y
    `harness_check.sh` (via `check-spec`) bloquean mientras el spec no este
    aprobado. `check-plan` vigila la frescura de spec y plan (exit 2 si cualquiera

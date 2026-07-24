@@ -49,7 +49,7 @@ if [ -f "$HARNESS_DIR/feature_list.json" ]; then
     else
         rc=$?
         if [ "$rc" -eq 2 ]; then
-            echo "[!] Spec sin aprobar o modificado. Ejecuta 'sh harness_cli check-spec'; si esta en draft, pide al USUARIO aprobarlo (Estado: approved) antes de continuar." >&2
+            echo "[!] Spec sin aprobar o modificado. Ejecuta 'sh harness_cli check-spec'; si esta en draft, mostrale el spec al USUARIO, preguntale si lo aprueba y con su SI registra 'sh harness_cli approve-spec --yes'." >&2
             failures=$((failures + 1))
         fi
         # rc=1 (sin feature) u otros: no incrementamos failures para este gate

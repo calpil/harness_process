@@ -322,10 +322,38 @@ test "$rc" -ne 0 || { echo "[!] advance debio bloquear con el spec en draft." >&
 rc=0; spec_cli check-spec >/dev/null 2>&1 || rc=$?
 test "$rc" -eq 2 || { echo "[!] check-spec debio dar rc=2 con spec draft (rc=$rc)." >&2; exit 1; }
 
-# Solo el USUARIO aprueba: el fixture SIMULA esa aprobacion con sed portable
-# (GNU/BSD: crea .bak y lo borra). En uso real los agentes NO tocan `Estado:`.
-sed -i.bak 's/^Estado: draft/Estado: approved/' "$SPEC_FILE" && rm -f "$SPEC_FILE.bak"
+# AC-3: sin la confirmacion explicita del usuario, approve-spec SE NIEGA (rc 2)
+# y el spec queda intacto en draft. Es la barrera del Articulo 2 en codigo.
+rc=0; spec_cli approve-spec >/dev/null 2>&1 || rc=$?
+test "$rc" -eq 2 || { echo "[!] approve-spec sin --yes debio dar rc=2 (rc=$rc)." >&2; exit 1; }
+grep -q '^Estado: draft' "$SPEC_FILE" \
+    || { echo "[!] approve-spec sin --yes NO debe tocar el spec." >&2; exit 1; }
+
+# AC-1: el usuario dice que si (en uso real: tras ver el spec en el chat y en su
+# editor) y el agente lo REGISTRA. El comando escribe el estado y el sello.
+rc=0; spec_cli approve-spec --yes --nota "aprobado en el chat" >/dev/null 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] approve-spec --yes debio dar rc=0 (rc=$rc)." >&2; exit 1; }
 grep -q '^Estado: approved' "$SPEC_FILE"
+grep -q '^Aprobado: .* por USUARIO (confirmacion explicita) - aprobado en el chat' "$SPEC_FILE" \
+    || { echo "[!] falta el sello de aprobacion en el spec." >&2; exit 1; }
+
+# AC-2: check-spec sale limpio INMEDIATAMENTE (sin advance de por medio). Antes,
+# aprobar a mano dejaba el spec stale y check-spec gritaba "otro LLM".
+rc=0; spec_cli check-spec >/dev/null 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] tras approve-spec, check-spec debio dar rc=0 sin re-firma manual (rc=$rc)." >&2; exit 1; }
+
+# AC-4: idempotente (no duplica el sello).
+spec_cli approve-spec --yes >/dev/null 2>&1
+test "$(grep -c '^Aprobado: ' "$SPEC_FILE")" -eq 1 \
+    || { echo "[!] approve-spec duplico el sello de aprobacion." >&2; exit 1; }
+
+# AC-10: la superficie sembrada describe el flujo nuevo, no el manual.
+grep -q 'approve-spec' "$SPEC_E2E/docs/constitution.md" \
+    || { echo "[!] la constitution sembrada no menciona approve-spec." >&2; exit 1; }
+grep -q 'auto-aprobar' "$SPEC_E2E/docs/constitution.md" \
+    && { echo "[!] la constitution sembrada conserva el texto del flujo viejo." >&2; exit 1; }
+grep -q 'approve-spec' "$SPEC_E2E/harness_check.sh" \
+    || { echo "[!] harness_check.sh sembrado no menciona approve-spec." >&2; exit 1; }
 
 # Aprobado => advance PASA (el fallo del hub best-effort no altera el exit code).
 rc=0; spec_cli advance --nota "ok" --no-graphify >/dev/null 2>&1 || rc=$?
@@ -334,6 +362,7 @@ test "$rc" -eq 0 || { echo "[!] advance debio pasar con el spec aprobado (rc=$rc
 rc=0; spec_cli check-spec >/dev/null 2>&1 || rc=$?
 test "$rc" -eq 0 || { echo "[!] check-spec debio dar rc=0 con spec aprobado (rc=$rc)." >&2; exit 1; }
 echo "[Ok] gate de spec (SDD): draft bloquea advance/check-spec; aprobado abre; constitution sembrada + no-pisa."
+echo "[Ok] approve-spec: exige --yes, sella la aprobacion del usuario, re-firma (check-spec limpio) y es idempotente."
 
 if bash "$REPO_ROOT/setup_harness.sh" --json-hub >/dev/null 2>&1; then
     echo "[!] --json-hub ya no debe estar soportado." >&2

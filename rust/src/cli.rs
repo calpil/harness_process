@@ -68,6 +68,17 @@ pub enum Command {
         #[arg(long)]
         feature: Option<String>,
     },
+    /// Registra la aprobacion del USUARIO sobre el spec (exige --yes)
+    #[command(name = "approve-spec")]
+    ApproveSpec {
+        #[arg(long)]
+        feature: Option<String>,
+        /// Confirmacion explicita del USUARIO: sin este flag el comando se niega
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        nota: Option<String>,
+    },
     /// Agrega una feature al backlog
     Add {
         #[arg(long)]
@@ -171,6 +182,12 @@ pub fn run() -> anyhow::Result<()> {
         Command::CheckSpec { feature } => {
             commands::check_spec::run(&HarnessPaths::resolve()?, feature.as_deref())
         }
+        Command::ApproveSpec { feature, yes, nota } => commands::approve_spec::run(
+            &HarnessPaths::resolve()?,
+            feature.as_deref(),
+            yes,
+            nota.as_deref(),
+        ),
         Command::Add {
             name,
             service,

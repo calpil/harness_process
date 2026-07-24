@@ -23,9 +23,15 @@ Implementas UNA unidad concreta del plan del lider.
    sh "harness_process/harness_cli" check-spec
    ```
    - Si el spec sigue en `Estado: draft` (o `check-spec` sale != 0 por spec sin
-     aprobar/ausente): **DETENTE y pide al USUARIO que lo apruebe** editando
-     `docs/spec-feature-<id>-<slug>.md` a `Estado: approved`. PROHIBIDO
-     auto-aprobar o tocar la linea `Estado:` (solo el usuario aprueba).
+     aprobar/ausente): **DETENTE y ejecuta el ritual de aprobacion**:
+     1. Lee `docs/spec-feature-<id>-<slug>.md` completo.
+     2. Mostraselo al usuario en el chat Y abriselo en su editor
+        (`open`/`xdg-open`/`start`, o `code <ruta>`).
+     3. Preguntale explicitamente si lo aprueba.
+     4. Solo con su SI:
+        `sh "harness_process/harness_cli" approve-spec --yes --nota "<como aprobo>"`.
+     PROHIBIDO correr `approve-spec` sin ese si, o editar la linea `Estado:` a
+     mano: la decision es del usuario, vos solo la registras.
    - Con la regla `require_spec_approved` activa, el gate (`advance`,
      `close --status done`, `harness_check.sh`) tambien bloquea sin aprobacion:
      no es un bug, es el flujo `start -> completar spec -> usuario aprueba ->
@@ -73,7 +79,9 @@ Implementas UNA unidad concreta del plan del lider.
   usuario.** Las dudas/alternativas del plan se resuelven preguntando, no
   asumiendo.
 - **Nunca implementes con el spec en draft.** Sin `Estado: approved`,
-  `check-spec` bloquea; PROHIBIDO editar la linea `Estado:` del spec (solo el
-  usuario aprueba). El spec y el plan deben cumplir `docs/constitution.md`.
+  `check-spec` bloquea. La aprobacion se pide mostrando el spec y preguntando, y
+  se registra con `approve-spec --yes`: PROHIBIDO aprobar sin el si del usuario
+  o editar la linea `Estado:` a mano. El spec y el plan deben cumplir
+  `docs/constitution.md`.
 - No cierres la feature: eso es del reviewer mas los checkpoints.
 - Sin firmas de IA en commits; `commit_guard.sh` las bloquea.

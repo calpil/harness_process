@@ -1,5 +1,6 @@
 pub mod add;
 pub mod advance;
+pub mod approve_spec;
 pub mod autocheck;
 pub mod check_plan;
 pub mod check_spec;

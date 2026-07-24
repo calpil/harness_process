@@ -187,9 +187,14 @@ adaptado y en layout plano):
   planes, sin carpetas `specs/NNN/`) con `Estado: draft`: recorridos de usuario
   priorizados (P1/P2), criterios de aceptacion AC-n en Given/When/Then, no
   funcionales y fuera de alcance.
-- El LIDER completa el spec y el plan (cada item de la Delegacion cita su AC-n);
-  el USUARIO lo aprueba editando `Estado: draft` -> `Estado: approved`. Ningun
-  agente puede auto-aprobar.
+- El LIDER completa el spec y el plan (cada item de la Delegacion cita su AC-n)
+  y ejecuta el **ritual de aprobacion**: le MUESTRA el spec al usuario (contenido
+  en el chat + abierto en su editor), le PREGUNTA si lo aprueba y solo con su SI
+  lo REGISTRA con `sh harness_cli approve-spec --yes [--nota "<como aprobo>"]`.
+  El comando escribe `Estado: approved`, sella quien/cuando y re-firma el spec
+  (por eso aprobar no dispara la alarma de "spec actualizado por otro LLM").
+  Sin `--yes` el comando se niega con exit 2: ningun agente aprueba por su
+  cuenta, y la decision sigue siendo exclusivamente del usuario.
 - Gate `require_spec_approved`: con la regla `"require_spec_approved": true` en
   `rules` de `feature_list.json` y el spec sin aprobar, `advance`,
   `close --status done` y `harness_check.sh` bloquean con mensaje accionable.

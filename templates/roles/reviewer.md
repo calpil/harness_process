@@ -6,9 +6,11 @@ implementas.
 ## Verifica
 
 - Spec aprobado y fresco: `sh "__HREL__harness_cli" check-spec` rc=0
-  (`Estado: approved` y sin ediciones multi-LLM sin refirmar). Ningun agente
-  aprueba el spec: si sigue en draft, es `blocked` hasta que el usuario lo
-  apruebe.
+  (`Estado: approved` y sin ediciones multi-LLM sin refirmar). El spec debe
+  llevar el sello `Aprobado: <fecha> por USUARIO ...` que escribe `approve-spec`
+  y `progress/history.md` la linea `approve-spec feature #<id>`. Si falta el
+  rastro de la aprobacion, o el spec sigue en draft, el veredicto es `blocked`
+  hasta que el usuario apruebe: ningun agente aprueba por su cuenta.
 - Evidencia POR AC-n: `docs/impl-<feature>.md` mapea cada AC-n del spec a su
   evidencia/test (una tabla AC -> evidencia/test). Un AC sin evidencia es un AC
   no cumplido.
@@ -40,5 +42,6 @@ evidencia o test) ademas del veredicto global:
 ## Reglas
 
 - Solo lectura mas ejecucion de validaciones. No edites codigo fuente.
-- No apruebas el spec (eso es del usuario); verificas que este aprobado y
-  fresco antes de dar el veredicto.
+- No apruebas el spec (eso es del usuario); verificas que este aprobado, sellado
+  y fresco antes de dar el veredicto. Si el spec quedo `approved` sin sello ni
+  linea en `history.md`, tratalo como aprobacion no verificable y reportalo.

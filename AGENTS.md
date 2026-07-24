@@ -8,9 +8,13 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
    completa el spec (`docs/spec-feature-<id>-<slug>.md`, `Estado: draft`) con
    los AC-n en Given/When/Then ANTES del plan; cada item de la Delegacion cita
    su AC-n.
-2. El USUARIO aprueba el spec (`Estado: draft` -> `Estado: approved`); ningun
-   agente auto-aprueba. Con la regla `require_spec_approved` activa, el gate
-   (`check-spec`, `advance`, `close --status done`) bloquea hasta la aprobacion.
+2. Ritual de aprobacion: el agente le MUESTRA el spec al USUARIO (contenido en
+   el chat + abierto en su editor), le PREGUNTA si lo aprueba y solo con su SI
+   lo REGISTRA con `sh harness_cli approve-spec --yes` (escribe
+   `Estado: approved`, sella quien/cuando y re-firma el spec). Sin `--yes` el
+   comando se niega: ningun agente aprueba por su cuenta. Con la regla
+   `require_spec_approved` activa, el gate (`check-spec`, `advance`,
+   `close --status done`) bloquea hasta esa aprobacion.
 3. Implementer verifica `check-spec` limpio, trabaja una unidad concreta y
    escribe evidencia por AC-n en `docs/impl-<feature>.md`.
 4. Reviewer verifica spec aprobado y fresco, evidencia por AC, impacto, tests,
@@ -28,7 +32,8 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `docs/constitution.md`: principios no negociables (el spec y el plan los
   cumplen; el reviewer los verifica).
 - `docs/spec-feature-<id>-<slug>.md`: spec de la feature con AC-n
-  (Given/When/Then); se aprueba (draft -> approved) antes de implementar.
+  (Given/When/Then); se aprueba (draft -> approved) antes de implementar, via
+  `harness_cli approve-spec --yes` tras el si explicito del usuario.
 - `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto; sus hitos
   alimentan `feature_list.json`.
 - `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
