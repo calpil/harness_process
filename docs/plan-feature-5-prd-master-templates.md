@@ -124,3 +124,6 @@ Orden: U1 -> U2 -> U3 -> U5 (verificar sh) -> U4 -> U6 -> U7.
 
 ---
 Cerrado: 2026-07-24T22:22:58Z - status=pending - Aparcada: implementada y commiteada (4c71f30); espera aprobacion del spec con el flujo nuevo de la feature #6
+
+### Avance 2026-07-24T23:05:37Z
+Reviewer: veredicto approved en docs/review-5.md (AC-1..AC-10 verificados; AC-6 Windows estatico). Preflight AC-5 re-ejecutado: exit 2
