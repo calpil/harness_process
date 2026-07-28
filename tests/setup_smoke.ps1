@@ -57,6 +57,7 @@ edition = "2021"
     $runningOnWindows = $env:OS -eq "Windows_NT"
     if ($runningOnWindows) {
         # (fake python block removed - Rust only)
+        $fakeCargo = @'
 @echo off
 echo %*> "%CD%\cargo-args.txt"
 if not exist "%CARGO_TARGET_DIR%\release" mkdir "%CARGO_TARGET_DIR%\release"
@@ -67,6 +68,7 @@ exit /b 0
     }
     else {
         # (fake python block removed - Rust only)
+        $fakeCargo = @'
 #!/bin/sh
 printf '%s\n' "$*" > "$PWD/cargo-args.txt"
 mkdir -p "$CARGO_TARGET_DIR/release"
@@ -201,7 +203,160 @@ exit 0
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/conventions.md") -Raw) -match $teamSentinel) "Migration overwrote the team's conventions.md in the root docs/."
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirHarness "docs/conventions.md") -Raw).Trim() -eq "VIEJO-CONVENTIONS") "Migration removed the old copy instead of keeping it."
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, and reset."
+    # --- Feature #7: gate de espejo de roles + resolucion robusta de raiz ------
+    # Paridad con los bloques nuevos de tests/setup_smoke.sh. El gate vive en
+    # harness_check.sh (bash); aqui se valida (1) que el script sembrado trae el
+    # gate y el guardrail, (2) la MISMA extraccion de cuerpos portada a
+    # PowerShell contra los espejos que genera el instalador ps1 (cero falsos
+    # positivos, AC-2/AC-11), (3) que esa extraccion detecta un espejo stale
+    # inyectado, y (4) si hay bash disponible, el harness_check.sh REAL sobre un
+    # checkout fuente simulado (AC-6). La ejecucion completa en Windows queda
+    # pendiente de entorno, como en las features #1/#4/#5/#6.
+
+    function Get-AgentBody {
+        param([string]$Path)
+        $lines = [IO.File]::ReadAllLines($Path)
+        $fm = 0
+        $inBody = $false
+        $body = New-Object System.Collections.Generic.List[string]
+        foreach ($line in $lines) {
+            if (-not $inBody) {
+                if ($line -match '^---\s*$') {
+                    $fm++
+                    if ($fm -eq 2) { $inBody = $true }
+                }
+                continue
+            }
+            $body.Add($line)
+        }
+        while ($body.Count -gt 0 -and $body[0].Trim() -eq '') { $body.RemoveAt(0) }
+        return ($body -join "`n").TrimEnd()
+    }
+
+    function Get-CodexBody {
+        param([string]$Path)
+        $lines = [IO.File]::ReadAllLines($Path)
+        $inBlock = $false
+        $body = New-Object System.Collections.Generic.List[string]
+        foreach ($line in $lines) {
+            if (-not $inBlock) {
+                if ($line -match '^developer_instructions\s*=') { $inBlock = $true }
+                continue
+            }
+            if ($line -eq "'''") { break }
+            $body.Add($line)
+        }
+        while ($body.Count -gt 0 -and $body[0].Trim() -eq '') { $body.RemoveAt(0) }
+        return ($body -join "`n").TrimEnd()
+    }
+
+    function Get-NormalizedText {
+        param([string]$Path)
+        return ((Get-Content -LiteralPath $Path -Raw) -replace "`r`n", "`n").TrimEnd()
+    }
+
+    $checkRobust = Join-Path $tempRoot "check-robust-ps"
+    Copy-Fixture -Target $checkRobust
+    New-Item -ItemType Directory -Path (Join-Path $checkRobust "rust") -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $fixture "rust/Cargo.toml") -Destination (Join-Path $checkRobust "rust/Cargo.toml")
+    $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
+    try {
+        & (Join-Path $checkRobust "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity `
+            -CargoTargetDir (Join-Path $checkRobust "cargo-target")
+    }
+    finally {
+        $env:PATH = $oldPath
+    }
+
+    # (1) El harness_check.sh sembrado trae el gate de espejo y el guardrail.
+    $seededCheck = Get-Content -LiteralPath (Join-Path $checkRobust "harness_check.sh") -Raw
+    Assert-True ($seededCheck -match 'Espejo desincronizado') "Seeded harness_check.sh does not carry the role-mirror gate."
+    Assert-True ($seededCheck -match 'extract_agent_body') "Seeded harness_check.sh does not carry the frontmatter body extractor."
+    Assert-True ($seededCheck -match 'Checkout fuente del arnes detectado') "Seeded harness_check.sh does not carry the source-checkout guardrail."
+    Assert-True ($seededCheck -match 'Divergencia roles/') "Seeded harness_check.sh does not carry the roles/ vs templates/roles/ sub-gate."
+
+    # (2) AC-2/AC-3/AC-11: los espejos generados por el instalador ps1 llevan el
+    # MISMO cuerpo que roles/<rol>.md en los tres formatos.
+    foreach ($role in @("leader", "implementer", "reviewer")) {
+        $roleBody = Get-NormalizedText -Path (Join-Path $checkRobust "roles/$role.md")
+        $claudeBody = Get-AgentBody -Path (Join-Path $checkRobust ".claude/agents/$role.md")
+        Assert-True ($claudeBody -eq $roleBody) "Mirror .claude/agents/$role.md is out of sync with roles/$role.md."
+        $geminiBody = Get-AgentBody -Path (Join-Path $checkRobust ".gemini/agents/$role.md")
+        Assert-True ($geminiBody -eq $roleBody) "Mirror .gemini/agents/$role.md is out of sync with roles/$role.md."
+        $codexBody = Get-CodexBody -Path (Join-Path $checkRobust ".codex/agents/$role.toml")
+        Assert-True ($codexBody -eq $roleBody) "Mirror .codex/agents/$role.toml is out of sync with roles/$role.md."
+    }
+
+    # AC-4: roles/ instalado equivale a templates/roles/ bajo alguna de las dos
+    # expansiones de __HREL__ (root => prefijo vacio).
+    $hrelPrefix = (Split-Path -Leaf $checkRobust) + "/"
+    foreach ($roleFile in @("leader", "implementer", "reviewer", "README")) {
+        $srcBody = Get-NormalizedText -Path (Join-Path $checkRobust "roles/$roleFile.md")
+        $tplRaw = Get-NormalizedText -Path (Join-Path $checkRobust "templates/roles/$roleFile.md")
+        $expSubdir = $tplRaw.Replace('__HREL__', $hrelPrefix)
+        $expFlat = $tplRaw.Replace('__HREL__', '')
+        Assert-True (($srcBody -eq $expSubdir) -or ($srcBody -eq $expFlat)) "roles/$roleFile.md diverges from templates/roles/$roleFile.md modulo __HREL__."
+    }
+
+    # (3) AC-1/AC-3: la misma extraccion DETECTA un espejo stale inyectado.
+    $staleMirror = Join-Path $checkRobust ".claude/agents/implementer.md"
+    $mirrorBackup = [IO.File]::ReadAllText($staleMirror)
+    Add-Content -LiteralPath $staleMirror -Value "PROTOCOLO VIEJO INYECTADO"
+    $roleBody = Get-NormalizedText -Path (Join-Path $checkRobust "roles/implementer.md")
+    Assert-True ((Get-AgentBody -Path $staleMirror) -ne $roleBody) "Injected stale mirror was not detected by the gate extraction logic."
+    [IO.File]::WriteAllText($staleMirror, $mirrorBackup)
+    Assert-True ((Get-AgentBody -Path $staleMirror) -eq $roleBody) "Restored mirror should match roles/implementer.md again."
+
+    # (4) AC-6: harness_check.sh REAL sobre un checkout fuente simulado (marker
+    # subdir + senales de fuente, padre sin huella). Requiere bash (Git Bash en
+    # Windows); sin bash se deja constancia y se omite.
+    $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+    if ($bashCmd) {
+        $sourceParent = Join-Path $tempRoot "source-sim"
+        $sourceClone = Join-Path $sourceParent "harness_process"
+        New-Item -ItemType Directory -Path $sourceClone -Force | Out-Null
+        foreach ($f in @("harness_check.sh", "commit_guard.sh", "CHECKPOINTS.md")) {
+            Copy-Item -LiteralPath (Join-Path $repoRoot $f) -Destination (Join-Path $sourceClone $f)
+        }
+        Copy-Item -LiteralPath (Join-Path $repoRoot "templates") -Destination $sourceClone -Recurse
+        Copy-Item -LiteralPath (Join-Path $repoRoot "roles") -Destination $sourceClone -Recurse
+        New-Item -ItemType Directory -Path (Join-Path $sourceClone "rust") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $sourceClone "docs") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $sourceClone "progress") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $sourceClone ".claude/agents") -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repoRoot "rust/Cargo.toml") -Destination (Join-Path $sourceClone "rust/Cargo.toml")
+        Copy-Item -LiteralPath (Join-Path $repoRoot "docs/constitution.md") -Destination (Join-Path $sourceClone "docs/constitution.md")
+        Copy-Item -Path (Join-Path $repoRoot ".claude/agents/*.md") -Destination (Join-Path $sourceClone ".claude/agents")
+        Copy-Item -LiteralPath (Join-Path $repoRoot "templates/progress/current.md") -Destination (Join-Path $sourceClone "progress/current.md")
+        # Sin feature_list.json: el check omite los subcomandos del binario (el
+        # fixture ps1 solo tiene el harness.exe fake del cargo simulado).
+        Set-Content -LiteralPath (Join-Path $sourceClone ".harness_layout") -Value "subdir" -Encoding Ascii
+
+        $oldRepoRootEnv = $env:HARNESS_REPO_ROOT
+        $oldClaudeProjectDir = $env:CLAUDE_PROJECT_DIR
+        $env:HARNESS_REPO_ROOT = $null
+        $env:CLAUDE_PROJECT_DIR = $null
+        Push-Location $sourceClone
+        try {
+            # $null en el pipe cierra stdin (commit_guard.sh hace cat de stdin).
+            $checkOutput = $null | & $bashCmd.Source "harness_check.sh" 2>&1 | Out-String
+            $checkExit = $LASTEXITCODE
+        }
+        finally {
+            Pop-Location
+            $env:HARNESS_REPO_ROOT = $oldRepoRootEnv
+            $env:CLAUDE_PROJECT_DIR = $oldClaudeProjectDir
+        }
+        Assert-True ($checkExit -eq 0) "harness_check.sh should pass on the simulated source checkout (exit=$checkExit): $checkOutput"
+        Assert-True ($checkOutput -match 'Checkout fuente del arnes detectado') "Source-checkout guardrail did not emit its informative notice."
+        Assert-True (-not ($checkOutput -match 'Falta docs/constitution\.md')) "harness_check.sh resolved to the parent (false constitution failure)."
+    }
+    else {
+        Write-Host "[INFO] bash not available: skipping the live harness_check.sh run on the simulated source checkout (static parity only)."
+    }
+
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, and source-checkout guardrail."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

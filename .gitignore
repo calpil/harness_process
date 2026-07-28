@@ -9,3 +9,8 @@ __pycache__/
 /feature_list.json
 /progress/
 /graphify-out*
+# Marker de layout: estado LOCAL de instalacion, no codigo (decision usuario
+# 2026-07-28, feature #7). Versionado hacia que todo clon naciera declarando
+# "mi raiz es mi padre" y el checkout fuente resolviera a $HOME. El instalador
+# lo escribe en cada instalacion.
+/.harness_layout

@@ -208,6 +208,29 @@ adaptado y en layout plano):
   (`setup_harness.sh` / `setup_harness.ps1`) solo si falta y nunca lo pisa;
   specs y planes deben cumplirlo y el reviewer lo verifica.
 
+## harness_check.sh: gates de integridad
+
+`bash harness_check.sh` (exit 0 limpio / 2 con fallos; `HARNESS_CHECK_MODE=block|warn|off`)
+valida estado del backlog, frescura de plan/spec, checkpoints, commit guard y el
+mapa de agentes. Desde la feature #7 incluye ademas:
+
+- **Gate de espejo de roles**: `roles/*.md` es la fuente unica. El check compara
+  el cuerpo embebido de `.claude/agents/*.md` (tambien leidos por Grok),
+  `.gemini/agents/*.md` y `.codex/agents/*.toml` contra `roles/<rol>.md`, y
+  `roles/*.md` contra `templates/roles/*.md` (modulo `__HREL__`). Un espejo
+  desincronizado bloquea, nombrando el archivo; el remedio es re-correr el
+  instalador (o propagar el cambio a `roles/` si lo editado fue el espejo). Los
+  espejos que no existen no fallan.
+- **Resolucion de raiz robusta**: los cuatro scripts (`harness_check.sh`,
+  `harness_status.sh`, `init.sh`, `commit_guard.sh`) y el binario Rust resuelven
+  `REPO_ROOT` con la misma regla: overrides primero (`HARNESS_REPO_ROOT`,
+  variables de agente), luego el marker `.harness_layout`; y si el marker dice
+  `subdir` pero el directorio es un checkout FUENTE (tiene
+  `templates/harness_cli` + `rust/`) con un padre sin huella de instalacion (o
+  el padre es `$HOME` sin `HARNESS_ALLOW_HOME_SURFACE=1`), la raiz es el propio
+  checkout, con aviso informativo `[i]`. El marker ya no esta versionado (es
+  estado local que escribe el instalador).
+
 ## Documentacion del proceso: toda en el `docs/` de la RAIZ
 
 Con el arnes en una subcarpeta (`<proyecto>/harness_process/`, layout por

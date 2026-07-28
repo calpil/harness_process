@@ -32,6 +32,22 @@ fn cmd(bin: &Path) -> Command {
     c
 }
 
+/// Fixture "checkout FUENTE del arnes": marker subdir + senales de fuente
+/// (templates/harness_cli + rust/) y padre SIN huella de instalacion. La
+/// resolucion debe quedarse en el propio checkout (feature #7 / AC-8).
+fn sandbox_source_checkout() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let harness_dir = dir.path().join("hp");
+    std::fs::create_dir_all(harness_dir.join("templates")).unwrap();
+    std::fs::create_dir_all(harness_dir.join("rust")).unwrap();
+    std::fs::write(harness_dir.join("templates/harness_cli"), "#!/bin/sh\n").unwrap();
+    std::fs::write(harness_dir.join(".harness_layout"), "subdir").unwrap();
+    let built = assert_cmd::cargo::cargo_bin("harness");
+    let target = harness_dir.join(if cfg!(windows) { "harness.exe" } else { "harness" });
+    std::fs::copy(&built, &target).unwrap();
+    (dir, target)
+}
+
 #[test]
 fn status_should_print_empty_backlog() {
     let (_dir, bin) = sandbox_with_binary();
@@ -391,6 +407,68 @@ fn close_blocked_should_pass_without_approved_spec() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Feature #1 cerrada como blocked."));
+}
+
+#[test]
+fn start_should_stay_inside_source_checkout_and_not_touch_parent() {
+    // Feature #7 / AC-8: en un checkout fuente (marker subdir incoherente con
+    // el entorno) los artefactos de start van a <checkout>/docs/ y el padre
+    // (que hacia de $HOME en el incidente real) queda intacto.
+    let (dir, bin) = sandbox_source_checkout();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[i] Checkout fuente del arnes detectado"));
+    assert!(dir.path().join("hp/docs/plan-feature-1-demo.md").exists());
+    assert!(dir.path().join("hp/docs/spec-feature-1-demo.md").exists());
+    assert!(!dir.path().join("docs").exists());
+}
+
+#[test]
+fn env_override_should_beat_source_checkout_guardrail() {
+    // Feature #7 / AC-9: HARNESS_REPO_ROOT sigue mandando sobre cualquier
+    // deteccion; con el override, los artefactos van a la raiz indicada.
+    let (dir, bin) = sandbox_source_checkout();
+    cmd(&bin)
+        .env("HARNESS_REPO_ROOT", dir.path())
+        .args(["add", "--name", "Demo"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .env("HARNESS_REPO_ROOT", dir.path())
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[i] Checkout fuente").not());
+    assert!(dir.path().join("docs/plan-feature-1-demo.md").exists());
+    assert!(!dir.path().join("hp/docs").exists());
+}
+
+#[test]
+fn home_parent_should_trigger_source_guardrail_even_with_footprint() {
+    // Feature #7 / AC-6 (regla $HOME): si el padre ES $HOME, la huella que
+    // haya ahi (~/CLAUDE.md, ~/.claude/settings.json) no lo convierte en raiz
+    // de instalacion; sin HARNESS_ALLOW_HOME_SURFACE=1 se resuelve local.
+    let (dir, bin) = sandbox_source_checkout();
+    std::fs::write(dir.path().join("CLAUDE.md"), "# global del usuario\n").unwrap();
+    cmd(&bin)
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .arg("status")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[i] Checkout fuente del arnes detectado"));
+    // Con el escape explicito, la misma huella vuelve a mandar (padre = raiz).
+    cmd(&bin)
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .env("HARNESS_ALLOW_HOME_SURFACE", "1")
+        .arg("status")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[i] Checkout fuente").not());
 }
 
 #[test]

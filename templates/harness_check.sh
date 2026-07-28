@@ -7,6 +7,31 @@ REPO_ROOT="${HARNESS_REPO_ROOT:-$AGENT_PROJECT_DIR}"
 if [ -z "$REPO_ROOT" ]; then
     if [ "$(cat "$HARNESS_DIR/.harness_layout" 2>/dev/null)" = "subdir" ]; then
         REPO_ROOT="$(dirname "$HARNESS_DIR")"
+        # Guardrail checkout fuente (decision usuario 2026-07-28): un clon de
+        # la fuente es identico a una instalacion subdir; solo el ENTORNO los
+        # distingue. Con senales de fuente en este dir (templates/harness_cli
+        # + rust/) y un padre sin huella de instalacion (o $HOME sin
+        # HARNESS_ALLOW_HOME_SURFACE=1), el marker 'subdir' es incoherente:
+        # fallback al propio arnes con aviso informativo (ni fallo duro ni
+        # silencioso).
+        if [ -f "$HARNESS_DIR/templates/harness_cli" ] && [ -d "$HARNESS_DIR/rust" ]; then
+            harness_parent_footprint=0
+            for harness_fp in "docs/constitution.md" "CLAUDE.md" "AGENTS.md" ".claude/settings.json"; do
+                if [ -f "$REPO_ROOT/$harness_fp" ]; then
+                    harness_parent_footprint=1
+                    break
+                fi
+            done
+            harness_parent_is_home=0
+            if [ "${HARNESS_ALLOW_HOME_SURFACE:-0}" != "1" ] && [ -n "${HOME:-}" ] \
+                && [ "$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)" = "$(cd "$HOME" 2>/dev/null && pwd -P)" ]; then
+                harness_parent_is_home=1
+            fi
+            if [ "$harness_parent_footprint" -eq 0 ] || [ "$harness_parent_is_home" -eq 1 ]; then
+                echo "[i] Checkout fuente del arnes detectado (.harness_layout=subdir sin huella de instalacion en el padre): REPO_ROOT=$HARNESS_DIR" >&2
+                REPO_ROOT="$HARNESS_DIR"
+            fi
+        fi
     else
         REPO_ROOT="$HARNESS_DIR"
     fi
@@ -73,6 +98,24 @@ fi
 # Integridad del mapa de agentes (solo si la capa de subagentes esta instalada).
 # roles/ vive junto a los scripts; los subagentes nativos de Claude viven en la
 # raiz multi-repo (REPO_ROOT/.claude/agents) para que Claude Code los registre.
+
+# Cuerpo embebido de un espejo Markdown (Claude/Gemini): todo lo que sigue al
+# cierre del frontmatter (segundo '---'), sin las lineas en blanco iniciales
+# (el instalador inserta una entre frontmatter y cuerpo).
+extract_agent_body() {
+    awk 'started { print; next }
+         inbody { if ($0 ~ /^[[:space:]]*$/) next; started=1; print; next }
+         /^---[[:space:]]*$/ { fm++; if (fm == 2) inbody=1; next }' "$1"
+}
+
+# Cuerpo embebido de un espejo Codex: el bloque developer_instructions entre
+# comillas triples (envoltorio fijo de build_codex_agent en el instalador).
+extract_codex_body() {
+    awk -v q="'''" 'started { if ($0 == q) exit; print; next }
+         inblock { if ($0 == q) exit; if ($0 ~ /^[[:space:]]*$/) next; started=1; print; next }
+         $0 ~ /^developer_instructions[[:space:]]*=/ { inblock=1 }' "$1"
+}
+
 if [ -d "$HARNESS_DIR/roles" ]; then
     for role in leader implementer reviewer; do
         if [ ! -f "$HARNESS_DIR/roles/$role.md" ]; then
@@ -99,7 +142,53 @@ if [ -d "$HARNESS_DIR/roles" ]; then
             echo "[!] .gemini/agents/$role.md sin frontmatter YAML." >&2
             failures=$((failures + 1))
         fi
+
+        # Gate de espejo (decision usuario 2026-07-28): roles/ es la fuente
+        # unica; los espejos generados por el instalador deben llevar el MISMO
+        # cuerpo. Solo se comparan espejos existentes (una instalacion
+        # --no-subagents o un checkout sin .gemini/.codex no falla). El check
+        # SOLO reporta (read-only): el remedio es re-correr el instalador, o
+        # propagar el cambio a roles/ si lo editado fue el espejo.
+        if [ -f "$HARNESS_DIR/roles/$role.md" ]; then
+            role_body="$(cat "$HARNESS_DIR/roles/$role.md")"
+            if [ -f "$agent_md" ] && [ "$(extract_agent_body "$agent_md")" != "$role_body" ]; then
+                echo "[!] Espejo desincronizado: .claude/agents/$role.md (leido por Claude y Grok) no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
+                failures=$((failures + 1))
+            fi
+            if [ -f "$gemini_md" ] && [ "$(extract_agent_body "$gemini_md")" != "$role_body" ]; then
+                echo "[!] Espejo desincronizado: .gemini/agents/$role.md no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
+                failures=$((failures + 1))
+            fi
+            if [ -f "$codex_toml" ] && [ "$(extract_codex_body "$codex_toml")" != "$role_body" ]; then
+                echo "[!] Espejo desincronizado: .codex/agents/$role.toml no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
+                failures=$((failures + 1))
+            fi
+        fi
     done
+
+    # Sub-gate raiz <-> templates (Articulo 6), modulo __HREL__: roles/<f>.md
+    # debe equivaler a templates/roles/<f>.md bajo ALGUNA de las dos
+    # expansiones validas del placeholder (prefijo "<basename del arnes>/" en
+    # layout subdir, o vacio en layout root/flat). Condicional a que
+    # templates/roles/ exista (la distribucion aplanada no lo trae).
+    if [ -d "$HARNESS_DIR/templates/roles" ]; then
+        harness_hrel="$(basename "$HARNESS_DIR")/"
+        for role_file in leader implementer reviewer README; do
+            role_src="$HARNESS_DIR/roles/$role_file.md"
+            role_tpl="$HARNESS_DIR/templates/roles/$role_file.md"
+            if [ ! -f "$role_src" ] || [ ! -f "$role_tpl" ]; then
+                echo "[!] Espejo roles/ <-> templates/roles/ incompleto: falta roles/$role_file.md o templates/roles/$role_file.md." >&2
+                failures=$((failures + 1))
+                continue
+            fi
+            role_src_body="$(cat "$role_src")"
+            if [ "$role_src_body" != "$(sed "s|__HREL__|$harness_hrel|g" "$role_tpl")" ] \
+                && [ "$role_src_body" != "$(sed "s|__HREL__||g" "$role_tpl")" ]; then
+                echo "[!] Divergencia roles/$role_file.md vs templates/roles/$role_file.md (modulo __HREL__). Propaga el cambio al otro lado en el mismo commit (regla de espejo del Articulo 6)." >&2
+                failures=$((failures + 1))
+            fi
+        done
+    fi
 fi
 
 # Constitution del proyecto: vive en el docs/ de la RAIZ (junto a planes y

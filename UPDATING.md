@@ -62,6 +62,9 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
   `harness_check.sh`
 - El subcomando `harness_cli approve-spec --yes`, que registra la aprobación del
   usuario (sello + re-firma del spec)
+- El gate de espejo de roles en `harness_check.sh` (compara el cuerpo embebido de
+  `.claude/agents/*.md`, `.gemini/agents/*.md` y `.codex/agents/*.toml` contra
+  `roles/*.md`) y la resolución de raíz robusta ante el checkout fuente
 
 ## Spec-Driven Development (opt-in en instalaciones existentes)
 
@@ -164,6 +167,40 @@ Garantías (mismo criterio que `docs/constitution.md`):
 
 En instalaciones existentes aparecen al re-correr el instalador, sin tocar nada
 de lo que ya tengas.
+
+## Marker `.harness_layout` des-versionado + gate de espejo de roles
+
+Desde esta versión (feature #7, decisión del usuario 2026-07-28):
+
+- **`.harness_layout` ya no está versionado** en el repo fuente. Es estado
+  **local** de instalación (no código): versionado con valor `subdir` hacía que
+  todo clon naciera declarando "mi raíz es mi padre", y el checkout fuente
+  resolvía su raíz a `$HOME` (falsos fallos en `harness_check.sh` y basura en
+  `$HOME/docs`). El instalador lo escribe en cada instalación, como siempre.
+- **Migración en instalaciones subdir existentes**: al hacer `git pull` en tu
+  `harness_process`, Git elimina el `.harness_layout` local (dejó de estar
+  tracked). Entre el `pull` y el siguiente setup el arnés opera como layout
+  `root` (efectos acotados al propio clon; no toca tu proyecto ni `$HOME`).
+  **Re-corre el instalador** (`./setup_harness.sh` / `.\setup_harness.ps1`) —el
+  flujo canónico de siempre tras un pull— y el marker se regenera con el layout
+  correcto.
+- **Guardrail de checkout fuente**: aunque el marker diga `subdir`, si el
+  directorio tiene señales de fuente (`templates/harness_cli` + `rust/`) y el
+  padre no tiene huella de instalación (`docs/constitution.md`, `CLAUDE.md`,
+  `AGENTS.md`, `.claude/settings.json`) o el padre es `$HOME` (sin
+  `HARNESS_ALLOW_HOME_SURFACE=1`), los scripts y el binario resuelven la raíz al
+  **propio checkout** con un aviso informativo `[i]`. Las instalaciones subdir
+  legítimas (padre con huella) no cambian, y `HARNESS_REPO_ROOT` /
+  `CLAUDE_PROJECT_DIR` (y variables de agente) siguen mandando sobre cualquier
+  detección.
+- **Gate de espejo de roles en `harness_check.sh`**: `roles/*.md` es la fuente
+  única; el check ahora compara el cuerpo embebido de `.claude/agents/*.md`
+  (también leídos por Grok), `.gemini/agents/*.md` y `.codex/agents/*.toml`
+  contra `roles/<rol>.md`, y `roles/*.md` contra `templates/roles/*.md` (módulo
+  `__HREL__`). Un espejo desincronizado **bloquea** como los demás checks
+  (`HARNESS_CHECK_MODE=warn|off` degradan igual que siempre). El check solo
+  **reporta**: el remedio es re-correr el instalador (o propagar el cambio a
+  `roles/` si lo que editaste fue el espejo).
 
 ## Mantenimiento Rust only (post feature #2)
 

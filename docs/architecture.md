@@ -36,6 +36,11 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   silencioso; ausencia de error => code 0.
 - `paths.rs`: `HarnessPaths::resolve()` localiza raiz del proyecto, `docs/`,
   `progress/`, `feature_list.json` y honra `HARNESS_REPO_ROOT` / markers de layout.
+  `repo_root_from_marker` (unico punto del marker, tambien usado por
+  `GraphEnv::resolve`) trae el guardrail de checkout fuente: marker `subdir` +
+  senales de fuente (`templates/harness_cli` + `rust/`) + padre sin huella de
+  instalacion (o `$HOME` sin `HARNESS_ALLOW_HOME_SURFACE=1`) => la raiz es el
+  propio checkout, con aviso `[i]` a stderr (feature #7).
 - `features.rs`: carga/guarda `feature_list.json` y selecciona la feature activa.
 - `plan.rs`: plantilla y firma del plan (`plan_signature` = dict
   path/mtime/size/hash), `is_plan_stale`, `plan_staleness_message`, `write_plan`,
@@ -109,6 +114,15 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   `templates/`. Regla de mantenedor: `templates/` y la raiz se mantienen
   espejados; `roles/*.md` es el espejo de `templates/roles/*.md` con el
   placeholder `__HREL__` sustituido por la ruta relativa del arnes.
+- Gate de espejo de roles (feature #7): `harness_check.sh` compara el cuerpo
+  embebido de `.claude/agents/*.md` (tambien leidos por Grok),
+  `.gemini/agents/*.md` (tras el frontmatter) y `.codex/agents/*.toml` (bloque
+  `developer_instructions`) contra `roles/<rol>.md`, y `roles/*.md` contra
+  `templates/roles/*.md` modulo `__HREL__` (ambas expansiones validas: prefijo
+  del arnes o vacio). Un espejo desincronizado bloquea como los demas checks
+  (`HARNESS_CHECK_MODE` degrada igual); el check solo reporta y el remedio es
+  re-correr el instalador. Los espejos ausentes no fallan (condicionalidad por
+  existencia).
 - TODA la documentacion del proceso se instala en el `docs/` de la RAIZ
   (`SURFACE_DIR/docs`): `constitution.md` mas los tres docs del arnes
   (`architecture.md`, `conventions.md`, `verification.md`, lista `HARNESS_DOCS` /
@@ -139,6 +153,13 @@ El hub usa exclusivamente PostgreSQL; se accede bajo `harness graph <cmd>`
   del proceso (constitution, docs del arnes, spec y plan) vive en el `docs/` de
   la RAIZ; el arnes no tiene `docs/` propio.
 - `root`: el arnes se instala directamente en la raiz (`SURFACE_DIR == HARNESS_DIR`).
+- El marker `.harness_layout` es estado LOCAL de cada instalacion (lo escribe el
+  instalador; NO esta versionado en el repo fuente desde la feature #7). La
+  resolucion de `REPO_ROOT` es la misma en `harness_check.sh`,
+  `harness_status.sh`, `init.sh`, `commit_guard.sh` y `rust/src/paths.rs`:
+  overrides (`HARNESS_REPO_ROOT`, variables de agente) > marker `subdir` =>
+  padre, salvo el guardrail de checkout fuente (senales de fuente + padre sin
+  huella o `$HOME`) que resuelve al propio dir con aviso `[i]`.
 
 ## Riesgos conocidos
 
@@ -148,5 +169,8 @@ El hub usa exclusivamente PostgreSQL; se accede bajo `harness graph <cmd>`
   solo-si-falta): gate apagado por defecto, opt-in documentado en `UPDATING.md`.
 - Paridad sh vs ps1: las superficies PowerShell son un resumen conceptual, no
   copia literal; la ejecucion Windows real se valida cuando hay entorno.
-- No correr `setup_harness.sh` en este checkout fuente (el marker de layout
-  apuntaria a `$HOME`): el binario raiz se refresca con `cargo build` + `cp`.
+- No correr `setup_harness.sh` en este checkout fuente (escribiria superficies
+  en `$HOME`): el binario raiz se refresca con `cargo build` + `cp`. Desde la
+  feature #7 los scripts y el binario resuelven el checkout fuente a si mismo
+  (guardrail + marker des-versionado), asi que el check y `start` ya no
+  producen falsos fallos ni basura en `$HOME`.

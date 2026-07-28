@@ -478,6 +478,153 @@ test -x "$RUST_TEST/harness"
 sh "$RUST_TEST/harness_cli" status | grep '^Backlog:' >/dev/null
 echo "[Ok] binario Rust compilado por el setup e integrado via harness_cli."
 
+# --- Feature #7: harness_check robusto (gate de espejo + checkout fuente) ---
+# (a) AC-12b: harness_check.sh corre y pasa LIMPIO en una fixture recien
+# instalada (espejos generados por el instalador vigente = cero falsos
+# positivos del gate de espejo, AC-2).
+CHECK_ROBUST="$TMP_ROOT/check-robust"
+copy_fixture "$CHECK_ROBUST"
+run_setup "$CHECK_ROBUST" --root
+
+run_check() {
+    (
+        cd "$CHECK_ROBUST"
+        env -u HARNESS_REPO_ROOT -u CLAUDE_PROJECT_DIR -u CODEX_PROJECT_DIR \
+            -u GEMINI_PROJECT_DIR -u GROK_PROJECT_DIR -u ANTIGRAVITY_PROJECT_DIR \
+            HOME="$TMP_ROOT/home" \
+            HARNESS_HUB="$CHECK_ROBUST/.test-hub" \
+            "$@" bash harness_check.sh < /dev/null
+    )
+}
+
+rc=0; run_check > "$TMP_ROOT/check-clean.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "[!] harness_check.sh debio pasar limpio en la fixture recien instalada (rc=$rc):" >&2
+    cat "$TMP_ROOT/check-clean.log" >&2
+    exit 1
+fi
+grep -q 'Harness Check limpio' "$TMP_ROOT/check-clean.log"
+if grep -q 'Espejo desincronizado' "$TMP_ROOT/check-clean.log"; then
+    echo "[!] falso positivo del gate de espejo sobre espejos recien generados (AC-2)." >&2
+    exit 1
+fi
+
+# (b) AC-12c: espejos stale INYECTADOS en los tres formatos -> el check los
+# reporta nombrando cada archivo y falla (rc=2) en modo block (AC-1, AC-3).
+cp "$CHECK_ROBUST/.claude/agents/implementer.md" "$TMP_ROOT/bak-claude-implementer.md"
+cp "$CHECK_ROBUST/.gemini/agents/leader.md" "$TMP_ROOT/bak-gemini-leader.md"
+cp "$CHECK_ROBUST/.codex/agents/reviewer.toml" "$TMP_ROOT/bak-codex-reviewer.toml"
+printf '\nPROTOCOLO VIEJO INYECTADO\n' >> "$CHECK_ROBUST/.claude/agents/implementer.md"
+printf '\nPROTOCOLO VIEJO INYECTADO\n' >> "$CHECK_ROBUST/.gemini/agents/leader.md"
+# Codex: el drift va DENTRO del bloque developer_instructions (antes del cierre ''').
+awk -v q="'''" '{ if ($0 == q && !done) { print "PROTOCOLO VIEJO INYECTADO"; done=1 } print }' \
+    "$CHECK_ROBUST/.codex/agents/reviewer.toml" > "$TMP_ROOT/reviewer.toml.tmp" \
+    && mv "$TMP_ROOT/reviewer.toml.tmp" "$CHECK_ROBUST/.codex/agents/reviewer.toml"
+
+rc=0; run_check > "$TMP_ROOT/check-stale.log" 2>&1 || rc=$?
+test "$rc" -eq 2 || { echo "[!] el check debio fallar (rc=2) con espejos stale (rc=$rc)." >&2; exit 1; }
+grep -q 'Espejo desincronizado: .claude/agents/implementer.md' "$TMP_ROOT/check-stale.log"
+grep -q 'Espejo desincronizado: .gemini/agents/leader.md' "$TMP_ROOT/check-stale.log"
+grep -q 'Espejo desincronizado: .codex/agents/reviewer.toml' "$TMP_ROOT/check-stale.log"
+grep -q 'Re-corre el instalador' "$TMP_ROOT/check-stale.log"
+# AC-5: HARNESS_CHECK_MODE degrada igual que el resto de los checks.
+rc=0; run_check HARNESS_CHECK_MODE=warn > "$TMP_ROOT/check-warn.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] modo warn debio salir 0 (rc=$rc)." >&2; exit 1; }
+grep -q 'Espejo desincronizado' "$TMP_ROOT/check-warn.log"
+rc=0; run_check HARNESS_CHECK_MODE=off > "$TMP_ROOT/check-off.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] modo off debio salir 0 (rc=$rc)." >&2; exit 1; }
+if grep -q 'Espejo desincronizado' "$TMP_ROOT/check-off.log"; then
+    echo "[!] modo off no debe evaluar el gate de espejo." >&2
+    exit 1
+fi
+cp "$TMP_ROOT/bak-claude-implementer.md" "$CHECK_ROBUST/.claude/agents/implementer.md"
+cp "$TMP_ROOT/bak-gemini-leader.md" "$CHECK_ROBUST/.gemini/agents/leader.md"
+cp "$TMP_ROOT/bak-codex-reviewer.toml" "$CHECK_ROBUST/.codex/agents/reviewer.toml"
+
+# AC-4: divergencia roles/ vs templates/roles/ (modulo __HREL__) tambien falla.
+cp "$CHECK_ROBUST/templates/roles/leader.md" "$TMP_ROOT/bak-tpl-leader.md"
+printf '\nDIVERGENCIA INYECTADA\n' >> "$CHECK_ROBUST/templates/roles/leader.md"
+rc=0; run_check > "$TMP_ROOT/check-tpl.log" 2>&1 || rc=$?
+test "$rc" -eq 2 || { echo "[!] el check debio fallar (rc=2) con templates/roles divergente (rc=$rc)." >&2; exit 1; }
+grep -q 'Divergencia roles/leader.md vs templates/roles/leader.md' "$TMP_ROOT/check-tpl.log"
+cp "$TMP_ROOT/bak-tpl-leader.md" "$CHECK_ROBUST/templates/roles/leader.md"
+
+# Sanity: restaurados los espejos, el check vuelve a quedar limpio.
+rc=0; run_check > "$TMP_ROOT/check-restored.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] el check debio volver a pasar tras restaurar los espejos (rc=$rc)." >&2; exit 1; }
+echo "[Ok] gate de espejo: limpio post-install; stale en Claude/Gemini/Codex y drift de templates detectados; warn/off degradan."
+
+# (c) AC-12d: checkout FUENTE simulado (marker subdir versionado historico +
+# senales de fuente, padre sin huella): resolucion LOCAL, sin el falso "Falta
+# docs/constitution.md", y CERO escrituras fuera del clon (AC-6, AC-7, AC-8).
+SOURCE_PARENT="$TMP_ROOT/source-sim"
+SOURCE_CLONE="$SOURCE_PARENT/harness_process"
+SOURCE_HOME="$TMP_ROOT/source-home"
+mkdir -p "$SOURCE_CLONE" "$SOURCE_HOME"
+for f in harness_check.sh harness_status.sh init.sh commit_guard.sh harness_cli setup_harness.sh CHECKPOINTS.md; do
+    cp "$REPO_ROOT/$f" "$SOURCE_CLONE/$f"
+done
+cp -R "$REPO_ROOT/templates" "$SOURCE_CLONE/templates"
+cp -R "$REPO_ROOT/roles" "$SOURCE_CLONE/roles"
+mkdir -p "$SOURCE_CLONE/rust" "$SOURCE_CLONE/docs" "$SOURCE_CLONE/progress" "$SOURCE_CLONE/.claude/agents"
+cp "$REPO_ROOT/rust/Cargo.toml" "$SOURCE_CLONE/rust/Cargo.toml"
+cp "$REPO_ROOT/docs/constitution.md" "$SOURCE_CLONE/docs/constitution.md"
+cp "$REPO_ROOT"/.claude/agents/*.md "$SOURCE_CLONE/.claude/agents/"
+cp "$REPO_ROOT/templates/feature_list.json" "$SOURCE_CLONE/feature_list.json"
+cp "$REPO_ROOT/templates/progress/current.md" "$SOURCE_CLONE/progress/current.md"
+cp "$REPO_ROOT/templates/progress/history.md" "$SOURCE_CLONE/progress/history.md"
+cp "$PREBUILT_BIN" "$SOURCE_CLONE/harness"
+chmod +x "$SOURCE_CLONE/harness"
+printf 'subdir\n' > "$SOURCE_CLONE/.harness_layout" # estado historico del footgun
+
+src_env() {
+    env -u HARNESS_REPO_ROOT -u CLAUDE_PROJECT_DIR -u CODEX_PROJECT_DIR \
+        -u GEMINI_PROJECT_DIR -u GROK_PROJECT_DIR -u ANTIGRAVITY_PROJECT_DIR \
+        HOME="$SOURCE_HOME" \
+        HARNESS_HUB="$SOURCE_CLONE/.test-hub" \
+        DB_HOST=127.0.0.1 DB_PORT=9 DB_USER=harness DB_PASSWORD=secret \
+        DB_NAME=harness DB_SSL_MODE=disable \
+        "$@"
+}
+
+# AC-6: harness_check.sh resuelve local, avisa con [i] y NO inventa fallos.
+rc=0; (cd "$SOURCE_CLONE" && src_env bash harness_check.sh < /dev/null) > "$TMP_ROOT/source-check.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "[!] harness_check.sh debio pasar en el checkout fuente simulado (rc=$rc):" >&2
+    cat "$TMP_ROOT/source-check.log" >&2
+    exit 1
+fi
+grep -q 'Checkout fuente del arnes detectado' "$TMP_ROOT/source-check.log"
+if grep -q 'Falta docs/constitution.md' "$TMP_ROOT/source-check.log"; then
+    echo "[!] falso fallo de constitution en el checkout fuente (resolvio al padre)." >&2
+    exit 1
+fi
+# AC-7: harness_status.sh y commit_guard.sh aplican la misma resolucion.
+rc=0; (cd "$SOURCE_CLONE" && src_env bash harness_status.sh --brief) > "$TMP_ROOT/source-status.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] harness_status.sh --brief fallo en el checkout fuente (rc=$rc)." >&2; exit 1; }
+grep -q 'Checkout fuente del arnes detectado' "$TMP_ROOT/source-status.log"
+rc=0; (cd "$SOURCE_CLONE" && src_env sh commit_guard.sh </dev/null) > "$TMP_ROOT/source-guard.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] commit_guard.sh fallo en el checkout fuente (rc=$rc)." >&2; exit 1; }
+grep -q 'Checkout fuente del arnes detectado' "$TMP_ROOT/source-guard.log"
+# init.sh: la resolucion es la misma; la conexion al hub muere rapido (DB
+# inalcanzable) y NADA debe quedar fuera del clon.
+(cd "$SOURCE_CLONE" && src_env bash init.sh) > "$TMP_ROOT/source-init.log" 2>&1 || true
+grep -q 'Checkout fuente del arnes detectado' "$TMP_ROOT/source-init.log"
+grep -qF "raiz=$SOURCE_CLONE" "$TMP_ROOT/source-init.log"
+# AC-8: start (binario Rust) crea los artefactos DENTRO del clon.
+src_env sh "$SOURCE_CLONE/harness_cli" add --name demo > /dev/null 2>&1
+src_env sh "$SOURCE_CLONE/harness_cli" start --feature 1 > "$TMP_ROOT/source-start.log" 2>&1
+test -f "$SOURCE_CLONE/docs/plan-feature-1-demo.md" \
+    || { echo "[!] start debio crear el plan dentro del clon." >&2; exit 1; }
+test -f "$SOURCE_CLONE/docs/spec-feature-1-demo.md"
+# Cero basura fuera del clon: el padre solo contiene el clon y el HOME de la
+# fixture queda intacto (el incidente real creaba $HOME/docs).
+test "$(ls -A "$SOURCE_PARENT")" = "harness_process" \
+    || { echo "[!] aparecieron rutas fuera del clon: $(ls -A "$SOURCE_PARENT")" >&2; exit 1; }
+test -z "$(ls -A "$SOURCE_HOME")" \
+    || { echo "[!] el \$HOME de la fixture fue modificado: $(ls -A "$SOURCE_HOME")" >&2; exit 1; }
+echo "[Ok] checkout fuente simulado: resolucion local con aviso [i] en check/status/guard/init, start sin escrituras fuera del clon."
+
 echo "[Ok] docs del arnes en el docs/ de la RAIZ: destino, migracion, no-pisa y reset."
 echo "[Ok] planillas maestras docs/prd/ (PRD + SDD): siembra, no-pisa y supervivencia al reset."
 echo "[Ok] setup smoke: Rust-only, gate de credenciales, layouts, reinstall, dry-run, version, reset."
