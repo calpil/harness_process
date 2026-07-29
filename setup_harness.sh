@@ -7,7 +7,7 @@
 #   - Integracion graphify (estructura automatica, rebuild semantico, hub) con el
 #     comando /graphify nativo desplegado por agente (Claude/Codex/Gemini/Antigravity).
 #   - Superficies y hooks multi-LLM auto-instalados (Claude, Codex, Gemini,
-#     Grok, Antigravity, generica) sin flag --target.
+#     Grok, Kimi, Antigravity, generica) sin flag --target.
 #   - Capa opcional de subagentes (lider/implementer/reviewer).
 #   - Respaldos *.bak.* archivados bajo bkp/ (HARNESS_BKP_DIR para overridear).
 #
@@ -34,6 +34,11 @@ INSTALL_GRAPHIFY=1
 INSTALL_GRAPHIFY_SKILLS=1
 INSTALL_ANTIGRAVITY=1
 WITH_SUBAGENTS=1
+# Bloque de hooks GLOBALES de Kimi Code (unica via que Kimi ofrece; decision
+# usuario 2026-07-28): se escribe solo si se detecta Kimi en la maquina y
+# --no-kimi lo excluye explicitamente. Los artefactos DE PROYECTO
+# (.kimi-code/agents/, launcher) se generan siempre, como los demas backends.
+INSTALL_KIMI_HOOKS=1
 FORCE=0
 # Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
 # directorio PADRE; las superficies LLM se escriben en el padre y los scripts
@@ -321,6 +326,11 @@ Opciones:
   --install-graphify   Ya es el default; se mantiene por compatibilidad.
   --install-antigravity Ya es el default; asegura Antigravity CLI si falta.
   --no-antigravity     No instala Antigravity CLI.
+  --no-kimi            No escribe el bloque de hooks globales de Kimi Code en
+                       KIMI_CODE_HOME/config.toml (default ~/.kimi-code). Los
+                       artefactos de proyecto (.kimi-code/agents/, launcher) se
+                       generan igual. Sin este flag, el bloque solo se escribe
+                       si se detecta Kimi en la maquina.
   --with-postgres      PostgreSQL es obligatorio; se mantiene por compatibilidad.
   --subdir             (DEFAULT) El arnes vive en esta subcarpeta y orquesta el
                        directorio PADRE: escribe superficies multi-LLM en el
@@ -381,6 +391,7 @@ while [ "$#" -gt 0 ]; do
         --no-graphify) INSTALL_GRAPHIFY=0 ;;
         --no-graphify-skills) INSTALL_GRAPHIFY_SKILLS=0 ;;
         --no-antigravity) INSTALL_ANTIGRAVITY=0 ;;
+        --no-kimi) INSTALL_KIMI_HOOKS=0 ;;
         --with-postgres) ;;
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
@@ -500,11 +511,18 @@ if [ "$RESET" -eq 1 ]; then
         "$SURFACE_DIR/.gemini/commands"
         "$SURFACE_DIR/.grok/hooks"
         "$SURFACE_DIR/.grok/GROK.md"
+        # Kimi Code: SOLO el artefacto de proyecto. El bloque de hooks GLOBALES
+        # en ${KIMI_CODE_HOME:-~/.kimi-code}/config.toml NO se toca (decision
+        # usuario 2026-07-28): es compartido por TODOS los proyectos con arnes
+        # de la maquina y --reset es por-proyecto. Remocion manual documentada
+        # en UPDATING.md (borrar entre los marcadores del arnes).
+        "$SURFACE_DIR/.kimi-code/agents"
         "$SURFACE_DIR/bin/harness-hook"
         "$SURFACE_DIR/bin/harness-claude"
         "$SURFACE_DIR/bin/harness-codex"
         "$SURFACE_DIR/bin/harness-gemini"
         "$SURFACE_DIR/bin/harness-grok"
+        "$SURFACE_DIR/bin/harness-kimi"
         "$SURFACE_DIR/bin/harness-antigravity"
         "$HARNESS_DIR/.harness_layout"
         "$HARNESS_DIR/.harness_backend"
@@ -660,7 +678,8 @@ Commitea por microservicio con Conventional Commits. El cierre ejecuta
 `HARNESS_COMMIT_GUARD_MODE=block|warn|off`.
 
 Launchers disponibles: `bin/harness-claude`, `bin/harness-codex`,
-`bin/harness-gemini`, `bin/harness-grok` y `bin/harness-antigravity`.
+`bin/harness-gemini`, `bin/harness-grok`, `bin/harness-kimi` y
+`bin/harness-antigravity`.
 
 ## Actualizacion
 
@@ -693,8 +712,8 @@ write_agent_surface() {
 # Harness Process
 
 Estas operando en la raiz de un arnes multi-repo compatible con Claude Code,
-Codex, Gemini, Grok, Antigravity y otros agentes CLI. No elijas proveedor ni
-target: sigue este mismo protocolo desde la raiz del proyecto.
+Codex, Gemini, Grok, Kimi Code, Antigravity y otros agentes CLI. No elijas
+proveedor ni target: sigue este mismo protocolo desde la raiz del proyecto.
 
 ## Arranque automatico
 
@@ -704,6 +723,9 @@ El instalador deja hooks nativos cuando la herramienta los soporta:
 - Codex: `.codex/hooks.json` (revisa y confia con `/hooks` si lo pide)
 - Gemini CLI: `.gemini/settings.json`
 - Grok Build: `.grok/hooks/` (confia con `/hooks-trust` si lo pide)
+- Kimi Code CLI: hooks GLOBALES en `~/.kimi-code/config.toml` (Kimi no soporta
+  hooks por proyecto; el instalador escribe un bloque delimitado con backup y
+  cada hook es no-op fuera de proyectos con arnes)
 - Antigravity CLI: sin hooks nativos conocidos; usa `bin/harness-antigravity`
   para inicializar el arnes antes de abrir el agente.
 
@@ -715,6 +737,7 @@ bin/harness-claude
 bin/harness-codex
 bin/harness-gemini
 bin/harness-grok
+bin/harness-kimi
 bin/harness-antigravity
 ```
 
@@ -891,6 +914,8 @@ Orquestacion (mismos roles, formato nativo por herramienta):
 - **Codex CLI**: subagentes nativos en `.codex/agents/*.toml`.
 - **Gemini CLI**: subagentes nativos en `.gemini/agents/`.
 - **Grok Build**: lee `.claude/agents/` por compatibilidad con Claude Code.
+- **Kimi Code CLI**: subagentes nativos en `.kimi-code/agents/*.md` (lee este
+  `AGENTS.md` nativamente).
 - **Antigravity y otros**: aplica `__HREL__roles/*.md` como fases secuenciales.
 
 Detalle por herramienta (formatos, modelos, effort): `__HREL__roles/README.md`.
@@ -1222,9 +1247,119 @@ GROK_MD_EOF
     write_file_notice ".grok/hooks/harness.sh / .grok/GROK.md ($SURFACE_DIR)"
 }
 
+# Kimi Code CLI (v0.29.x): hooks SOLO globales, verificado empiricamente (un
+# [[hooks]] en el config del proyecto NO se ejecuta). Unica excepcion a la
+# regla de no escribir fuera del proyecto (decision usuario 2026-07-28),
+# blindada: backup previo via bkp/, bloque delimitado por marcadores propios,
+# reemplazo idempotente SOLO entre marcadores (el resto del archivo del usuario
+# queda intacto), validacion best-effort con `kimi doctor` + rollback, y guard
+# barato por proyecto ($PWD/bin/harness-hook; el hook corre con cwd =
+# proyecto). Eventos: SessionStart/PostToolUse(Edit|Write)/Stop, mapeados a
+# session-start/post-tool/stop de bin/harness-hook. SessionEnd NO se registra
+# (run_event lo trataria como stop y el check correria dos veces por turno).
+# Best-effort de punta a punta: nunca cambia el exit code del setup.
+KIMI_HOOKS_BEGIN="# >>> harness-process hooks >>>"
+KIMI_HOOKS_END="# <<< harness-process hooks <<<"
+KIMI_HOOKS_WRITTEN=0
+
+write_kimi_hooks() {
+    kimi_home="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
+    kimi_cfg="$kimi_home/config.toml"
+    if [ "$INSTALL_KIMI_HOOKS" -eq 0 ]; then
+        log_info "   -> Kimi Code: bloque global de hooks omitido (--no-kimi); los artefactos de proyecto quedan igual."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    # Decision usuario (2026-07-28): la escritura en el config GLOBAL solo se
+    # justifica si el backend existe realmente en la maquina.
+    kimi_bin=""
+    if command -v kimi >/dev/null 2>&1; then
+        kimi_bin="kimi"
+    elif [ -x "$kimi_home/bin/kimi" ]; then
+        kimi_bin="$kimi_home/bin/kimi"
+    fi
+    if [ -z "$kimi_bin" ]; then
+        log_info "   -> Kimi Code CLI no detectado; no se toca $kimi_cfg (los artefactos de proyecto quedan listos)."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+
+    # Backup ANTES de tocar el archivo (mecanismo bkp/ de siempre) + copia de
+    # rollback local para la validacion doctor.
+    kimi_rollback=""
+    if [ -f "$kimi_cfg" ]; then
+        backup_file "$kimi_cfg"
+        kimi_rollback="$kimi_cfg.harness.rollback"
+        cp -p "$kimi_cfg" "$kimi_rollback"
+    fi
+    mkdir -p "$kimi_home"
+
+    # Conserva el contenido del usuario fuera del bloque; remueve SOLO el
+    # bloque delimitado previo (si existe) y anexa la version fresca al final,
+    # con newline final garantizado (awk normaliza la ultima linea).
+    kimi_tmp="$kimi_cfg.harness.tmp"
+    if [ -f "$kimi_cfg" ]; then
+        awk -v b="$KIMI_HOOKS_BEGIN" -v e="$KIMI_HOOKS_END" '
+            $0 == b { inblk=1; next }
+            inblk { if ($0 == e) inblk=0; next }
+            { print }
+        ' "$kimi_cfg" > "$kimi_tmp"
+    else
+        : > "$kimi_tmp"
+    fi
+    cat <<'KIMI_HOOKS_EOF' >> "$kimi_tmp"
+# >>> harness-process hooks >>>
+# Bloque gestionado por Harness Process (setup_harness.sh / setup_harness.ps1).
+# Kimi Code solo soporta hooks GLOBALES: este bloque es compartido por todos
+# los proyectos de la maquina y cada comando es un guard que solo actua si el
+# directorio actual tiene un arnes instalado ($PWD/bin/harness-hook); en
+# cualquier otro proyecto es un no-op silencioso. Re-instalar el arnes lo
+# regenera; para quitarlo a mano borra desde este marcador hasta el de cierre
+# (ver UPDATING.md). No edites dentro del bloque: se reemplaza completo.
+
+[[hooks]]
+event = "SessionStart"
+command = "[ -x \"$PWD/bin/harness-hook\" ] || exit 0; HARNESS_REPO_ROOT=\"$PWD\" exec \"$PWD/bin/harness-hook\" plain session-start"
+timeout = 120
+
+[[hooks]]
+event = "PostToolUse"
+matcher = "Edit|Write"
+command = "[ -x \"$PWD/bin/harness-hook\" ] || exit 0; HARNESS_REPO_ROOT=\"$PWD\" exec \"$PWD/bin/harness-hook\" plain post-tool"
+timeout = 30
+
+[[hooks]]
+event = "Stop"
+command = "[ -x \"$PWD/bin/harness-hook\" ] || exit 0; HARNESS_REPO_ROOT=\"$PWD\" exec \"$PWD/bin/harness-hook\" plain stop"
+timeout = 120
+# <<< harness-process hooks <<<
+KIMI_HOOKS_EOF
+    mv "$kimi_tmp" "$kimi_cfg"
+
+    # Validacion best-effort del TOML resultante. Verificado en v0.29.2:
+    # `kimi doctor` sale 0 con config valido AUNQUE falte login/modelo, y !=0
+    # solo con config invalido, asi que el exit code es senal fiable. Si algo
+    # quedo invalido: restaurar el estado previo (o retirar el archivo recien
+    # creado), avisar accionable y seguir sin cambiar el exit del setup.
+    if ! KIMI_CODE_HOME="$kimi_home" "$kimi_bin" doctor >/dev/null 2>&1; then
+        if [ -n "$kimi_rollback" ]; then
+            mv "$kimi_rollback" "$kimi_cfg"
+        else
+            rm -f "$kimi_cfg"
+        fi
+        log_warn "   -> 'kimi doctor' reporto config invalido tras escribir el bloque del arnes; se restauro el estado previo de $kimi_cfg."
+        log_warn "      Revisa ese archivo (hay backup en $BKP_DIR) y re-corre el instalador; el resto del setup continua."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    [ -n "$kimi_rollback" ] && rm -f "$kimi_rollback"
+    KIMI_HOOKS_WRITTEN=1
+    write_file_notice "config.toml global de Kimi Code ($kimi_cfg, bloque delimitado)"
+}
+
 write_launchers() {
     mkdir -p "$SURFACE_DIR/bin"
-    for agent in claude codex gemini grok antigravity; do
+    for agent in claude codex gemini grok kimi antigravity; do
         launcher="$SURFACE_DIR/bin/harness-$agent"
         cat <<'LAUNCHER_EOF' > "$launcher"
 #!/bin/bash
@@ -1263,7 +1398,7 @@ LAUNCHER_EOF
             "$launcher" > "$launcher_tmp" && mv "$launcher_tmp" "$launcher"
         chmod +x "$launcher"
     done
-    write_file_notice "bin/harness-claude|codex|gemini|grok|antigravity ($SURFACE_DIR)"
+    write_file_notice "bin/harness-claude|codex|gemini|grok|kimi|antigravity ($SURFACE_DIR)"
 }
 
 ensure_antigravity_cli() {
@@ -1582,7 +1717,7 @@ fi
 log_info "== Instalando Harness Process en: $HARNESS_DIR =="
 log_info "   proyecto:   $PROJECT_NAME"
 log_info "   layout:     $LAYOUT$([ "$LAYOUT" = "subdir" ] && echo " (raiz multi-repo: $REPO_ROOT)")"
-log_info "   superficies/hooks: Claude, Codex, Gemini, Grok, Antigravity, generica"
+log_info "   superficies/hooks: Claude, Codex, Gemini, Grok, Kimi, Antigravity, generica"
 log_info "   subagentes: $([ "$WITH_SUBAGENTS" -eq 1 ] && echo si || echo no)"
 log_info "   graphify:   $([ "$INSTALL_GRAPHIFY" -eq 1 ] && echo asegurar || echo no)"
 log_info "   /graphify por agente: $([ "$INSTALL_GRAPHIFY_SKILLS" -eq 1 ] && echo "Claude/Codex/Gemini/Antigravity" || echo no)"
@@ -1628,6 +1763,9 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     do_mkdir "$SURFACE_DIR/.claude/agents"
     do_mkdir "$SURFACE_DIR/.codex/agents"
     do_mkdir "$SURFACE_DIR/.gemini/agents"
+    # Kimi solo necesita el dir de agentes en el proyecto (sus hooks son
+    # globales); con --no-subagents no se crea nada .kimi-code/ aqui.
+    do_mkdir "$SURFACE_DIR/.kimi-code/agents"
 fi
 
 # Marcador de layout (respetando dry-run)
@@ -1700,6 +1838,9 @@ backup_file "$SURFACE_DIR/.codex/agents/reviewer.toml"
 backup_file "$SURFACE_DIR/.gemini/agents/leader.md"
 backup_file "$SURFACE_DIR/.gemini/agents/implementer.md"
 backup_file "$SURFACE_DIR/.gemini/agents/reviewer.md"
+backup_file "$SURFACE_DIR/.kimi-code/agents/leader.md"
+backup_file "$SURFACE_DIR/.kimi-code/agents/implementer.md"
+backup_file "$SURFACE_DIR/.kimi-code/agents/reviewer.md"
 backup_file "$SURFACE_DIR/.codex/hooks.json"
 backup_file "$SURFACE_DIR/.gemini/settings.json"
 backup_file "$SURFACE_DIR/.gemini/commands/harness/check.toml"
@@ -1711,6 +1852,7 @@ backup_file "$SURFACE_DIR/bin/harness-claude"
 backup_file "$SURFACE_DIR/bin/harness-codex"
 backup_file "$SURFACE_DIR/bin/harness-gemini"
 backup_file "$SURFACE_DIR/bin/harness-grok"
+backup_file "$SURFACE_DIR/bin/harness-kimi"
 backup_file "$SURFACE_DIR/bin/harness-antigravity"
 backup_file "$HARNESS_DIR/UPDATING.md"
 
@@ -1916,6 +2058,26 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         cat "roles/$role.md" >> "$out"
     }
 
+    # Kimi Code CLI: subagentes nativos en .kimi-code/agents/*.md (Markdown +
+    # frontmatter name/description, cuerpo = system prompt; formato verificado
+    # empiricamente en v0.29.2, equivalente a .claude/agents/). Al seleccionar
+    # un perfil su cuerpo REEMPLAZA el system prompt (el rol se basta solo).
+    # tools = allowlist por rol (decision usuario 2026-07-28) con los nombres
+    # case-sensitive verificados en v0.29.2. Args: role tools description.
+    build_kimi_agent() {
+        local role="$1" atools="$2" adesc="$3"
+        local out="$SURFACE_DIR/.kimi-code/agents/$role.md"
+        {
+            printf -- '---\n'
+            printf 'name: %s\n' "$role"
+            printf 'description: %s\n' "$adesc"
+            printf 'tools: %s\n' "$atools"
+            printf -- '---\n\n'
+        } > "$out"
+        cat "roles/$role.md" >> "$out"
+        subst_hrel_inplace "$out"
+    }
+
     # Descripciones compartidas por las tres superficies de subagentes nativos.
     desc_leader="Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el spec + plan con AC-n en docs/ de la raiz. No implementa codigo."
     desc_impl="Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia durable en docs/ de la raiz. Usalo para escribir o modificar codigo."
@@ -1935,6 +2097,12 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     build_gemini_agent leader      "$desc_leader"
     build_gemini_agent implementer "$desc_impl"
     build_gemini_agent reviewer    "$desc_rev"
+
+    # --- Kimi Code CLI: .kimi-code/agents/*.md (allowlist de tools por rol:
+    # leader/reviewer read-only; implementer ademas Edit/Write) ----------------
+    build_kimi_agent leader      "Read, Grep, Glob, Bash"              "$desc_leader"
+    build_kimi_agent implementer "Read, Edit, Write, Bash, Grep, Glob" "$desc_impl"
+    build_kimi_agent reviewer    "Read, Grep, Glob, Bash"              "$desc_rev"
 
     # Grok Build (xAI) lee .claude/agents/*.md por compatibilidad con Claude Code;
     # no requiere archivos propios. Antigravity crea subagentes en runtime (sin
@@ -1992,7 +2160,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         fi
     done
 
-    write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
+    write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents + .kimi-code/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
 
 echo "Generando superficies multi-LLM..."
@@ -2008,6 +2176,7 @@ write_harness_hook_runtime
 write_codex_hooks
 write_gemini_hooks
 write_grok_hooks
+write_kimi_hooks
 write_launchers
 
 chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness_cli
@@ -2135,7 +2304,12 @@ log_info "  $SURFACE_DIR/.claude/settings.json (hooks automaticos para Claude Co
 log_info "  $SURFACE_DIR/.codex/hooks.json (hooks automaticos para Codex; confiar con /hooks)"
 log_info "  $SURFACE_DIR/.gemini/settings.json (hooks automaticos para Gemini CLI)"
 log_info "  $SURFACE_DIR/.grok/hooks/harness.sh (hooks automaticos para Grok; confiar con /hooks-trust)"
-log_info "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok|antigravity"
+if [ "$KIMI_HOOKS_WRITTEN" -eq 1 ]; then
+    log_info "  ${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml (hooks GLOBALES de Kimi Code: bloque delimitado, con backup en bkp/; --reset NO lo toca)"
+else
+    log_info "  (Kimi Code: bloque global de hooks no escrito: sin Kimi detectado, --no-kimi, o doctor lo rechazo; ver log)"
+fi
+log_info "  $SURFACE_DIR/bin/harness-claude|codex|gemini|grok|kimi|antigravity"
 if [ "$LAYOUT" = "subdir" ]; then
     log_info ""
     log_info "Scripts del arnes en: $HARNESS_DIR"
@@ -2160,6 +2334,7 @@ log_info "  sh ${HREL}harness_cli approve-spec --yes  # <-- registra el SI del u
 log_info "  bin/harness-codex"
 log_info "  bin/harness-gemini"
 log_info "  bin/harness-grok"
+log_info "  bin/harness-kimi"
 log_info "  bin/harness-antigravity"
 log_info "  /graphify           (comando nativo en Claude/Codex/Gemini/Antigravity)"
 log_info "  graphify query \"...\"  (CLI; funciona en cualquier agente, incl. Grok)"
@@ -2167,7 +2342,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     log_info ""
     log_info "Modo subagentes activo:"
     log_info "  Mapa de agentes:    ${HREL}roles/README.md"
-    log_info "  Subagentes nativos: .claude/agents/*.md, .codex/agents/*.toml, .gemini/agents/*.md"
+    log_info "  Subagentes nativos: .claude/agents/*.md, .codex/agents/*.toml, .gemini/agents/*.md, .kimi-code/agents/*.md"
     log_info "  Grok Build:         lee .claude/agents/*.md (compat Claude Code)"
     log_info "  Antigravity/otros:  ${HREL}roles/*.md como fases secuenciales"
     log_info "  sh ${HREL}harness_cli add --name \"mi_feature\" --service \"$PROJECT_NAME/servicio\""

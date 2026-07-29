@@ -21,10 +21,10 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
    checkpoints y estado Git.
 5. El cierre requiere `harness_check.sh` limpio o decision explicita de bloqueo.
    El check incluye el gate de espejo de roles: los cuerpos embebidos de
-   `.claude/agents/*.md`, `.gemini/agents/*.md` y `.codex/agents/*.toml` deben
-   coincidir con `roles/*.md` (fuente unica), y `roles/*.md` con
-   `templates/roles/*.md` modulo `__HREL__`; un espejo stale bloquea y el
-   remedio es re-correr el instalador.
+   `.claude/agents/*.md`, `.gemini/agents/*.md`, `.codex/agents/*.toml` y
+   `.kimi-code/agents/*.md` deben coincidir con `roles/*.md` (fuente unica), y
+   `roles/*.md` con `templates/roles/*.md` modulo `__HREL__`; un espejo stale
+   bloquea y el remedio es re-correr el instalador.
 
 ## Archivos principales
 

@@ -31,6 +31,11 @@ try {
     $env:DB_PASSWORD = "secret"
     $env:DB_NAME = "harness"
     $env:DB_SSL_MODE = "require"
+    # Aislamiento Kimi (feature #8): este smoke NO overridea HOME, asi que sin
+    # esto una maquina con kimi en PATH escribiria el bloque global de hooks en
+    # el ~/.kimi-code REAL. Toda corrida usa una fixture; los bloques Kimi
+    # re-apuntan la variable a sus propias fixtures.
+    $env:KIMI_CODE_HOME = Join-Path $tempRoot "kimi-home-default"
 
     $dryRun = Join-Path $tempRoot "dry-run"
     Copy-Fixture -Target $dryRun
@@ -356,7 +361,114 @@ exit 0
         Write-Host "[INFO] bash not available: skipping the live harness_check.sh run on the simulated source checkout (static parity only)."
     }
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, and source-checkout guardrail."
+    # --- Feature #8: Kimi Code CLI como backend (paridad con setup_smoke.sh) ---
+    # (a) AC-9a/AC-10: espejos Kimi generados con frontmatter valido (allowlist
+    # de tools por rol, decision usuario 2026-07-28) y cuerpo == roles/<rol>.md.
+    foreach ($role in @("leader", "implementer", "reviewer")) {
+        $kimiMirror = Join-Path $checkRobust ".kimi-code/agents/$role.md"
+        Assert-True (Test-Path -LiteralPath $kimiMirror) "Kimi mirror $role.md was not generated."
+        $kimiLines = [IO.File]::ReadAllLines($kimiMirror)
+        Assert-True ($kimiLines[0] -eq "---") "Kimi mirror $role.md lacks YAML frontmatter."
+        Assert-True (@($kimiLines | Where-Object { $_ -eq "name: $role" }).Count -eq 1) "Kimi mirror $role.md lacks name: in the frontmatter."
+        Assert-True (@($kimiLines | Where-Object { $_ -match '^description: ' }).Count -ge 1) "Kimi mirror $role.md lacks description: in the frontmatter."
+        $kimiBody = Get-AgentBody -Path $kimiMirror
+        $kimiRoleBody = Get-NormalizedText -Path (Join-Path $checkRobust "roles/$role.md")
+        Assert-True ($kimiBody -eq $kimiRoleBody) "Mirror .kimi-code/agents/$role.md is out of sync with roles/$role.md."
+    }
+    $kimiLeaderTools = @([IO.File]::ReadAllLines((Join-Path $checkRobust ".kimi-code/agents/leader.md")) | Where-Object { $_ -match '^tools: ' })[0]
+    Assert-True ($kimiLeaderTools -eq "tools: Read, Grep, Glob, Bash") "Kimi leader allowlist must be read-only (Read, Grep, Glob, Bash)."
+    $kimiImplTools = @([IO.File]::ReadAllLines((Join-Path $checkRobust ".kimi-code/agents/implementer.md")) | Where-Object { $_ -match '^tools: ' })[0]
+    Assert-True ($kimiImplTools -match 'Edit' -and $kimiImplTools -match 'Write') "Kimi implementer allowlist must include Edit and Write."
+    # El harness_check.sh sembrado trae el gate de espejo extendido a Kimi.
+    $seededCheckKimi = Get-Content -LiteralPath (Join-Path $checkRobust "harness_check.sh") -Raw
+    Assert-True ($seededCheckKimi -match '\.kimi-code/agents') "Seeded harness_check.sh does not cover the Kimi mirrors."
+    # Launcher generado como los demas.
+    Assert-True (Test-Path -LiteralPath (Join-Path $checkRobust "bin/harness-kimi.ps1")) "Kimi launcher bin/harness-kimi.ps1 was not generated."
+
+    # (b) AC-9c/AC-9d/AC-9e/AC-10: bloque GLOBAL de hooks contra un
+    # KIMI_CODE_HOME de fixture con un kimi falso (doctor OK), NUNCA el real.
+    $kimiHomeOn = Join-Path $tempRoot "kimi-home-on"
+    New-Item -ItemType Directory -Path (Join-Path $kimiHomeOn "bin") -Force | Out-Null
+    if ($runningOnWindows) {
+        $fakeKimi = @'
+@echo off
+exit /b 0
+'@
+        Set-Content -LiteralPath (Join-Path $kimiHomeOn "bin/kimi.cmd") -Value $fakeKimi -Encoding Ascii
+    }
+    else {
+        $fakeKimi = @'
+#!/bin/sh
+exit 0
+'@
+        $fakeKimiPath = Join-Path $kimiHomeOn "bin/kimi"
+        Set-Content -LiteralPath $fakeKimiPath -Value $fakeKimi -Encoding utf8NoBOM
+        & chmod +x $fakeKimiPath
+    }
+    $kimiSentinel = "SENTINEL-KIMI-USER-CONFIG-PS"
+    $kimiConfigPath = Join-Path $kimiHomeOn "config.toml"
+    $kimiUserConfig = @'
+# __KIMI_SENTINEL__
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "echo hook-del-usuario"
+'@
+    Set-Content -LiteralPath $kimiConfigPath -Value ($kimiUserConfig.Replace("__KIMI_SENTINEL__", $kimiSentinel)) -Encoding utf8NoBOM
+    $kimiBeginMarker = "# >>> harness-process hooks >>>"
+    $oldKimiHomeEnv = $env:KIMI_CODE_HOME
+    $env:KIMI_CODE_HOME = $kimiHomeOn
+    $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
+    try {
+        & (Join-Path $checkRobust "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity `
+            -CargoTargetDir (Join-Path $checkRobust "cargo-target")
+        $kimiConfigText = Get-Content -LiteralPath $kimiConfigPath -Raw
+        Assert-True ($kimiConfigText -match [regex]::Escape($kimiSentinel)) "User content in the global Kimi config did not survive."
+        Assert-True ($kimiConfigText -match 'hook-del-usuario') "The user's own hook in the global Kimi config did not survive."
+        Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape($kimiBeginMarker))).Count -eq 1) "The harness block marker count must be exactly 1."
+        Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape("[[hooks]]"))).Count -eq 4) "Expected the user hook plus the 3 harness hooks."
+        Assert-True ($kimiConfigText -match 'event = "SessionStart"') "SessionStart hook missing from the harness block."
+        Assert-True ($kimiConfigText -match 'matcher = "Edit\|Write"') "PostToolUse matcher Edit|Write missing from the harness block."
+        Assert-True ($kimiConfigText -match 'event = "Stop"') "Stop hook missing from the harness block."
+        Assert-True (-not ($kimiConfigText -match 'SessionEnd')) "SessionEnd must not be registered (it would double the Stop check)."
+
+        # Re-instalar NO duplica el bloque (reemplazo idempotente entre marcadores).
+        & (Join-Path $checkRobust "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity `
+            -CargoTargetDir (Join-Path $checkRobust "cargo-target")
+        $kimiConfigText = Get-Content -LiteralPath $kimiConfigPath -Raw
+        Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape($kimiBeginMarker))).Count -eq 1) "Reinstall duplicated the harness block."
+        Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape("[[hooks]]"))).Count -eq 4) "Reinstall changed the hook count."
+
+        # -Reset limpia el artefacto de proyecto pero NO toca el config global
+        # (decision usuario 2026-07-28: es compartido entre proyectos).
+        & (Join-Path $checkRobust "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity -Reset
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $checkRobust ".kimi-code/agents"))) "-Reset did not clean the project .kimi-code/agents."
+        $kimiConfigAfterReset = Get-Content -LiteralPath $kimiConfigPath -Raw
+        Assert-True ($kimiConfigAfterReset -eq $kimiConfigText) "-Reset must not touch the global Kimi hooks block."
+
+        # -NoKimi: con Kimi detectable, el bloque global NO se escribe (los
+        # artefactos de proyecto se regeneran igual).
+        $kimiHomeFlag = Join-Path $tempRoot "kimi-home-flag"
+        New-Item -ItemType Directory -Path (Join-Path $kimiHomeFlag "bin") -Force | Out-Null
+        Get-ChildItem -LiteralPath (Join-Path $kimiHomeOn "bin") | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $kimiHomeFlag "bin")
+        }
+        $env:KIMI_CODE_HOME = $kimiHomeFlag
+        & (Join-Path $checkRobust "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi `
+            -CargoTargetDir (Join-Path $checkRobust "cargo-target")
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $kimiHomeFlag "config.toml"))) "-NoKimi must not write the global Kimi config."
+        Assert-True (Test-Path -LiteralPath (Join-Path $checkRobust ".kimi-code/agents/leader.md")) "-NoKimi must still generate the project Kimi mirrors."
+    }
+    finally {
+        $env:PATH = $oldPath
+        $env:KIMI_CODE_HOME = $oldKimiHomeEnv
+    }
+
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, and Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global)."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

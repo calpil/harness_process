@@ -17,6 +17,7 @@ param(
     [switch]$NoGraphify,
     [switch]$NoGraphifySkills,
     [switch]$NoAntigravity,
+    [switch]$NoKimi,
     [switch]$Force,
     [Alias("Preview")]
     [switch]$DryRun,
@@ -616,7 +617,7 @@ function Write-AgentSurface {
 # Harness Process
 
 This repository uses the Harness Process with Claude Code, Codex, Gemini,
-Grok, Antigravity, and other agent CLIs.
+Grok, Kimi Code, Antigravity, and other agent CLIs.
 
 Before changing code:
 
@@ -720,6 +721,20 @@ description: $($descriptions[$role])
 $body
 "@
         Write-HarnessText -Path (Join-Path $script:SurfaceDir ".gemini/agents/$role.md") -Content $gemini
+
+        # Kimi Code CLI (v0.29.x): mismo formato Markdown+frontmatter que Claude
+        # (verificado empiricamente); tools = allowlist por rol (decision usuario
+        # 2026-07-28), identica a la de Claude, asi que se reutiliza $tools.
+        $kimi = @"
+---
+name: $role
+description: $($descriptions[$role])
+tools: $tools
+---
+
+$body
+"@
+        Write-HarnessText -Path (Join-Path $script:SurfaceDir ".kimi-code/agents/$role.md") -Content $kimi
     }
 }
 
@@ -951,8 +966,140 @@ or start through `bin/harness-grok.ps1`.
 '@
 }
 
+# Kimi Code CLI (v0.29.x): hooks SOLO globales (paridad exacta con
+# write_kimi_hooks de setup_harness.sh). Unica excepcion a la regla de no
+# escribir fuera del proyecto (decision usuario 2026-07-28), blindada: backup
+# previo, bloque delimitado por marcadores propios, reemplazo idempotente SOLO
+# entre marcadores, validacion best-effort con `kimi doctor` + rollback y
+# guard por proyecto ($PWD/bin/harness-hook). El comando del bloque usa
+# sintaxis POSIX: si Kimi en Windows no lo ejecuta via sh, el hook global
+# queda best-effort alli (documentado en UPDATING.md). Nunca cambia el exit
+# del setup. Solo se escribe si se detecta Kimi; -NoKimi lo excluye.
+function Write-KimiGlobalHooks {
+    $kimiHome = if ($env:KIMI_CODE_HOME) { $env:KIMI_CODE_HOME } else { Join-Path $HOME ".kimi-code" }
+    $kimiConfig = Join-Path $kimiHome "config.toml"
+    if ($NoKimi) {
+        Write-HarnessLog INFO "Kimi Code: global hooks block skipped (-NoKimi); project artifacts are still generated."
+        $script:Counters.skipped++
+        return
+    }
+    $kimiCommand = Get-Command kimi -ErrorAction SilentlyContinue
+    $kimiLocal = $null
+    foreach ($candidate in @("bin/kimi", "bin/kimi.exe", "bin/kimi.cmd")) {
+        $candidatePath = Join-Path $kimiHome $candidate
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            $kimiLocal = $candidatePath
+            break
+        }
+    }
+    if (-not $kimiCommand -and -not $kimiLocal) {
+        Write-HarnessLog INFO "Kimi Code CLI not detected; leaving $kimiConfig untouched (project artifacts are still generated)."
+        $script:Counters.skipped++
+        return
+    }
+    if ($DryRun) {
+        Write-HarnessLog INFO "[DRY-RUN] Write the delimited harness hooks block into: $kimiConfig"
+        $script:Counters.created++
+        return
+    }
+
+    $beginMarker = "# >>> harness-process hooks >>>"
+    $endMarker = "# <<< harness-process hooks <<<"
+    $block = @'
+# >>> harness-process hooks >>>
+# Bloque gestionado por Harness Process (setup_harness.sh / setup_harness.ps1).
+# Kimi Code solo soporta hooks GLOBALES: este bloque es compartido por todos
+# los proyectos de la maquina y cada comando es un guard que solo actua si el
+# directorio actual tiene un arnes instalado ($PWD/bin/harness-hook); en
+# cualquier otro proyecto es un no-op silencioso. Re-instalar el arnes lo
+# regenera; para quitarlo a mano borra desde este marcador hasta el de cierre
+# (ver UPDATING.md). No edites dentro del bloque: se reemplaza completo.
+
+[[hooks]]
+event = "SessionStart"
+command = "[ -x \"$PWD/bin/harness-hook\" ] || exit 0; HARNESS_REPO_ROOT=\"$PWD\" exec \"$PWD/bin/harness-hook\" plain session-start"
+timeout = 120
+
+[[hooks]]
+event = "PostToolUse"
+matcher = "Edit|Write"
+command = "[ -x \"$PWD/bin/harness-hook\" ] || exit 0; HARNESS_REPO_ROOT=\"$PWD\" exec \"$PWD/bin/harness-hook\" plain post-tool"
+timeout = 30
+
+[[hooks]]
+event = "Stop"
+command = "[ -x \"$PWD/bin/harness-hook\" ] || exit 0; HARNESS_REPO_ROOT=\"$PWD\" exec \"$PWD/bin/harness-hook\" plain stop"
+timeout = 120
+# <<< harness-process hooks <<<
+'@
+
+    $existed = Test-Path -LiteralPath $kimiConfig -PathType Leaf
+    $rollback = $null
+    $raw = ""
+    if ($existed) {
+        # Backup ANTES de tocar el archivo (mecanismo bkp/ de siempre) + copia
+        # en memoria para el rollback de la validacion doctor.
+        Backup-HarnessPath -Target $kimiConfig
+        $rollback = [IO.File]::ReadAllText($kimiConfig)
+        $raw = $rollback
+    }
+    New-Item -ItemType Directory -Path $kimiHome -Force | Out-Null
+
+    # Remueve SOLO el bloque delimitado previo (si existe) preservando el resto
+    # byte a byte, y anexa la version fresca al final con newline garantizado.
+    $beginIdx = $raw.IndexOf($beginMarker)
+    if ($beginIdx -ge 0) {
+        $endIdx = $raw.IndexOf($endMarker, $beginIdx)
+        if ($endIdx -ge 0) {
+            $afterEnd = $endIdx + $endMarker.Length
+            if ($afterEnd -lt $raw.Length -and $raw[$afterEnd] -eq "`r") { $afterEnd++ }
+            if ($afterEnd -lt $raw.Length -and $raw[$afterEnd] -eq "`n") { $afterEnd++ }
+            $raw = $raw.Substring(0, $beginIdx) + $raw.Substring($afterEnd)
+        }
+        else {
+            $raw = $raw.Substring(0, $beginIdx)
+        }
+    }
+    if ($raw.Length -gt 0 -and -not $raw.EndsWith("`n")) {
+        $raw += "`n"
+    }
+    Write-HarnessText -Path $kimiConfig -Content ($raw + $block + "`n")
+
+    # Validacion best-effort del TOML resultante (verificado en v0.29.2: doctor
+    # sale 0 con config valido aunque falte login/modelo). Si quedo invalido:
+    # restaurar el estado previo (o retirar el archivo recien creado), avisar y
+    # seguir sin cambiar el exit del setup.
+    $doctorTool = if ($kimiCommand) { $kimiCommand.Source } else { $kimiLocal }
+    $doctorOk = $true
+    $previousKimiHome = $env:KIMI_CODE_HOME
+    try {
+        $env:KIMI_CODE_HOME = $kimiHome
+        & $doctorTool doctor *> $null
+        if ($LASTEXITCODE -ne 0) { $doctorOk = $false }
+    }
+    catch {
+        $doctorOk = $false
+    }
+    finally {
+        $env:KIMI_CODE_HOME = $previousKimiHome
+    }
+    if (-not $doctorOk) {
+        if ($null -ne $rollback) {
+            [IO.File]::WriteAllText($kimiConfig, $rollback, [Text.UTF8Encoding]::new($false))
+        }
+        else {
+            Remove-Item -LiteralPath $kimiConfig -Force -ErrorAction SilentlyContinue
+        }
+        Write-HarnessLog WARN "'kimi doctor' reporto config invalido tras escribir el bloque del arnes; se restauro el estado previo de $kimiConfig. Revisa ese archivo (hay backup en $($script:BackupDir)) y re-corre el instalador; el resto del setup continua."
+        $script:Counters.skipped++
+        return
+    }
+    Write-HarnessLog OK "Kimi Code global hooks block written: $kimiConfig (delimited block; backup under $($script:BackupDir))."
+    $script:Counters.created++
+}
+
 function Write-AgentLaunchers {
-    foreach ($agent in @("claude", "codex", "gemini", "grok", "antigravity")) {
+    foreach ($agent in @("claude", "codex", "gemini", "grok", "kimi", "antigravity")) {
         $content = @'
 #requires -Version 5.1
 [CmdletBinding()]
@@ -1111,17 +1258,24 @@ function Invoke-HarnessReset {
         ".gemini/agents",
         ".grok/hooks",
         ".grok/GROK.md",
+        # Kimi Code: SOLO el artefacto de proyecto. El bloque de hooks GLOBALES
+        # en KIMI_CODE_HOME/config.toml NO se toca (decision usuario
+        # 2026-07-28): es compartido por todos los proyectos con arnes de la
+        # maquina y -Reset es por-proyecto. Remocion manual en UPDATING.md.
+        ".kimi-code/agents",
         "bin/harness-hook",
         "bin/harness-hook.ps1",
         "bin/harness-claude",
         "bin/harness-codex",
         "bin/harness-gemini",
         "bin/harness-grok",
+        "bin/harness-kimi",
         "bin/harness-antigravity",
         "bin/harness-claude.ps1",
         "bin/harness-codex.ps1",
         "bin/harness-gemini.ps1",
         "bin/harness-grok.ps1",
+        "bin/harness-kimi.ps1",
         "bin/harness-antigravity.ps1"
     )
     $targets += @(
@@ -1236,7 +1390,8 @@ try {
             (Join-Path $script:SurfaceDir "docs/prd"),
             (Join-Path $script:SurfaceDir ".claude/agents"),
             (Join-Path $script:SurfaceDir ".codex/agents"),
-            (Join-Path $script:SurfaceDir ".gemini/agents")
+            (Join-Path $script:SurfaceDir ".gemini/agents"),
+            (Join-Path $script:SurfaceDir ".kimi-code/agents")
         )) {
             Ensure-Directory -Path $directory
         }
@@ -1342,6 +1497,7 @@ try {
         "bin/harness-codex.ps1",
         "bin/harness-gemini.ps1",
         "bin/harness-grok.ps1",
+        "bin/harness-kimi.ps1",
         "bin/harness-antigravity.ps1"
     )
     if ($script:WithSubagents) {
@@ -1349,6 +1505,7 @@ try {
             $surfaceBackups += ".claude/agents/$role.md"
             $surfaceBackups += ".codex/agents/$role.toml"
             $surfaceBackups += ".gemini/agents/$role.md"
+            $surfaceBackups += ".kimi-code/agents/$role.md"
         }
     }
     foreach ($relative in $surfaceBackups) {
@@ -1362,6 +1519,7 @@ try {
     }
     Write-PowerShellHookRuntime
     Write-AgentHooks
+    Write-KimiGlobalHooks
     Write-AgentLaunchers
 
     Ensure-Graphify

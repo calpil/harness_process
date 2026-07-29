@@ -63,8 +63,12 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - El subcomando `harness_cli approve-spec --yes`, que registra la aprobación del
   usuario (sello + re-firma del spec)
 - El gate de espejo de roles en `harness_check.sh` (compara el cuerpo embebido de
-  `.claude/agents/*.md`, `.gemini/agents/*.md` y `.codex/agents/*.toml` contra
-  `roles/*.md`) y la resolución de raíz robusta ante el checkout fuente
+  `.claude/agents/*.md`, `.gemini/agents/*.md`, `.codex/agents/*.toml` y
+  `.kimi-code/agents/*.md` contra `roles/*.md`) y la resolución de raíz robusta
+  ante el checkout fuente
+- El soporte de Kimi Code CLI: subagentes `.kimi-code/agents/*.md`, launcher
+  `bin/harness-kimi` y el bloque de hooks globales en
+  `KIMI_CODE_HOME/config.toml` (solo si se detecta Kimi; `--no-kimi` lo excluye)
 
 ## Spec-Driven Development (opt-in en instalaciones existentes)
 
@@ -201,6 +205,65 @@ Desde esta versión (feature #7, decisión del usuario 2026-07-28):
   (`HARNESS_CHECK_MODE=warn|off` degradan igual que siempre). El check solo
   **reporta**: el remedio es re-correr el instalador (o propagar el cambio a
   `roles/` si lo que editaste fue el espejo).
+
+## Kimi Code CLI: hooks globales (única excepción de escritura en `$HOME`)
+
+Desde esta versión (feature #8) Kimi Code CLI (v0.29.x) es backend de primera
+clase: lee el `AGENTS.md` generado (verificado empíricamente contra v0.29.2:
+lo inyecta al system prompt), recibe los roles como subagentes nativos en
+`.kimi-code/agents/*.md` (frontmatter `name`/`description`/`tools` con
+allowlist por rol: leader/reviewer `Read, Grep, Glob, Bash`; implementer
+además `Edit, Write`), y tiene launcher `bin/harness-kimi`. Todo eso vive en
+el proyecto, como con los demás backends.
+
+**La excepción**: Kimi **no soporta hooks por proyecto** (verificado: un
+`[[hooks]]` en el config del proyecto no se ejecuta). El único lugar donde
+existen es el config **global** `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`.
+El usuario decidió (2026-07-28) aceptar esa única excepción a la regla de no
+escribir fuera del proyecto, con estas salvaguardas:
+
+- **Detección previa**: el bloque solo se escribe si Kimi está presente
+  (`kimi` en PATH o `KIMI_CODE_HOME/bin/kimi` ejecutable). `--no-kimi`
+  (`-NoKimi` en PowerShell) lo excluye explícitamente.
+- **Backup previo** del `config.toml` en `bkp/` (mecanismo `HARNESS_BKP_DIR`
+  de siempre) antes de cualquier escritura.
+- **Bloque delimitado** por los marcadores `# >>> harness-process hooks >>>` y
+  `# <<< harness-process hooks <<<`, con **reemplazo idempotente** solo entre
+  marcadores: re-instalar no duplica nada y los hooks/config propios del
+  usuario quedan intactos byte a byte.
+- **Validación best-effort**: tras escribir se corre `kimi doctor`; si reporta
+  config inválido se restaura el estado previo (o se retira el archivo recién
+  creado) con un aviso accionable, sin cambiar el exit code del setup.
+- **Guard por proyecto**: cada `command` del bloque solo actúa si
+  `$PWD/bin/harness-hook` existe (el hook corre con cwd = proyecto,
+  verificado); en proyectos sin arnés es un no-op silencioso que cuesta un
+  `stat`.
+
+Eventos registrados: `SessionStart` (timeout 120), `PostToolUse` con matcher
+`Edit|Write` (timeout 30) y `Stop` (timeout 120), despachando a
+`bin/harness-hook plain <evento>`. `SessionEnd` NO se registra a propósito
+(el runtime lo trataría como otro `stop` y el check correría dos veces por
+turno). El `Stop` con exit 2 + stderr bloquea el cierre del turno en Kimi
+(verificado), igual que en Claude Code.
+
+**`--reset` NO remueve el bloque global** (decisión del usuario 2026-07-28):
+el bloque es compartido por TODOS los proyectos con arnés de la máquina y
+`--reset` es por-proyecto — removerlo desde el proyecto A dejaría sin hooks al
+proyecto B. Es inofensivo en máquinas que abandonan el arnés (el guard sale 0
+en silencio). Para quitarlo a mano:
+
+1. Abre `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`.
+2. Borra desde la línea `# >>> harness-process hooks >>>` hasta la línea
+   `# <<< harness-process hooks <<<` (inclusive).
+3. Si algo sale mal, hay backups `config.toml.bak.*` bajo `bkp/` del arnés
+   desde la primera instalación.
+
+Instalaciones existentes: re-corre el instalador (`./setup_harness.sh` /
+`.\setup_harness.ps1`) y aparecen los subagentes, el launcher y —si Kimi está
+instalado— el bloque global. Nota de acoplamiento: los nombres de eventos y
+tools están verificados contra v0.29.2; si una versión futura de Kimi los
+renombra, el fallo es benigno (el hook no matchea) y el gate de espejo de
+roles no depende de Kimi.
 
 ## Mantenimiento Rust only (post feature #2)
 

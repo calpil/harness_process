@@ -56,6 +56,14 @@ Mismos tres roles; cada CLI los recibe en su formato nativo (auto-registrados):
 - **Grok Build (xAI)**: sin formato propio, pero LEE `.claude/agents/*.md` por
   compatibilidad con Claude Code (sin archivos extra). Puede ignorar un `model:`
   de Claude y caer al modelo por defecto de Grok.
+- **Kimi Code CLI**: `.kimi-code/agents/*.md` (frontmatter `name`/`description`/
+  `tools`; cuerpo = system prompt, mismo formato que Claude; verificado en
+  v0.29.2). Al seleccionar un perfil su cuerpo REEMPLAZA el system prompt (cada
+  rol se basta solo). Delegacion en sesion interactiva via tools
+  `Agent`/`AgentSwarm`; en modo `-p`, `--agent <rol>` requiere el engine v2
+  (`KIMI_CODE_EXPERIMENTAL_FLAG=1`). Lee `AGENTS.md` nativamente; sus hooks son
+  SOLO globales (`KIMI_CODE_HOME/config.toml`, default `~/.kimi-code/`, bloque
+  delimitado del arnes con guard por proyecto).
 
 Sin archivo de definicion soportado (aplican `harness_process/roles/*.md` como fases
 secuenciales lider -> implementer -> reviewer en una sola sesion):
@@ -81,6 +89,10 @@ subagente `leader`.
 - **Gemini** (`.gemini/agents/*.md`): `model` y `tools` se heredan de la sesion
   (omitidos para no fijar IDs/nombres que cambian por version). Agregalos por
   rol cuando confirmes los nombres de tools/model de tu version instalada.
+- **Kimi** (`.kimi-code/agents/*.md`): `model` se hereda de la sesion; `tools`
+  con allowlist por rol (decision usuario 2026-07-28; nombres case-sensitive
+  verificados en v0.29.2): leader/reviewer `Read, Grep, Glob, Bash`
+  (read-only), implementer ademas `Edit, Write`.
 
 ## Regla anti perdida de contexto
 

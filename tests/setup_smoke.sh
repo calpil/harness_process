@@ -6,6 +6,11 @@ TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/harness-setup-smoke.XXXXXX")"
 TMP_ROOT="$(cd "$TMP_ROOT" && pwd -P)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
+# Aislamiento Kimi (feature #8): NINGUNA corrida del instalador dentro del
+# smoke puede tocar el home real de Kimi. El default apunta a una fixture; los
+# bloques que lo necesitan lo overridean con su propio KIMI_CODE_HOME.
+export KIMI_CODE_HOME="$TMP_ROOT/kimi-home-default"
+
 # Diseño Rust-only: el binario es requerido, asi que el smoke tambien
 # requiere cargo. Se compila UNA vez y se siembra en cada fixture (rama
 # "binario preexistente" del instalador; el build real se prueba al final).
@@ -248,6 +253,9 @@ CUSTOM_BKP="$TMP_ROOT/custom-backups"
         --no-antigravity
 )
 find "$CUSTOM_BKP" -type f -name 'AGENTS.md.bak.*' -print -quit | grep -q .
+# Feature #8 / AC-2: los espejos Kimi tambien se respaldan en el reinstall.
+find "$CUSTOM_BKP" -type f -path '*.kimi-code/agents/leader.md.bak.*' -print -quit | grep -q . \
+    || { echo "[!] falta el backup del espejo Kimi en el reinstall." >&2; exit 1; }
 # El reinstall NO pisa la constitution existente: el sentinel sigue ahi.
 grep -q "$CONST_SENTINEL" "$SUBDIR_ROOT/docs/constitution.md"
 # Feature #4 / AC-4: tampoco pisa los docs del arnes ya presentes en la raiz.
@@ -624,6 +632,213 @@ test "$(ls -A "$SOURCE_PARENT")" = "harness_process" \
 test -z "$(ls -A "$SOURCE_HOME")" \
     || { echo "[!] el \$HOME de la fixture fue modificado: $(ls -A "$SOURCE_HOME")" >&2; exit 1; }
 echo "[Ok] checkout fuente simulado: resolucion local con aviso [i] en check/status/guard/init, start sin escrituras fuera del clon."
+
+# --- Feature #8: Kimi Code CLI como backend de primera clase ----------------
+# Todo lo global de Kimi usa KIMI_CODE_HOME de fixture (NUNCA el home real);
+# el export del inicio del smoke ya aisla cualquier corrida del instalador.
+
+# (a) AC-9a: espejos Kimi generados en layout root y subdir, con frontmatter
+# valido (allowlist de tools por rol, decision usuario 2026-07-28) y cuerpo
+# identico a roles/<rol>.md (misma extraccion que el gate del check).
+kimi_agent_body() {
+    awk 'started { print; next }
+         inbody { if ($0 ~ /^[[:space:]]*$/) next; started=1; print; next }
+         /^---[[:space:]]*$/ { fm++; if (fm == 2) inbody=1; next }' "$1"
+}
+for kimi_role in leader implementer reviewer; do
+    test -f "$ROOT_LAYOUT/.kimi-code/agents/$kimi_role.md"
+    test "$(head -n1 "$ROOT_LAYOUT/.kimi-code/agents/$kimi_role.md")" = "---"
+    grep -q "^name: $kimi_role\$" "$ROOT_LAYOUT/.kimi-code/agents/$kimi_role.md"
+    grep -q '^description: ' "$ROOT_LAYOUT/.kimi-code/agents/$kimi_role.md"
+    test "$(kimi_agent_body "$ROOT_LAYOUT/.kimi-code/agents/$kimi_role.md")" = "$(cat "$ROOT_LAYOUT/roles/$kimi_role.md")" \
+        || { echo "[!] espejo Kimi $kimi_role.md (root) no coincide con roles/$kimi_role.md." >&2; exit 1; }
+    test -f "$SUBDIR_ROOT/.kimi-code/agents/$kimi_role.md"
+    test "$(kimi_agent_body "$SUBDIR_ROOT/.kimi-code/agents/$kimi_role.md")" = "$(cat "$SUBDIR_HARNESS/roles/$kimi_role.md")" \
+        || { echo "[!] espejo Kimi $kimi_role.md (subdir) no coincide con roles/$kimi_role.md." >&2; exit 1; }
+done
+grep -q '^tools: Read, Grep, Glob, Bash$' "$ROOT_LAYOUT/.kimi-code/agents/leader.md"
+grep -q '^tools: Read, Grep, Glob, Bash$' "$ROOT_LAYOUT/.kimi-code/agents/reviewer.md"
+grep -q '^tools: Read, Edit, Write, Bash, Grep, Glob$' "$ROOT_LAYOUT/.kimi-code/agents/implementer.md"
+# Launcher + superficie multi-backend mencionan a Kimi (AC-2/AC-7).
+test -x "$ROOT_LAYOUT/bin/harness-kimi"
+grep -q 'AGENT="kimi"' "$ROOT_LAYOUT/bin/harness-kimi"
+grep -q 'bin/harness-kimi' "$ROOT_LAYOUT/AGENTS.md"
+grep -q '.kimi-code/agents' "$ROOT_LAYOUT/AGENTS.md"
+grep -q 'bin/harness-kimi' "$NO_SUBAGENTS/AGENTS.md"
+# AC-1: --no-subagents NO genera espejos Kimi (misma condicionalidad que
+# .claude/.codex/.gemini); el launcher se genera siempre.
+test ! -d "$NO_SUBAGENTS/.kimi-code"
+test -x "$NO_SUBAGENTS/bin/harness-kimi"
+
+# (b) AC-9b: espejo Kimi stale inyectado -> harness_check.sh lo reporta
+# nombrando el archivo y falla (rc=2) en block; warn reporta y sale 0; off no
+# evalua. Reusa la fixture check-robust y run_check de la feature #7.
+cp "$CHECK_ROBUST/.kimi-code/agents/leader.md" "$TMP_ROOT/bak-kimi-leader.md"
+printf '\nPROTOCOLO VIEJO INYECTADO\n' >> "$CHECK_ROBUST/.kimi-code/agents/leader.md"
+rc=0; run_check > "$TMP_ROOT/check-kimi-stale.log" 2>&1 || rc=$?
+test "$rc" -eq 2 || { echo "[!] el check debio fallar (rc=2) con espejo Kimi stale (rc=$rc)." >&2; exit 1; }
+grep -q 'Espejo desincronizado: .kimi-code/agents/leader.md' "$TMP_ROOT/check-kimi-stale.log"
+grep -q 'Re-corre el instalador' "$TMP_ROOT/check-kimi-stale.log"
+rc=0; run_check HARNESS_CHECK_MODE=warn > "$TMP_ROOT/check-kimi-warn.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] modo warn debio salir 0 con espejo Kimi stale (rc=$rc)." >&2; exit 1; }
+grep -q 'Espejo desincronizado: .kimi-code/agents/leader.md' "$TMP_ROOT/check-kimi-warn.log"
+rc=0; run_check HARNESS_CHECK_MODE=off > "$TMP_ROOT/check-kimi-off.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] modo off debio salir 0 (rc=$rc)." >&2; exit 1; }
+if grep -q 'Espejo desincronizado' "$TMP_ROOT/check-kimi-off.log"; then
+    echo "[!] modo off no debe evaluar el gate de espejo Kimi." >&2
+    exit 1
+fi
+cp "$TMP_ROOT/bak-kimi-leader.md" "$CHECK_ROBUST/.kimi-code/agents/leader.md"
+rc=0; run_check > "$TMP_ROOT/check-kimi-restored.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] el check debio volver a pasar tras restaurar el espejo Kimi (rc=$rc)." >&2; exit 1; }
+
+# (c)/(d)/(e): bloque GLOBAL de hooks con KIMI_CODE_HOME de fixture.
+KIMI_E2E="$TMP_ROOT/kimi-e2e"
+copy_fixture "$KIMI_E2E"
+KIMI_BKP="$TMP_ROOT/kimi-bkp"
+
+kimi_setup() {
+    kimi_home_arg="$1"
+    shift
+    (
+        cd "$KIMI_E2E"
+        HOME="$TMP_ROOT/home" \
+        KIMI_CODE_HOME="$kimi_home_arg" \
+        HARNESS_HUB="$KIMI_E2E/.test-hub" \
+        HARNESS_BKP_DIR="$KIMI_BKP" \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+        bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity "$@"
+    )
+}
+
+KIMI_HOOKS_B='# >>> harness-process hooks >>>'
+KIMI_HOOKS_E='# <<< harness-process hooks <<<'
+
+# Kimi falso detectable via ${KIMI_CODE_HOME}/bin/kimi: 'doctor' valida OK.
+KIMI_HOME_ON="$TMP_ROOT/kimi-home-on"
+mkdir -p "$KIMI_HOME_ON/bin"
+printf '#!/bin/sh\nexit 0\n' > "$KIMI_HOME_ON/bin/kimi"
+chmod +x "$KIMI_HOME_ON/bin/kimi"
+
+# (c-1) AC-9c: config global INEXISTENTE -> se crea dir+archivo con UN solo
+# bloque delimitado y exactamente los tres [[hooks]] del arnes (TOML valido).
+kimi_setup "$KIMI_HOME_ON" > "$TMP_ROOT/kimi-install-on.log" 2>&1
+test -f "$KIMI_HOME_ON/config.toml"
+test "$(grep -cF "$KIMI_HOOKS_B" "$KIMI_HOME_ON/config.toml")" -eq 1
+test "$(grep -cF "$KIMI_HOOKS_E" "$KIMI_HOME_ON/config.toml")" -eq 1
+test "$(grep -c '^\[\[hooks\]\]$' "$KIMI_HOME_ON/config.toml")" -eq 3
+grep -q '^event = "SessionStart"$' "$KIMI_HOME_ON/config.toml"
+grep -q '^event = "PostToolUse"$' "$KIMI_HOME_ON/config.toml"
+grep -q '^matcher = "Edit|Write"$' "$KIMI_HOME_ON/config.toml"
+grep -q '^event = "Stop"$' "$KIMI_HOME_ON/config.toml"
+grep -q 'plain session-start' "$KIMI_HOME_ON/config.toml"
+grep -q 'plain post-tool' "$KIMI_HOME_ON/config.toml"
+grep -q 'plain stop' "$KIMI_HOME_ON/config.toml"
+grep -q 'HARNESS_REPO_ROOT' "$KIMI_HOME_ON/config.toml"
+if grep -q 'SessionEnd\|UserPromptSubmit' "$KIMI_HOME_ON/config.toml"; then
+    echo "[!] el bloque global solo debe registrar SessionStart/PostToolUse/Stop." >&2
+    exit 1
+fi
+python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$KIMI_HOME_ON/config.toml"
+
+# (c-2) AC-9c: config con hooks PROPIOS del usuario + sentinel -> sobreviven,
+# el bloque no se duplica tras re-instalar, el resto queda byte a byte y hay
+# backup en el bkp/ de fixture.
+KIMI_HOME_USER="$TMP_ROOT/kimi-home-user"
+mkdir -p "$KIMI_HOME_USER/bin"
+cp "$KIMI_HOME_ON/bin/kimi" "$KIMI_HOME_USER/bin/kimi"
+KIMI_SENTINEL="SENTINEL-KIMI-USER-CONFIG-$$"
+cat > "$KIMI_HOME_USER/config.toml" <<KIMIUSEREOF
+# $KIMI_SENTINEL
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "echo hook-del-usuario"
+KIMIUSEREOF
+cp "$KIMI_HOME_USER/config.toml" "$TMP_ROOT/kimi-user-config.orig"
+kimi_setup "$KIMI_HOME_USER" > "$TMP_ROOT/kimi-install-user.log" 2>&1
+grep -q "$KIMI_SENTINEL" "$KIMI_HOME_USER/config.toml"
+grep -q 'echo hook-del-usuario' "$KIMI_HOME_USER/config.toml"
+test "$(grep -cF "$KIMI_HOOKS_B" "$KIMI_HOME_USER/config.toml")" -eq 1
+test "$(grep -c '^\[\[hooks\]\]$' "$KIMI_HOME_USER/config.toml")" -eq 4
+kimi_setup "$KIMI_HOME_USER" > "$TMP_ROOT/kimi-install-user2.log" 2>&1
+test "$(grep -cF "$KIMI_HOOKS_B" "$KIMI_HOME_USER/config.toml")" -eq 1
+test "$(grep -cF "$KIMI_HOOKS_E" "$KIMI_HOME_USER/config.toml")" -eq 1
+test "$(grep -c '^\[\[hooks\]\]$' "$KIMI_HOME_USER/config.toml")" -eq 4
+awk -v b="$KIMI_HOOKS_B" -v e="$KIMI_HOOKS_E" '
+    $0 == b { inblk=1; next }
+    inblk { if ($0 == e) inblk=0; next }
+    { print }
+' "$KIMI_HOME_USER/config.toml" > "$TMP_ROOT/kimi-user-config.stripped"
+cmp -s "$TMP_ROOT/kimi-user-config.orig" "$TMP_ROOT/kimi-user-config.stripped" \
+    || { echo "[!] el contenido del usuario fuera del bloque de Kimi cambio." >&2; exit 1; }
+find "$KIMI_BKP" -type f -name 'config.toml.bak.*' -print -quit | grep -q . \
+    || { echo "[!] falta el backup del config.toml global de Kimi." >&2; exit 1; }
+
+# AC-5: doctor invalido -> rollback al estado previo (o retiro del archivo
+# recien creado), aviso accionable y el setup conserva exit 0. Determinista
+# solo si el 'kimi' real no esta en PATH (usaria el doctor real, que si
+# validaria); en ese caso queda cubierto por --no-kimi y el doctor OK de (c).
+if ! command -v kimi >/dev/null 2>&1; then
+    KIMI_HOME_BAD="$TMP_ROOT/kimi-home-bad"
+    mkdir -p "$KIMI_HOME_BAD/bin"
+    printf '#!/bin/sh\nexit 1\n' > "$KIMI_HOME_BAD/bin/kimi"
+    chmod +x "$KIMI_HOME_BAD/bin/kimi"
+    printf '# config previa del usuario\n' > "$KIMI_HOME_BAD/config.toml"
+    cp "$KIMI_HOME_BAD/config.toml" "$TMP_ROOT/kimi-bad-config.orig"
+    rc=0; kimi_setup "$KIMI_HOME_BAD" > "$TMP_ROOT/kimi-install-bad.log" 2>&1 || rc=$?
+    test "$rc" -eq 0 || { echo "[!] el bloque global es best-effort: el setup no debio fallar (rc=$rc)." >&2; exit 1; }
+    cmp -s "$TMP_ROOT/kimi-bad-config.orig" "$KIMI_HOME_BAD/config.toml" \
+        || { echo "[!] doctor invalido debio restaurar el config.toml previo." >&2; exit 1; }
+    grep -q "doctor' reporto config invalido" "$TMP_ROOT/kimi-install-bad.log"
+    rm -f "$KIMI_HOME_BAD/config.toml"
+    rc=0; kimi_setup "$KIMI_HOME_BAD" > "$TMP_ROOT/kimi-install-bad2.log" 2>&1 || rc=$?
+    test "$rc" -eq 0
+    test ! -e "$KIMI_HOME_BAD/config.toml" \
+        || { echo "[!] con doctor invalido el config recien creado debio retirarse." >&2; exit 1; }
+else
+    echo "[info] 'kimi' esta en PATH: se omite la rama de rollback con doctor falso."
+fi
+
+# (d) AC-9d: rama de NO instalacion del bloque global.
+# (d-1) --no-kimi con Kimi detectable -> no escribe nada en el home global.
+KIMI_HOME_FLAG="$TMP_ROOT/kimi-home-flag"
+mkdir -p "$KIMI_HOME_FLAG/bin"
+cp "$KIMI_HOME_ON/bin/kimi" "$KIMI_HOME_FLAG/bin/kimi"
+kimi_setup "$KIMI_HOME_FLAG" --no-kimi > "$TMP_ROOT/kimi-install-flag.log" 2>&1
+test ! -e "$KIMI_HOME_FLAG/config.toml" \
+    || { echo "[!] --no-kimi no debe escribir el config.toml global." >&2; exit 1; }
+grep -q 'omitido (--no-kimi)' "$TMP_ROOT/kimi-install-flag.log"
+# (d-2) sin Kimi detectable -> KIMI_CODE_HOME de fixture queda intacto.
+# Determinista solo si 'kimi' tampoco esta en el PATH del entorno del test.
+if ! command -v kimi >/dev/null 2>&1; then
+    KIMI_HOME_OFF="$TMP_ROOT/kimi-home-off"
+    mkdir -p "$KIMI_HOME_OFF"
+    kimi_setup "$KIMI_HOME_OFF" > "$TMP_ROOT/kimi-install-off.log" 2>&1
+    test -z "$(ls -A "$KIMI_HOME_OFF")" \
+        || { echo "[!] sin Kimi detectado no debio escribirse nada en KIMI_CODE_HOME." >&2; exit 1; }
+    grep -q 'no detectado' "$TMP_ROOT/kimi-install-off.log"
+else
+    echo "[info] 'kimi' esta en PATH: se omite la rama de no-deteccion (la cubre --no-kimi)."
+fi
+# En todas las ramas los artefactos DE PROYECTO se generan igual.
+test -f "$KIMI_E2E/.kimi-code/agents/leader.md"
+test -x "$KIMI_E2E/bin/harness-kimi"
+
+# (e) AC-9e: --reset limpia .kimi-code/agents del proyecto (con backup previo)
+# y NO toca el bloque global (decision usuario 2026-07-28: es compartido por
+# todos los proyectos de la maquina).
+cp "$KIMI_HOME_USER/config.toml" "$TMP_ROOT/kimi-user-config.pre-reset"
+kimi_setup "$KIMI_HOME_USER" --reset > "$TMP_ROOT/kimi-reset.log" 2>&1
+test ! -e "$KIMI_E2E/.kimi-code/agents" \
+    || { echo "[!] --reset debio limpiar .kimi-code/agents del proyecto." >&2; exit 1; }
+test ! -e "$KIMI_E2E/bin/harness-kimi" \
+    || { echo "[!] --reset debio limpiar bin/harness-kimi." >&2; exit 1; }
+find "$KIMI_BKP" -path '*.kimi-code/agents.bak.*' -print -quit | grep -q . \
+    || { echo "[!] falta el backup de .kimi-code/agents en el reset." >&2; exit 1; }
+cmp -s "$TMP_ROOT/kimi-user-config.pre-reset" "$KIMI_HOME_USER/config.toml" \
+    || { echo "[!] --reset NO debe tocar el bloque global de hooks de Kimi." >&2; exit 1; }
+echo "[Ok] Kimi Code: espejos por rol (root+subdir, allowlist de tools), gate de espejo stale/warn/off, bloque global blindado (crea/no-duplica/backup/rollback doctor), ramas --no-kimi y sin-deteccion, --reset conserva lo global."
 
 echo "[Ok] docs del arnes en el docs/ de la RAIZ: destino, migracion, no-pisa y reset."
 echo "[Ok] planillas maestras docs/prd/ (PRD + SDD): siembra, no-pisa y supervivencia al reset."

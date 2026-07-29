@@ -108,21 +108,35 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   generan las superficies (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `GROK.md`,
   `LLM.md`), hooks, launchers y la capa de subagentes.
 - Los subagentes nativos se ensamblan desde `roles/*.md`: `.claude/agents/*.md`,
-  `.codex/agents/*.toml` y `.gemini/agents/*.md` (leader, implementer, reviewer).
+  `.codex/agents/*.toml`, `.gemini/agents/*.md` y `.kimi-code/agents/*.md`
+  (leader, implementer, reviewer; los espejos Kimi llevan `tools` con allowlist
+  por rol, decision usuario 2026-07-28).
+- Kimi Code CLI (v0.29.x, feature #8): lee `AGENTS.md` nativamente (verificado
+  empiricamente) y sus hooks son SOLO globales, asi que `write_kimi_hooks` /
+  `Write-KimiGlobalHooks` escriben un bloque `[[hooks]]` delimitado en
+  `${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml` — la UNICA escritura fuera
+  del proyecto, blindada: solo con Kimi detectado (`--no-kimi` la excluye),
+  backup previo en `bkp/`, reemplazo idempotente entre marcadores, validacion
+  `kimi doctor` con rollback, y guard por proyecto (`$PWD/bin/harness-hook`;
+  no-op silencioso fuera de proyectos con arnes). Eventos SessionStart/
+  PostToolUse(`Edit|Write`)/Stop hacia `bin/harness-hook plain <evento>`; sin
+  `SessionEnd` (duplicaria el Stop). `--reset` NO toca el bloque global
+  (compartido entre proyectos; remocion manual en `UPDATING.md`).
 - Los assets versionados (`harness_cli`, `harness_check.sh`, roles,
   `CHECKPOINTS.md`, `UPDATING.md`, `docs/constitution.md`, ...) se copian desde
   `templates/`. Regla de mantenedor: `templates/` y la raiz se mantienen
   espejados; `roles/*.md` es el espejo de `templates/roles/*.md` con el
   placeholder `__HREL__` sustituido por la ruta relativa del arnes.
-- Gate de espejo de roles (feature #7): `harness_check.sh` compara el cuerpo
-  embebido de `.claude/agents/*.md` (tambien leidos por Grok),
-  `.gemini/agents/*.md` (tras el frontmatter) y `.codex/agents/*.toml` (bloque
-  `developer_instructions`) contra `roles/<rol>.md`, y `roles/*.md` contra
-  `templates/roles/*.md` modulo `__HREL__` (ambas expansiones validas: prefijo
-  del arnes o vacio). Un espejo desincronizado bloquea como los demas checks
-  (`HARNESS_CHECK_MODE` degrada igual); el check solo reporta y el remedio es
-  re-correr el instalador. Los espejos ausentes no fallan (condicionalidad por
-  existencia).
+- Gate de espejo de roles (feature #7; extendido a Kimi en la #8):
+  `harness_check.sh` compara el cuerpo embebido de `.claude/agents/*.md`
+  (tambien leidos por Grok), `.gemini/agents/*.md` y `.kimi-code/agents/*.md`
+  (tras el frontmatter, extractor comun `extract_agent_body`) y
+  `.codex/agents/*.toml` (bloque `developer_instructions`) contra
+  `roles/<rol>.md`, y `roles/*.md` contra `templates/roles/*.md` modulo
+  `__HREL__` (ambas expansiones validas: prefijo del arnes o vacio). Un espejo
+  desincronizado bloquea como los demas checks (`HARNESS_CHECK_MODE` degrada
+  igual); el check solo reporta y el remedio es re-correr el instalador. Los
+  espejos ausentes no fallan (condicionalidad por existencia).
 - TODA la documentacion del proceso se instala en el `docs/` de la RAIZ
   (`SURFACE_DIR/docs`): `constitution.md` mas los tres docs del arnes
   (`architecture.md`, `conventions.md`, `verification.md`, lista `HARNESS_DOCS` /

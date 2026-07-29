@@ -142,6 +142,16 @@ if [ -d "$HARNESS_DIR/roles" ]; then
             echo "[!] .gemini/agents/$role.md sin frontmatter YAML." >&2
             failures=$((failures + 1))
         fi
+        kimi_md="$REPO_ROOT/.kimi-code/agents/$role.md"
+        if [ -f "$kimi_md" ]; then
+            if [ "$(head -n1 "$kimi_md")" != "---" ]; then
+                echo "[!] .kimi-code/agents/$role.md sin frontmatter YAML; Kimi Code no lo registrara como subagente." >&2
+                failures=$((failures + 1))
+            elif ! grep -q '^name:' "$kimi_md" || ! grep -q '^description:' "$kimi_md"; then
+                echo "[!] .kimi-code/agents/$role.md: frontmatter sin name: o description:." >&2
+                failures=$((failures + 1))
+            fi
+        fi
 
         # Gate de espejo (decision usuario 2026-07-28): roles/ es la fuente
         # unica; los espejos generados por el instalador deben llevar el MISMO
@@ -157,6 +167,10 @@ if [ -d "$HARNESS_DIR/roles" ]; then
             fi
             if [ -f "$gemini_md" ] && [ "$(extract_agent_body "$gemini_md")" != "$role_body" ]; then
                 echo "[!] Espejo desincronizado: .gemini/agents/$role.md no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
+                failures=$((failures + 1))
+            fi
+            if [ -f "$kimi_md" ] && [ "$(extract_agent_body "$kimi_md")" != "$role_body" ]; then
+                echo "[!] Espejo desincronizado: .kimi-code/agents/$role.md (leido por Kimi Code) no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
                 failures=$((failures + 1))
             fi
             if [ -f "$codex_toml" ] && [ "$(extract_codex_body "$codex_toml")" != "$role_body" ]; then

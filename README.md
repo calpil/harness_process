@@ -1,8 +1,9 @@
 # Harness Process
 
 Instalador de un arnes multi-repo para Claude Code, Codex, Gemini, Grok,
-Antigravity y otros agentes CLI. Genera superficies de instrucciones, hooks,
-launchers, memoria compartida y una capa opcional de subagentes.
+Kimi Code, Antigravity y otros agentes CLI. Genera superficies de
+instrucciones, hooks, launchers, memoria compartida y una capa opcional de
+subagentes.
 
 ## Requisitos
 
@@ -103,6 +104,8 @@ Ejecuta `./setup_harness.sh --help` para ver todas las opciones. Las mas utiles:
 - `--no-graphify`: no instala el CLI de graphify.
 - `--no-graphify-skills`: no modifica skills globales de agentes.
 - `--no-antigravity`: no instala Antigravity CLI.
+- `--no-kimi`: no escribe el bloque de hooks globales de Kimi Code en
+  `KIMI_CODE_HOME/config.toml` (los artefactos de proyecto se generan igual).
 - `--force`: sobrescribe sin crear backups.
 - `--dry-run` (o `--preview`): modo simulado, no escribe ni instala nada (ideal para auditar).
 - `--reset`: limpia todas las superficies, hooks, agentes, binarios y marcadores generados por el arnes (respaldando primero). No toca tu codigo.
@@ -112,8 +115,8 @@ Ejecuta `./setup_harness.sh --help` para ver todas las opciones. Las mas utiles:
 - `--config <ruta>`: carga variables de entorno extra desde un archivo (se evalua temprano).
 
 PowerShell usa los equivalentes `-Root`, `-Subdir`, `-NoSubagents`,
-`-NoGraphify`, `-NoGraphifySkills`, `-NoAntigravity`, `-Force`, `-DryRun`,
-`-Reset`, `-Version`, `-Help`, `-Json`, `-LogFile`, `-Config` y
+`-NoGraphify`, `-NoGraphifySkills`, `-NoAntigravity`, `-NoKimi`, `-Force`,
+`-DryRun`, `-Reset`, `-Version`, `-Help`, `-Json`, `-LogFile`, `-Config` y
 `-CargoTargetDir`.
 
 Los backups se guardan en `bkp/`. Usa `HARNESS_BKP_DIR` para cambiar la ruta.
@@ -230,6 +233,31 @@ mapa de agentes. Desde la feature #7 incluye ademas:
   el padre es `$HOME` sin `HARNESS_ALLOW_HOME_SURFACE=1`), la raiz es el propio
   checkout, con aviso informativo `[i]`. El marker ya no esta versionado (es
   estado local que escribe el instalador).
+
+## Kimi Code CLI: backend con hooks globales (unica excepcion de `$HOME`)
+
+Kimi Code CLI (v0.29.x) es backend de primera clase: lee el `AGENTS.md`
+generado (verificado empiricamente: lo inyecta a su system prompt), recibe los
+tres roles como subagentes nativos en `.kimi-code/agents/*.md` (allowlist de
+`tools` por rol) y arranca con `bin/harness-kimi`.
+
+Su particularidad: **Kimi no soporta hooks por proyecto** — el unico lugar
+donde existen es el config global `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`.
+Por decision del usuario (2026-07-28) el instalador escribe alli un bloque
+`[[hooks]]` para `SessionStart`, `PostToolUse` (matcher `Edit|Write`) y `Stop`.
+Es la **unica** escritura del arnes fuera del proyecto, blindada:
+
+- Solo si se detecta Kimi en la maquina (`kimi` en PATH o
+  `KIMI_CODE_HOME/bin/kimi`); `--no-kimi` / `-NoKimi` la excluye.
+- Backup previo en `bkp/` antes de tocar el archivo.
+- Bloque delimitado por marcadores propios, con reemplazo idempotente SOLO
+  entre marcadores: los hooks y config del usuario quedan intactos.
+- Validacion best-effort con `kimi doctor` + rollback si el TOML quedo
+  invalido (nunca rompe el resto del setup).
+- Cada comando del bloque es un guard: solo actua si `$PWD/bin/harness-hook`
+  existe (proyecto con arnes); en cualquier otro proyecto es no-op silencioso.
+- `--reset` NO lo toca (es compartido por todos los proyectos de la maquina);
+  la remocion manual esta documentada en `UPDATING.md`.
 
 ## Documentacion del proceso: toda en el `docs/` de la RAIZ
 
