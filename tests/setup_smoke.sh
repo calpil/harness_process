@@ -650,6 +650,174 @@ test -z "$(ls -A "$SOURCE_HOME")" \
     || { echo "[!] el \$HOME de la fixture fue modificado: $(ls -A "$SOURCE_HOME")" >&2; exit 1; }
 echo "[Ok] checkout fuente simulado: resolucion local con aviso [i] en check/status/guard/init, start sin escrituras fuera del clon."
 
+# --- Feature #10: layout inferido por huella cuando falta el marker ---------
+# La feature #7 des-versiono .harness_layout (commit c8392f5 graba
+# "D .harness_layout"), asi que toda instalacion subdir que hace 'git pull' se
+# queda SIN marker y pasaba a tratar harness_process/ como raiz en silencio.
+# Fixtures propias para los escenarios del AC-10 (mas la guarda de $HOME).
+
+LOST_ROOT="$TMP_ROOT/lost-marker"
+mkdir -p "$LOST_ROOT/home"
+
+# <caso>/proyecto/harness_process con los scripts y el binario REALES. El
+# proyecto lleva huella de instalacion (docs/constitution.md + CLAUDE.md) solo
+# si se pide, y el marker se escribe solo si se pasa un valor.
+make_lost_case() { # $1=caso  $2=huella(1|0)  $3=marker ("" = ausente)
+    lost_proj="$LOST_ROOT/$1/proyecto"
+    lost_h="$lost_proj/harness_process"
+    mkdir -p "$lost_h/progress" "$lost_h/rust"
+    for lost_f in harness_check.sh harness_status.sh init.sh commit_guard.sh harness_cli CHECKPOINTS.md; do
+        cp "$REPO_ROOT/$lost_f" "$lost_h/$lost_f"
+    done
+    cp -R "$REPO_ROOT/templates" "$lost_h/templates"
+    cp -R "$REPO_ROOT/roles" "$lost_h/roles"
+    cp "$REPO_ROOT/rust/Cargo.toml" "$lost_h/rust/Cargo.toml"  # senal de fuente
+    cp "$REPO_ROOT/templates/feature_list.json" "$lost_h/feature_list.json"
+    cp "$REPO_ROOT/templates/progress/current.md" "$lost_h/progress/current.md"
+    cp "$REPO_ROOT/templates/progress/history.md" "$lost_h/progress/history.md"
+    cp "$PREBUILT_BIN" "$lost_h/harness"
+    chmod +x "$lost_h/harness"
+    if [ "$2" = "1" ]; then
+        mkdir -p "$lost_proj/docs"
+        cp "$REPO_ROOT/docs/constitution.md" "$lost_proj/docs/constitution.md"
+        printf '# proyecto\n' > "$lost_proj/CLAUDE.md"
+    fi
+    if [ -n "$3" ]; then
+        printf '%s\n' "$3" > "$lost_h/.harness_layout"
+    fi
+    return 0
+}
+
+lost_env() {
+    env -u HARNESS_REPO_ROOT -u CLAUDE_PROJECT_DIR -u CODEX_PROJECT_DIR \
+        -u GEMINI_PROJECT_DIR -u GROK_PROJECT_DIR -u ANTIGRAVITY_PROJECT_DIR \
+        HOME="$LOST_ROOT/home" \
+        HARNESS_HUB="$LOST_ROOT/hub" \
+        DB_HOST=127.0.0.1 DB_PORT=9 DB_USER=harness DB_PASSWORD=secret \
+        DB_NAME=harness DB_SSL_MODE=disable \
+        "$@"
+}
+
+# init.sh imprime la raiz resuelta ("raiz=..."); la conexion al hub muere
+# despues (DB inalcanzable), como en el bloque del checkout fuente.
+lost_resolved_root() { # $1=harness dir  $2=log  [env extra...]
+    lost_dir="$1"; lost_log="$2"; shift 2
+    (cd "$lost_dir" && lost_env "$@" bash init.sh) > "$lost_log" 2>&1 || true
+}
+
+lost_assert_absent() { # $1=log  $2=patron  $3=explicacion
+    if grep -q "$2" "$1"; then
+        echo "[!] $3 (log: $1)" >&2
+        exit 1
+    fi
+}
+
+# (a) AC-1 + AC-2: sin marker y con huella en el padre -> raiz al PROYECTO, con
+# aviso [i] que nombra el remedio. Es el footgun real de las 15 instalaciones.
+make_lost_case a 1 ""
+LOST_A_PROJ="$LOST_ROOT/a/proyecto"
+LOST_A_H="$LOST_A_PROJ/harness_process"
+rc=0; (cd "$LOST_A_H" && lost_env bash harness_check.sh < /dev/null) > "$TMP_ROOT/lost-a-check.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "[!] harness_check.sh debio pasar en la instalacion sin marker (rc=$rc):" >&2
+    cat "$TMP_ROOT/lost-a-check.log" >&2
+    exit 1
+fi
+grep -q '\.harness_layout ausente: layout subdir inferido por la huella de instalacion del padre' "$TMP_ROOT/lost-a-check.log"
+grep -q 'para regenerar el marker' "$TMP_ROOT/lost-a-check.log"
+# Sin la inferencia, REPO_ROOT seria el arnes y el check inventaria este fallo:
+lost_assert_absent "$TMP_ROOT/lost-a-check.log" 'Falta docs/constitution.md' \
+    "la resolucion cayo en el arnes en vez del proyecto"
+rc=0; (cd "$LOST_A_H" && lost_env bash harness_status.sh --brief) > "$TMP_ROOT/lost-a-status.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] harness_status.sh --brief fallo sin marker (rc=$rc)." >&2; exit 1; }
+grep -q '\.harness_layout ausente' "$TMP_ROOT/lost-a-status.log"
+rc=0; (cd "$LOST_A_H" && lost_env sh commit_guard.sh </dev/null) > "$TMP_ROOT/lost-a-guard.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] commit_guard.sh fallo sin marker (rc=$rc)." >&2; exit 1; }
+grep -q '\.harness_layout ausente' "$TMP_ROOT/lost-a-guard.log"
+lost_resolved_root "$LOST_A_H" "$TMP_ROOT/lost-a-init.log"
+grep -qF "raiz=$LOST_A_PROJ" "$TMP_ROOT/lost-a-init.log"
+# AC-8: el binario aplica la MISMA regla; los artefactos van al docs/ del proyecto.
+lost_env sh "$LOST_A_H/harness_cli" add --name demo > /dev/null 2>&1
+lost_env sh "$LOST_A_H/harness_cli" start --feature 1 > "$TMP_ROOT/lost-a-start.log" 2>&1
+test -f "$LOST_A_PROJ/docs/plan-feature-1-demo.md" \
+    || { echo "[!] start debio crear el plan en el docs/ del proyecto." >&2; exit 1; }
+test -f "$LOST_A_PROJ/docs/spec-feature-1-demo.md"
+test ! -d "$LOST_A_H/docs" \
+    || { echo "[!] el binario escribio dentro del arnes: $(ls -A "$LOST_A_H/docs")" >&2; exit 1; }
+
+# (b) AC-4: sin marker y SIN huella en el padre -> raiz al propio arnes, sin aviso.
+make_lost_case b 0 ""
+LOST_B_H="$LOST_ROOT/b/proyecto/harness_process"
+lost_resolved_root "$LOST_B_H" "$TMP_ROOT/lost-b-init.log"
+grep -qF "raiz=$LOST_B_H" "$TMP_ROOT/lost-b-init.log"
+lost_assert_absent "$TMP_ROOT/lost-b-init.log" '\.harness_layout ausente' \
+    "se infirio subdir sin huella en el padre"
+
+# (c) AC-3: marker EXPLICITO 'root' con huella en el padre -> sin inferencia y
+# sin aviso (la inferencia solo aplica cuando el archivo NO existe).
+make_lost_case c 1 root
+LOST_C_H="$LOST_ROOT/c/proyecto/harness_process"
+lost_resolved_root "$LOST_C_H" "$TMP_ROOT/lost-c-init.log"
+grep -qF "raiz=$LOST_C_H" "$TMP_ROOT/lost-c-init.log"
+lost_assert_absent "$TMP_ROOT/lost-c-init.log" '\.harness_layout ausente' \
+    "se infirio layout sobre un marker explicito 'root'"
+
+# (d) AC-7: el guardrail de checkout fuente de la feature #7 sigue verde
+# (marker 'subdir' + senales de fuente + padre sin huella -> propio dir).
+make_lost_case d 0 subdir
+LOST_D_H="$LOST_ROOT/d/proyecto/harness_process"
+lost_resolved_root "$LOST_D_H" "$TMP_ROOT/lost-d-init.log"
+grep -qF "raiz=$LOST_D_H" "$TMP_ROOT/lost-d-init.log"
+grep -q 'Checkout fuente del arnes detectado' "$TMP_ROOT/lost-d-init.log"
+lost_assert_absent "$TMP_ROOT/lost-d-init.log" '\.harness_layout ausente' \
+    "el marker 'subdir' no debe pasar por la inferencia"
+
+# (e) cero regresion feature #7: marker 'subdir' + padre CON huella sigue
+# resolviendo al padre, sin ningun aviso.
+make_lost_case e 1 subdir
+LOST_E_PROJ="$LOST_ROOT/e/proyecto"
+lost_resolved_root "$LOST_E_PROJ/harness_process" "$TMP_ROOT/lost-e-init.log"
+grep -qF "raiz=$LOST_E_PROJ" "$TMP_ROOT/lost-e-init.log"
+lost_assert_absent "$TMP_ROOT/lost-e-init.log" '\[i\]' \
+    "una instalacion subdir legitima no debe emitir avisos"
+
+# (f) AC-5: la guarda de $HOME aplica tambien a la inferencia; con el escape
+# explicito HARNESS_ALLOW_HOME_SURFACE=1 la huella vuelve a mandar.
+make_lost_case f 1 ""
+LOST_F_PROJ="$LOST_ROOT/f/proyecto"
+LOST_F_H="$LOST_F_PROJ/harness_process"
+lost_resolved_root "$LOST_F_H" "$TMP_ROOT/lost-f-init.log" env HOME="$LOST_F_PROJ"
+grep -qF "raiz=$LOST_F_H" "$TMP_ROOT/lost-f-init.log"
+lost_assert_absent "$TMP_ROOT/lost-f-init.log" '\.harness_layout ausente' \
+    "se infirio subdir con el padre == \$HOME"
+lost_resolved_root "$LOST_F_H" "$TMP_ROOT/lost-f-home-ok.log" \
+    env HOME="$LOST_F_PROJ" HARNESS_ALLOW_HOME_SURFACE=1
+grep -qF "raiz=$LOST_F_PROJ" "$TMP_ROOT/lost-f-home-ok.log"
+grep -q '\.harness_layout ausente' "$TMP_ROOT/lost-f-home-ok.log"
+
+# (g) AC-6: los overrides mandan sobre la inferencia, sin aviso. HARNESS_REPO_ROOT
+# lo honran script y binario; las variables de agente (CLAUDE_PROJECT_DIR, ...)
+# solo los scripts -el binario nunca las leyo, comportamiento previo a esta
+# feature-, asi que ahi el "sin aviso" se comprueba con commit_guard.sh, que es
+# shell puro y no invoca al binario.
+LOST_G_TARGET="$LOST_ROOT/override-target"
+mkdir -p "$LOST_G_TARGET"
+(cd "$LOST_A_H" && lost_env env HARNESS_REPO_ROOT="$LOST_G_TARGET" bash init.sh) \
+    > "$TMP_ROOT/lost-g-init.log" 2>&1 || true
+grep -qF "raiz=$LOST_G_TARGET" "$TMP_ROOT/lost-g-init.log"
+lost_assert_absent "$TMP_ROOT/lost-g-init.log" '\.harness_layout ausente' \
+    "el override no debe pasar por la inferencia"
+(cd "$LOST_A_H" && lost_env env CLAUDE_PROJECT_DIR="$LOST_G_TARGET" bash init.sh) \
+    > "$TMP_ROOT/lost-g2-init.log" 2>&1 || true
+grep -qF "raiz=$LOST_G_TARGET" "$TMP_ROOT/lost-g2-init.log"
+rc=0; (cd "$LOST_A_H" && lost_env env CLAUDE_PROJECT_DIR="$LOST_G_TARGET" sh commit_guard.sh </dev/null) \
+    > "$TMP_ROOT/lost-g2-guard.log" 2>&1 || rc=$?
+test "$rc" -eq 0 || { echo "[!] commit_guard.sh fallo con variable de agente (rc=$rc)." >&2; exit 1; }
+lost_assert_absent "$TMP_ROOT/lost-g2-guard.log" '\[i\]' \
+    "la variable de agente no debe pasar por la inferencia en los scripts"
+
+echo "[Ok] marker ausente: layout subdir inferido por huella del padre (scripts + binario) con aviso [i]; sin huella, marker 'root', \$HOME y overrides no infieren; guardrail #7 intacto."
+
 # --- Feature #8: Kimi Code CLI como backend de primera clase ----------------
 # Todo lo global de Kimi usa KIMI_CODE_HOME de fixture (NUNCA el home real);
 # el export del inicio del smoke ya aisla cualquier corrida del instalador.

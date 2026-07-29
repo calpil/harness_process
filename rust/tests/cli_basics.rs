@@ -48,6 +48,120 @@ fn sandbox_source_checkout() -> (tempfile::TempDir, PathBuf) {
     (dir, target)
 }
 
+/// Fixture "instalacion subdir que perdio el marker" (feature #10): el arnes
+/// vive en `<raiz>/hp` SIN `.harness_layout` -el estado en que queda cualquier
+/// instalacion que hizo `git pull` tras la feature #7- y la raiz tiene huella
+/// de instalacion (`docs/constitution.md` + `CLAUDE.md`).
+fn sandbox_lost_marker_install(with_footprint: bool) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let harness_dir = dir.path().join("hp");
+    std::fs::create_dir_all(&harness_dir).unwrap();
+    if with_footprint {
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/constitution.md"), "# constitution\n").unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# proyecto\n").unwrap();
+    }
+    assert!(!harness_dir.join(".harness_layout").exists());
+    let built = assert_cmd::cargo::cargo_bin("harness");
+    let target = harness_dir.join(if cfg!(windows) { "harness.exe" } else { "harness" });
+    std::fs::copy(&built, &target).unwrap();
+    (dir, target)
+}
+
+#[test]
+fn start_should_infer_subdir_root_when_marker_is_missing() {
+    // Feature #10 / AC-1 + AC-2: sin marker y con huella en el padre, los
+    // artefactos van al docs/ del PROYECTO (no a <arnes>/docs) y se avisa.
+    let (dir, bin) = sandbox_lost_marker_install(true);
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "[i] .harness_layout ausente: layout subdir inferido por la huella de instalacion del padre",
+        ))
+        .stderr(predicate::str::contains("para regenerar el marker"));
+    assert!(dir.path().join("docs/plan-feature-1-demo.md").exists());
+    assert!(dir.path().join("docs/spec-feature-1-demo.md").exists());
+    assert!(!dir.path().join("hp/docs").exists());
+}
+
+#[test]
+fn missing_marker_without_footprint_should_stay_local() {
+    // Feature #10 / AC-4: sin marker y sin huella no se infiere nada; la raiz
+    // es el propio dir del arnes y no hay aviso.
+    let (dir, bin) = sandbox_lost_marker_install(false);
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(".harness_layout ausente").not());
+    assert!(dir.path().join("hp/docs/plan-feature-1-demo.md").exists());
+    assert!(!dir.path().join("docs").exists());
+}
+
+#[test]
+fn explicit_root_marker_should_never_infer_subdir() {
+    // Feature #10 / AC-3: con un marker EXPLICITO ('root') no hay inferencia
+    // aunque el padre tenga huella; la raiz es el dir del arnes, sin aviso.
+    let (dir, bin) = sandbox_lost_marker_install(true);
+    std::fs::write(dir.path().join("hp/.harness_layout"), "root\n").unwrap();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(".harness_layout ausente").not());
+    assert!(dir.path().join("hp/docs/plan-feature-1-demo.md").exists());
+    assert!(!dir.path().join("docs/plan-feature-1-demo.md").exists());
+}
+
+#[test]
+fn home_parent_should_block_marker_inference() {
+    // Feature #10 / AC-5: la guarda de $HOME de la feature #7 aplica tambien a
+    // la inferencia; con el escape explicito, la huella vuelve a mandar.
+    let (dir, bin) = sandbox_lost_marker_install(true);
+    cmd(&bin)
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .arg("status")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(".harness_layout ausente").not());
+    cmd(&bin)
+        .env("HOME", dir.path())
+        .env("USERPROFILE", dir.path())
+        .env("HARNESS_ALLOW_HOME_SURFACE", "1")
+        .arg("status")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(".harness_layout ausente"));
+}
+
+#[test]
+fn env_override_should_beat_marker_inference() {
+    // Feature #10 / AC-6: HARNESS_REPO_ROOT manda sobre la inferencia y el
+    // aviso [i] no aparece.
+    let (dir, bin) = sandbox_lost_marker_install(true);
+    let target_root = dir.path().join("otra-raiz");
+    std::fs::create_dir_all(&target_root).unwrap();
+    cmd(&bin)
+        .env("HARNESS_REPO_ROOT", &target_root)
+        .args(["add", "--name", "Demo"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .env("HARNESS_REPO_ROOT", &target_root)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(".harness_layout ausente").not());
+    assert!(target_root.join("docs/plan-feature-1-demo.md").exists());
+    assert!(!dir.path().join("docs/plan-feature-1-demo.md").exists());
+}
+
 #[test]
 fn status_should_print_empty_backlog() {
     let (_dir, bin) = sandbox_with_binary();

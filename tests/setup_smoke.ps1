@@ -361,6 +361,84 @@ exit 0
         Write-Host "[INFO] bash not available: skipping the live harness_check.sh run on the simulated source checkout (static parity only)."
     }
 
+    # --- Feature #10: layout inferido por huella cuando falta el marker -------
+    # Paridad con el bloque "Feature #10" de tests/setup_smoke.sh: sin
+    # .harness_layout (el estado en que queda toda instalacion que hizo
+    # 'git pull' tras la feature #7) la raiz se infiere del padre con huella.
+
+    # (1) Los CUATRO scripts sembrados por el instalador traen la regla nueva.
+    foreach ($seededScript in @("harness_check.sh", "harness_status.sh", "init.sh", "commit_guard.sh")) {
+        $seeded = Get-Content -LiteralPath (Join-Path $checkRobust $seededScript) -Raw
+        Assert-True ($seeded -match '\.harness_layout ausente') "Seeded $seededScript does not carry the marker-inference notice."
+        Assert-True ($seeded -match 'harness_parent_footprint') "Seeded $seededScript does not carry the parent-footprint probe."
+        Assert-True ($seeded -match 'elif \[ ! -f "\$harness_marker" \]') "Seeded $seededScript does not gate the inference on the marker being ABSENT."
+        Assert-True ($seeded -match 'Checkout fuente del arnes detectado') "Seeded $seededScript lost the feature #7 source-checkout guardrail."
+    }
+
+    # (2) Ejecucion real con bash (Git Bash en Windows); sin bash se informa.
+    if ($bashCmd) {
+        function New-LostMarkerCase {
+            param([string]$Name, [string]$Marker)
+            $caseProj = Join-Path (Join-Path $tempRoot "lost-marker-ps") $Name
+            $caseHarness = Join-Path $caseProj "harness_process"
+            New-Item -ItemType Directory -Path $caseHarness -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $caseHarness "progress") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $caseHarness "rust") -Force | Out-Null
+            foreach ($f in @("harness_check.sh", "harness_status.sh", "init.sh", "commit_guard.sh", "CHECKPOINTS.md")) {
+                Copy-Item -LiteralPath (Join-Path $repoRoot $f) -Destination (Join-Path $caseHarness $f)
+            }
+            Copy-Item -LiteralPath (Join-Path $repoRoot "templates") -Destination $caseHarness -Recurse
+            Copy-Item -LiteralPath (Join-Path $repoRoot "roles") -Destination $caseHarness -Recurse
+            Copy-Item -LiteralPath (Join-Path $repoRoot "rust/Cargo.toml") -Destination (Join-Path $caseHarness "rust/Cargo.toml")
+            Copy-Item -LiteralPath (Join-Path $repoRoot "templates/progress/current.md") -Destination (Join-Path $caseHarness "progress/current.md")
+            # Huella de instalacion en el PADRE (el proyecto), no en el arnes.
+            New-Item -ItemType Directory -Path (Join-Path $caseProj "docs") -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $repoRoot "docs/constitution.md") -Destination (Join-Path $caseProj "docs/constitution.md")
+            Set-Content -LiteralPath (Join-Path $caseProj "CLAUDE.md") -Value "# proyecto" -Encoding Ascii
+            if ($Marker) {
+                Set-Content -LiteralPath (Join-Path $caseHarness ".harness_layout") -Value $Marker -Encoding Ascii
+            }
+            return $caseHarness
+        }
+
+        function Invoke-HarnessCheck {
+            param([string]$HarnessDir)
+            $oldRepoRootEnv = $env:HARNESS_REPO_ROOT
+            $oldClaudeProjectDir = $env:CLAUDE_PROJECT_DIR
+            $env:HARNESS_REPO_ROOT = $null
+            $env:CLAUDE_PROJECT_DIR = $null
+            Push-Location $HarnessDir
+            try {
+                return ($null | & $bashCmd.Source "harness_check.sh" 2>&1 | Out-String)
+            }
+            finally {
+                Pop-Location
+                $env:HARNESS_REPO_ROOT = $oldRepoRootEnv
+                $env:CLAUDE_PROJECT_DIR = $oldClaudeProjectDir
+            }
+        }
+
+        # (a) AC-1/AC-2: sin marker + huella en el padre -> raiz al PROYECTO. La
+        # constitution vive en el proyecto: si la resolucion cayera en el arnes,
+        # el check reportaria "Falta docs/constitution.md".
+        $lostHarness = New-LostMarkerCase -Name "sin-marker" -Marker ""
+        $lostOutput = Invoke-HarnessCheck -HarnessDir $lostHarness
+        Assert-True ($lostOutput -match '\.harness_layout ausente: layout subdir inferido por la huella de instalacion del padre') "Missing marker did not trigger the subdir inference notice."
+        Assert-True ($lostOutput -match 'para regenerar el marker') "Inference notice does not name the remedy (re-run the installer)."
+        Assert-True (-not ($lostOutput -match 'Falta docs/constitution\.md')) "Resolution fell back to the harness dir instead of the project."
+
+        # (c) AC-3: marker EXPLICITO 'root' con la misma huella -> sin
+        # inferencia; la raiz es el arnes y ahi SI falta la constitution (esa
+        # linea es justamente la evidencia de que resolvio local).
+        $rootMarkerHarness = New-LostMarkerCase -Name "marker-root" -Marker "root"
+        $rootMarkerOutput = Invoke-HarnessCheck -HarnessDir $rootMarkerHarness
+        Assert-True (-not ($rootMarkerOutput -match '\.harness_layout ausente')) "An explicit 'root' marker must never go through the inference."
+        Assert-True ($rootMarkerOutput -match 'Falta docs/constitution\.md') "Explicit 'root' marker did not resolve to the harness dir."
+    }
+    else {
+        Write-Host "[INFO] bash not available: skipping the live marker-inference runs (static parity only)."
+    }
+
     # --- Feature #8: Kimi Code CLI como backend (paridad con setup_smoke.sh) ---
     # (a) AC-9a/AC-10: espejos Kimi generados con frontmatter valido (allowlist
     # de tools por rol, decision usuario 2026-07-28) y cuerpo == roles/<rol>.md.
@@ -468,7 +546,7 @@ command = "echo hook-del-usuario"
         $env:KIMI_CODE_HOME = $oldKimiHomeEnv
     }
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, and Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global)."
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), and Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global)."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

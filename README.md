@@ -233,6 +233,14 @@ mapa de agentes. Desde la feature #7 incluye ademas:
   el padre es `$HOME` sin `HARNESS_ALLOW_HOME_SURFACE=1`), la raiz es el propio
   checkout, con aviso informativo `[i]`. El marker ya no esta versionado (es
   estado local que escribe el instalador).
+- **Layout inferido cuando falta el marker** (feature #10): como des-versionar
+  `.harness_layout` lo borra del working tree de toda instalacion que hace
+  `git pull`, su AUSENCIA ya no se interpreta como layout root. Si el padre tiene
+  huella de instalacion (`docs/constitution.md`, `CLAUDE.md`, `AGENTS.md`,
+  `.claude/settings.json`) y no es `$HOME`, se infiere `subdir` y la raiz es el
+  padre, con un aviso `[i]` que recuerda que re-correr el instalador regenera el
+  marker (los scripts nunca lo escriben). Sin huella no se infiere nada, y un
+  marker presente con otro valor (`root`) se respeta al pie de la letra.
 
 ## Kimi Code CLI: backend con hooks globales (unica excepcion de `$HOME`)
 

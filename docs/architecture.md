@@ -37,10 +37,13 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
 - `paths.rs`: `HarnessPaths::resolve()` localiza raiz del proyecto, `docs/`,
   `progress/`, `feature_list.json` y honra `HARNESS_REPO_ROOT` / markers de layout.
   `repo_root_from_marker` (unico punto del marker, tambien usado por
-  `GraphEnv::resolve`) trae el guardrail de checkout fuente: marker `subdir` +
-  senales de fuente (`templates/harness_cli` + `rust/`) + padre sin huella de
-  instalacion (o `$HOME` sin `HARNESS_ALLOW_HOME_SURFACE=1`) => la raiz es el
-  propio checkout, con aviso `[i]` a stderr (feature #7).
+  `GraphEnv::resolve`) distingue tres casos: marker `subdir` => el padre, con el
+  guardrail de checkout fuente (senales de fuente `templates/harness_cli` +
+  `rust/` + padre sin huella de instalacion, o `$HOME` sin
+  `HARNESS_ALLOW_HOME_SURFACE=1` => la raiz es el propio checkout, con aviso
+  `[i]` a stderr, feature #7); marker AUSENTE => se infiere `subdir` si el padre
+  tiene huella y no es `$HOME`, tambien con aviso `[i]` (feature #10); marker con
+  otro valor (`root`) => el propio dir, sin inferencia ni aviso.
 - `features.rs`: carga/guarda `feature_list.json` y selecciona la feature activa.
 - `plan.rs`: plantilla y firma del plan (`plan_signature` = dict
   path/mtime/size/hash), `is_plan_stale`, `plan_staleness_message`, `write_plan`,
@@ -174,6 +177,17 @@ El hub usa exclusivamente PostgreSQL; se accede bajo `harness graph <cmd>`
   overrides (`HARNESS_REPO_ROOT`, variables de agente) > marker `subdir` =>
   padre, salvo el guardrail de checkout fuente (senales de fuente + padre sin
   huella o `$HOME`) que resuelve al propio dir con aviso `[i]`.
+- Marker AUSENTE (feature #10): des-versionarlo dejo sin marker a toda
+  instalacion que hizo `git pull`, asi que la ausencia ya no significa "layout
+  root". Si el padre tiene huella de instalacion (`docs/constitution.md`,
+  `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`) y no es `$HOME`, se infiere
+  `subdir` con aviso `[i]` que nombra el remedio (re-correr el instalador
+  regenera el marker); sin huella, la raiz sigue siendo el dir del arnes. Las
+  cuatro huellas y la guarda de `$HOME` son las MISMAS que usa el guardrail, y
+  los scripts siguen siendo read-only: nunca escriben el marker.
+- Un marker presente con cualquier valor distinto de `subdir` (`root`) se
+  respeta al pie de la letra: la inferencia aplica SOLO cuando el archivo no
+  existe.
 
 ## Riesgos conocidos
 
@@ -183,6 +197,11 @@ El hub usa exclusivamente PostgreSQL; se accede bajo `harness graph <cmd>`
   solo-si-falta): gate apagado por defecto, opt-in documentado en `UPDATING.md`.
 - Paridad sh vs ps1: las superficies PowerShell son un resumen conceptual, no
   copia literal; la ejecucion Windows real se valida cuando hay entorno.
+- Inferencia de layout por huella (feature #10): un `harness_process/` colocado
+  dentro de un directorio que casualmente tenga `CLAUDE.md` o `AGENTS.md`
+  resolveria al padre cuando falta el marker. Es el mismo criterio de huella que
+  ya usa el guardrail, `HARNESS_REPO_ROOT` sigue como override y el aviso `[i]`
+  deja rastro; riesgo aceptado y acotado.
 - No correr `setup_harness.sh` en este checkout fuente (escribiria superficies
   en `$HOME`): el binario raiz se refresca con `cargo build` + `cp`. Desde la
   feature #7 los scripts y el binario resuelven el checkout fuente a si mismo

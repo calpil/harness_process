@@ -54,21 +54,40 @@ impl HarnessPaths {
     }
 }
 
-/// Lee `.harness_layout`: "subdir" -> el padre de `root` es la raiz multi-repo.
+/// Rutas que siembra el instalador en la raiz de una instalacion: su presencia
+/// en el padre es la "huella de instalacion". Mismas cuatro que usan
+/// harness_check.sh / harness_status.sh / init.sh / commit_guard.sh.
+const INSTALL_FOOTPRINTS: [&str; 4] = [
+    "docs/constitution.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".claude/settings.json",
+];
+
+/// Resuelve la raiz multi-repo segun `.harness_layout`. Tres casos EXCLUYENTES
+/// (feature #10), identicos a los de los 4 scripts sh:
 ///
-/// Guardrail checkout fuente (decision usuario 2026-07-28): un clon de la
-/// fuente es identico a una instalacion subdir; solo el ENTORNO los
-/// distingue. Con senales de fuente en `root` (`templates/harness_cli` +
-/// `rust/`) y un padre sin huella de instalacion (o `$HOME` sin
-/// `HARNESS_ALLOW_HOME_SURFACE=1`), el marker 'subdir' es incoherente:
-/// fallback al propio arnes con aviso informativo `[i]` (ni fallo duro ni
-/// silencioso). Misma regla que harness_check.sh / harness_status.sh /
-/// init.sh / commit_guard.sh.
+/// 1. marker == "subdir" -> el padre de `root`, salvo el guardrail de checkout
+///    fuente (feature #7, decision usuario 2026-07-28): un clon de la fuente es
+///    identico a una instalacion subdir y solo el ENTORNO los distingue; con
+///    senales de fuente en `root` (`templates/harness_cli` + `rust/`) y un
+///    padre sin huella de instalacion (o `$HOME` sin
+///    `HARNESS_ALLOW_HOME_SURFACE=1`) el marker es incoherente y la raiz es el
+///    propio arnes, con aviso `[i]`.
+/// 2. marker AUSENTE (decision usuario 2026-07-29) -> la feature #7
+///    des-versiono el marker, asi que toda instalacion subdir que hizo
+///    `git pull` se quedo sin el. Si el padre tiene huella de instalacion (y no
+///    es `$HOME`), se infiere layout subdir y la raiz es el padre, con aviso
+///    `[i]`; sin huella no hay evidencia para inferir nada.
+/// 3. marker presente con cualquier otro valor ("root") -> se respeta tal cual:
+///    la raiz es `root`, sin inferencia y sin aviso.
 pub fn repo_root_from_marker(root: &Path) -> PathBuf {
     let marker = root.join(".harness_layout");
-    if let Ok(content) = std::fs::read_to_string(&marker) {
+    if marker.is_file() {
+        // Marker EXPLICITO: manda tal cual (nunca se infiere sobre el).
+        let content = std::fs::read_to_string(&marker).unwrap_or_default();
         if content.trim() == "subdir" {
-            if let Some(parent) = root.parent() {
+            if let Some(parent) = non_empty_parent(root) {
                 if source_checkout_mismatch(root, parent) {
                     eprintln!(
                         "[i] Checkout fuente del arnes detectado (.harness_layout=subdir sin huella de instalacion en el padre): REPO_ROOT={}",
@@ -79,8 +98,40 @@ pub fn repo_root_from_marker(root: &Path) -> PathBuf {
                 return parent.to_path_buf();
             }
         }
+        return root.to_path_buf();
+    }
+    // Marker AUSENTE: inferencia por huella del padre.
+    if let Some(parent) = non_empty_parent(root) {
+        if parent_has_footprint(parent) && !parent_is_home(parent) {
+            eprintln!(
+                "[i] .harness_layout ausente: layout subdir inferido por la huella de instalacion del padre: REPO_ROOT={}. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerar el marker.",
+                parent.display()
+            );
+            return parent.to_path_buf();
+        }
     }
     root.to_path_buf()
+}
+
+/// Padre de `root` descartando el padre vacio de una ruta relativa de un solo
+/// componente (`Path::new("harness").parent() == Some("")`), que no designa
+/// ningun directorio utilizable como raiz.
+fn non_empty_parent(root: &Path) -> Option<&Path> {
+    root.parent().filter(|p| !p.as_os_str().is_empty())
+}
+
+/// True si `parent` tiene al menos una huella de instalacion del arnes.
+fn parent_has_footprint(parent: &Path) -> bool {
+    INSTALL_FOOTPRINTS
+        .iter()
+        .any(|fp| parent.join(fp).is_file())
+}
+
+/// True si `parent` es `$HOME` y no esta el escape
+/// `HARNESS_ALLOW_HOME_SURFACE=1` (paridad con la guarda del instalador).
+fn parent_is_home(parent: &Path) -> bool {
+    env_nonempty("HARNESS_ALLOW_HOME_SURFACE").as_deref() != Some("1")
+        && crate::pycompat::home_dir().is_some_and(|home| same_dir(parent, &home))
 }
 
 /// True si `root` parece el checkout FUENTE del arnes y `parent` no parece la
@@ -92,16 +143,7 @@ fn source_checkout_mismatch(root: &Path, parent: &Path) -> bool {
     if !(root.join("templates/harness_cli").is_file() && root.join("rust").is_dir()) {
         return false;
     }
-    let footprints = [
-        "docs/constitution.md",
-        "CLAUDE.md",
-        "AGENTS.md",
-        ".claude/settings.json",
-    ];
-    let parent_has_footprint = footprints.iter().any(|fp| parent.join(fp).is_file());
-    let parent_is_home = env_nonempty("HARNESS_ALLOW_HOME_SURFACE").as_deref() != Some("1")
-        && crate::pycompat::home_dir().is_some_and(|home| same_dir(parent, &home));
-    !parent_has_footprint || parent_is_home
+    !parent_has_footprint(parent) || parent_is_home(parent)
 }
 
 /// Compara dos directorios por identidad real (canonicalize) con fallback a
@@ -120,8 +162,12 @@ mod tests {
 
     #[test]
     fn repo_root_should_be_root_without_marker() {
+        // El padre es un tempdir VACIO (sin huella de instalacion): sin marker
+        // y sin evidencia, la raiz es el propio dir del arnes.
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(repo_root_from_marker(dir.path()), dir.path());
+        let harness = dir.path().join("harness_process");
+        std::fs::create_dir(&harness).unwrap();
+        assert_eq!(repo_root_from_marker(&harness), harness);
     }
 
     #[test]
@@ -178,6 +224,86 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
         std::fs::write(dir.path().join(".claude/settings.json"), "{}\n").unwrap();
         assert_eq!(repo_root_from_marker(&harness), dir.path());
+    }
+
+    /// Arma `<parent>/harness_process` SIN marker (el estado en que queda una
+    /// instalacion subdir tras el `git pull` que borro `.harness_layout`).
+    fn lost_marker_fixture(parent: &Path) -> PathBuf {
+        let harness = parent.join("harness_process");
+        std::fs::create_dir_all(&harness).unwrap();
+        assert!(!harness.join(".harness_layout").exists());
+        harness
+    }
+
+    #[test]
+    fn repo_root_should_infer_subdir_without_marker_when_parent_has_footprint() {
+        // Feature #10 / AC-1: sin marker pero con huella de instalacion en el
+        // padre, la raiz es el PADRE (el proyecto), no el dir del arnes.
+        let dir = tempfile::tempdir().unwrap();
+        let harness = lost_marker_fixture(dir.path());
+        std::fs::write(dir.path().join("CLAUDE.md"), "# proyecto\n").unwrap();
+        assert_eq!(repo_root_from_marker(&harness), dir.path());
+    }
+
+    #[test]
+    fn repo_root_inference_should_accept_any_single_footprint_file() {
+        // La inferencia usa las MISMAS cuatro huellas que el guardrail: basta
+        // cualquiera de ellas (aqui la que no es un .md de la raiz).
+        let dir = tempfile::tempdir().unwrap();
+        let harness = lost_marker_fixture(dir.path());
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(dir.path().join(".claude/settings.json"), "{}\n").unwrap();
+        assert_eq!(repo_root_from_marker(&harness), dir.path());
+        // docs/constitution.md tambien, en una fixture limpia.
+        let dir2 = tempfile::tempdir().unwrap();
+        let harness2 = lost_marker_fixture(dir2.path());
+        std::fs::create_dir_all(dir2.path().join("docs")).unwrap();
+        std::fs::write(dir2.path().join("docs/constitution.md"), "# c\n").unwrap();
+        assert_eq!(repo_root_from_marker(&harness2), dir2.path());
+    }
+
+    #[test]
+    fn repo_root_should_not_infer_without_parent_footprint() {
+        // Feature #10 / AC-4: sin marker y sin huella no hay evidencia para
+        // inferir; la raiz sigue siendo el propio dir del arnes.
+        let dir = tempfile::tempdir().unwrap();
+        let harness = lost_marker_fixture(dir.path());
+        std::fs::write(dir.path().join("README.md"), "# no es huella\n").unwrap();
+        assert_eq!(repo_root_from_marker(&harness), harness);
+    }
+
+    #[test]
+    fn repo_root_should_not_infer_when_marker_says_root() {
+        // Feature #10 / AC-3: un marker EXPLICITO distinto de 'subdir' manda
+        // aunque el padre tenga huella: sin inferencia, la raiz es el arnes.
+        let dir = tempfile::tempdir().unwrap();
+        let harness = lost_marker_fixture(dir.path());
+        std::fs::write(harness.join(".harness_layout"), "root\n").unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# proyecto\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/constitution.md"), "# c\n").unwrap();
+        assert_eq!(repo_root_from_marker(&harness), harness);
+    }
+
+    #[test]
+    fn repo_root_should_not_infer_when_marker_is_empty_or_unknown() {
+        // Mismo caso AC-3 con valores raros: el archivo EXISTE, asi que se
+        // respeta como marker explicito (nunca se infiere sobre el).
+        for value in ["", "\n", "  ", "flat", "subdirectorio"] {
+            let dir = tempfile::tempdir().unwrap();
+            let harness = lost_marker_fixture(dir.path());
+            std::fs::write(harness.join(".harness_layout"), value).unwrap();
+            std::fs::write(dir.path().join("AGENTS.md"), "# proyecto\n").unwrap();
+            assert_eq!(repo_root_from_marker(&harness), harness, "valor {value:?}");
+        }
+    }
+
+    #[test]
+    fn repo_root_should_not_infer_without_usable_parent() {
+        // Ruta relativa de un solo componente: Path::parent() devuelve "" (no
+        // designa directorio alguno) y la inferencia no aplica.
+        let root = Path::new("harness_process_inexistente_para_test");
+        assert_eq!(repo_root_from_marker(root), root);
     }
 
     #[test]

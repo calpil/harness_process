@@ -183,11 +183,12 @@ Desde esta versión (feature #7, decisión del usuario 2026-07-28):
   `$HOME/docs`). El instalador lo escribe en cada instalación, como siempre.
 - **Migración en instalaciones subdir existentes**: al hacer `git pull` en tu
   `harness_process`, Git elimina el `.harness_layout` local (dejó de estar
-  tracked). Entre el `pull` y el siguiente setup el arnés opera como layout
-  `root` (efectos acotados al propio clon; no toca tu proyecto ni `$HOME`).
-  **Re-corre el instalador** (`./setup_harness.sh` / `.\setup_harness.ps1`) —el
-  flujo canónico de siempre tras un pull— y el marker se regenera con el layout
-  correcto.
+  tracked). **Ya no hace falta re-correr el instalador para que la raíz vuelva a
+  ser tu proyecto**: desde la feature #10 el layout `subdir` se infiere de la
+  huella del padre (ver la sección siguiente). Re-correr el instalador
+  (`./setup_harness.sh` / `.\setup_harness.ps1`) sigue siendo el flujo canónico
+  tras un pull y es lo que **regenera el marker** —y con él, el aviso `[i]`
+  desaparece—, pero ya no es un requisito para no perder la raíz.
 - **Guardrail de checkout fuente**: aunque el marker diga `subdir`, si el
   directorio tiene señales de fuente (`templates/harness_cli` + `rust/`) y el
   padre no tiene huella de instalación (`docs/constitution.md`, `CLAUDE.md`,
@@ -205,6 +206,44 @@ Desde esta versión (feature #7, decisión del usuario 2026-07-28):
   (`HARNESS_CHECK_MODE=warn|off` degradan igual que siempre). El check solo
   **reporta**: el remedio es re-correr el instalador (o propagar el cambio a
   `roles/` si lo que editaste fue el espejo).
+
+## Layout `subdir` inferido cuando falta `.harness_layout`
+
+Desde esta versión (feature #10, decisión del usuario 2026-07-29). Corrige el
+efecto colateral de des-versionar el marker: el commit que lo sacó de git graba
+`D .harness_layout`, así que **cualquier instalación que hizo `git pull` se
+quedó sin marker** y pasaba a tratar `harness_process/` como raíz, en silencio
+(specs, planes y veredictos escritos dentro del arnés en vez de en el `docs/` de
+tu proyecto).
+
+Cómo se resuelve ahora la raíz (misma regla en los cuatro scripts —
+`harness_check.sh`, `harness_status.sh`, `init.sh`, `commit_guard.sh`— y en el
+binario Rust), en orden:
+
+1. `HARNESS_REPO_ROOT` o una variable de agente (`CLAUDE_PROJECT_DIR`,
+   `CODEX_PROJECT_DIR`, ...) siguen mandando sobre todo lo demás, sin avisos.
+2. **Marker `subdir`**: la raíz es el padre, con el guardrail de checkout fuente
+   de la feature #7 intacto.
+3. **Marker ausente**: si el padre tiene huella de instalación
+   (`docs/constitution.md`, `CLAUDE.md`, `AGENTS.md` o `.claude/settings.json`) y
+   no es `$HOME` (sin `HARNESS_ALLOW_HOME_SURFACE=1`), se **infiere layout
+   `subdir`** y la raíz es el padre, con un aviso informativo:
+
+   ```
+   [i] .harness_layout ausente: layout subdir inferido por la huella de
+       instalacion del padre: REPO_ROOT=<tu proyecto>. Re-corre el instalador
+       (setup_harness.sh / setup_harness.ps1) para regenerar el marker.
+   ```
+
+   No es un fallo: los exit codes no cambian. Sin huella en el padre no se
+   infiere nada (la raíz es el directorio del arnés, como antes).
+4. **Marker con cualquier otro valor** (`root`): se respeta al pie de la letra.
+   La inferencia aplica **solo** cuando el archivo NO existe, así que una
+   instalación en layout root nunca cambia de raíz.
+
+Qué tienes que hacer: **nada**. Tu instalación se repara sola al actualizar. Si
+quieres que el aviso `[i]` desaparezca, re-corre el instalador: es lo único que
+escribe el marker (los scripts son de solo lectura y nunca lo regeneran).
 
 ## Kimi Code CLI: hooks globales (única excepción de escritura en `$HOME`)
 
