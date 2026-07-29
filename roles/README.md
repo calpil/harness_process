@@ -84,15 +84,26 @@ subagente `leader`.
   Opus 4.7+). El `effort:` del frontmatter NO sobreescribe la env var
   `CLAUDE_CODE_EFFORT_LEVEL`.
 - **Codex** (`.codex/agents/*.toml`): `model` se hereda de la sesion;
-  `model_reasoning_effort = high` (tope de Codex). Read-only via
-  `sandbox_mode = read-only`; el implementer usa `workspace-write`.
+  `model_reasoning_effort = high` (tope de Codex). El formato NO admite
+  allowlist de herramientas (los subagentes usan las del chat padre), asi que
+  la unica palanca es `sandbox_mode`, y los TRES roles usan `workspace-write`:
+  leader y reviewer tienen que escribir sus entregables en `docs/` (spec, plan
+  y veredicto), cosa que `read-only` impide (feature #9).
 - **Gemini** (`.gemini/agents/*.md`): `model` y `tools` se heredan de la sesion
   (omitidos para no fijar IDs/nombres que cambian por version). Agregalos por
   rol cuando confirmes los nombres de tools/model de tu version instalada.
 - **Kimi** (`.kimi-code/agents/*.md`): `model` se hereda de la sesion; `tools`
   con allowlist por rol (decision usuario 2026-07-28; nombres case-sensitive
-  verificados en v0.29.2): leader/reviewer `Read, Grep, Glob, Bash`
-  (read-only), implementer ademas `Edit, Write`.
+  verificados en v0.29.2): leader/reviewer `Read, Grep, Glob, Bash`,
+  implementer ademas `Edit, Write`.
+
+**Sobre "solo lectura":** en Claude y en Kimi, leader y reviewer NO tienen
+`Edit` ni `Write`, pero SI tienen `Bash`, con el que se escribe un archivo
+igual — y lo necesitan, porque su entregable ES un archivo en `docs/`. En
+Codex la palanca equivalente es `workspace-write`. En los tres backends la
+disciplina de rol la sostiene el PROMPT de `roles/*.md` ("No edites codigo
+fuente"), no la configuracion: ningun backend impide fisicamente que un rol
+read-only toque codigo si decide ignorar su prompt.
 
 ## Regla anti perdida de contexto
 

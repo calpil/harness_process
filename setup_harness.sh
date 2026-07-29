@@ -2026,7 +2026,21 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     subst_hrel_inplace roles/README.md
 
     # Codex CLI: subagentes nativos en .codex/agents/*.toml (auto-registrados).
-    # No hay allowlist de tools; la capacidad se acota con sandbox_mode.
+    # El formato NO admite allowlist de herramientas ("subagents use the tools
+    # available to the parent chat"): la unica palanca es sandbox_mode.
+    #
+    # Los TRES roles usan workspace-write, no solo el implementer, porque leader
+    # y reviewer tienen que ESCRIBIR sus entregables en docs/ (spec, plan y
+    # veredicto). Con read-only el sandbox responde "Operation not permitted" y
+    # esos dos roles no pueden entregar su trabajo (feature #9; verificado con
+    # `codex sandbox` sobre codex-cli 0.145.0).
+    #
+    # No es mas laxo que Claude: alli leader y reviewer tampoco tienen Edit ni
+    # Write, pero SI tienen Bash, con el que se escribe un archivo igual. En
+    # ambos backends la disciplina de rol la sostiene el prompt de roles/*.md
+    # ("No edites codigo fuente"), no el sandbox. Tampoco hay via intermedia:
+    # writable_roots solo AÑADE rutas escribibles fuera del workspace, no
+    # restringe las de dentro (verificado). danger-full-access no se usa nunca.
     # Args: role sandbox_mode reasoning_effort description.
     build_codex_agent() {
         local role="$1" asandbox="$2" aeffort="$3" adesc="$4"
@@ -2089,9 +2103,9 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     build_claude_agent reviewer    reviewer    claude-fable-5    max "Read, Grep, Glob, Bash"              "$desc_rev"
 
     # --- Codex CLI: .codex/agents/*.toml (sandbox por rol; effort high = tope) ---
-    build_codex_agent leader      read-only       high "$desc_leader"
+    build_codex_agent leader      workspace-write high "$desc_leader"
     build_codex_agent implementer workspace-write high "$desc_impl"
-    build_codex_agent reviewer    read-only       high "$desc_rev"
+    build_codex_agent reviewer    workspace-write high "$desc_rev"
 
     # --- Gemini CLI: .gemini/agents/*.md (hereda tools/model de la sesion) -------
     build_gemini_agent leader      "$desc_leader"

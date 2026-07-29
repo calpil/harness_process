@@ -157,6 +157,23 @@ grep -Fq 'harness_cli" graph mapa' "$ROOT_LAYOUT/AGENTS.md"
 python3 -m json.tool "$ROOT_LAYOUT/.codex/hooks.json" >/dev/null
 python3 -m json.tool "$ROOT_LAYOUT/.gemini/settings.json" >/dev/null
 python3 -c 'import pathlib, tomllib; [tomllib.loads(p.read_text()) for p in pathlib.Path("'"$ROOT_LAYOUT"'/.codex/agents").glob("*.toml")]'
+# Feature #9 / AC-1: los TRES roles de Codex son workspace-write. Codex no
+# ofrece allowlist de tools, asi que read-only en leader/reviewer les impedia
+# escribir sus entregables en docs/ (spec, plan, veredicto). Se verifica sobre
+# el TOML parseado, no por grep, para que un cambio de formato no lo falsee.
+python3 - "$ROOT_LAYOUT" <<'CODEX_SANDBOX_EOF'
+import pathlib, sys, tomllib
+root = pathlib.Path(sys.argv[1]) / ".codex" / "agents"
+roles = {}
+for p in sorted(root.glob("*.toml")):
+    roles[p.stem] = tomllib.loads(p.read_text()).get("sandbox_mode")
+faltan = {r for r in ("leader", "implementer", "reviewer")} - set(roles)
+if faltan:
+    sys.exit(f"[FALLO] faltan agentes Codex: {sorted(faltan)}")
+malos = {r: m for r, m in roles.items() if m != "workspace-write"}
+if malos:
+    sys.exit(f"[FALLO] sandbox_mode != workspace-write en Codex: {malos}")
+CODEX_SANDBOX_EOF
 grep -Fq "$ROOT_LAYOUT/bin/harness-hook" "$ROOT_LAYOUT/.codex/hooks.json"
 git init -q "$ROOT_LAYOUT/svc-demo"
 # DB inexistente en localhost: rechazo instantaneo (sin timeout de 10s).

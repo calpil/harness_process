@@ -700,7 +700,12 @@ $body
 "@
         Write-HarnessText -Path (Join-Path $script:SurfaceDir ".claude/agents/$role.md") -Content $claude
 
-        $sandbox = if ($role -eq "implementer") { "workspace-write" } else { "read-only" }
+        # Feature #9: los TRES roles usan workspace-write. Codex no admite
+        # allowlist de herramientas, y leader/reviewer deben escribir sus
+        # entregables en docs/ (spec, plan, veredicto): con read-only el sandbox
+        # responde "Operation not permitted". No es mas laxo que Claude, donde
+        # esos roles ya escriben via Bash; la disciplina la pone el prompt.
+        $sandbox = "workspace-write"
         $codex = @"
 name = "$role"
 description = "$($descriptions[$role])"
