@@ -370,6 +370,7 @@ HARNESS_DOCS=(
     "architecture.md"
     "conventions.md"
     "verification.md"
+    "kimi-cli-uso-eficiente.md"
 )
 
 # Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
@@ -380,6 +381,16 @@ HARNESS_DOCS=(
 PRD_DOCS=(
     "PRD-master.md"
     "SDD-master.md"
+)
+
+# Dotfiles de contexto para agentes (Kimi y otros): exclusiones de contexto
+# (.kimiignore, espejo de .gitignore) y reglas fijas del proyecto (.kimirules,
+# referenciado desde el AGENTS.md de la raiz). Documentos del USUARIO en la
+# RAIZ: se siembran solo si faltan, no se respaldan, no se regeneran y NO
+# entran en los reset targets (mismo criterio que PRD_DOCS).
+KIMI_DOTFILES=(
+    ".kimiignore"
+    ".kimirules"
 )
 
 while [ "$#" -gt 0 ]; do
@@ -943,6 +954,12 @@ Archivos principales:
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
 - `docs/conventions.md` (RAIZ): convenciones del equipo.
 - `docs/verification.md` (RAIZ): comandos de validacion.
+- `.kimirules` (RAIZ, si existe): reglas fijas del proyecto (dominio, moneda,
+  invariantes); respetalas en todo el trabajo. `.kimiignore` lista las
+  exclusiones de contexto (espejo de `.gitignore`).
+- `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
+  CLI (exclusiones de contexto, reglas fijas, acotamiento por archivo y `/new`
+  entre tareas para no reenviar historial).
 
 Los documentos durables (plan, investigacion, evidencia) se escriben en `docs/`
 de la raiz; `__HREL__progress/` guarda solo el estado vivo. Una respuesta corta
@@ -1605,9 +1622,12 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "docs/architecture.md"
         "docs/conventions.md"
         "docs/verification.md"
+        "docs/kimi-cli-uso-eficiente.md"
         "docs/constitution.md"
         "docs/prd/PRD-master.md"
         "docs/prd/SDD-master.md"
+        ".kimiignore"
+        ".kimirules"
         "roles/README.md"
         "roles/leader.md"
         "roles/implementer.md"
@@ -2169,6 +2189,18 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     for prd_doc in "${PRD_DOCS[@]}"; do
         if [ ! -f "$SURFACE_DIR/docs/prd/$prd_doc" ]; then
             install_asset "docs/prd/$prd_doc" "$SURFACE_DIR/docs/prd/$prd_doc"
+        else
+            COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        fi
+    done
+
+    # Dotfiles Kimi (.kimiignore/.kimirules): documentos del USUARIO en la
+    # RAIZ. Mismo criterio que PRD/SDD: se siembran SOLO si faltan y ni
+    # --force los pisa (lo escrito ahi son las reglas del proyecto, no una
+    # plantilla refrescable).
+    for kimi_dotfile in "${KIMI_DOTFILES[@]}"; do
+        if [ ! -f "$SURFACE_DIR/$kimi_dotfile" ]; then
+            install_asset "$kimi_dotfile" "$SURFACE_DIR/$kimi_dotfile"
         else
             COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
         fi

@@ -280,6 +280,7 @@ miproyecto/
 |   |-- architecture.md              mapa de arquitectura
 |   |-- conventions.md               convenciones del equipo
 |   |-- verification.md              comandos de validacion
+|   |-- kimi-cli-uso-eficiente.md    guia de uso eficiente de Kimi CLI
 |   |-- prd/
 |   |   |-- PRD-master.md            que se construye y por que (planilla)
 |   |   `-- SDD-master.md            como se construye, a nivel proyecto (planilla)
@@ -308,13 +309,13 @@ implementacion -> docs/impl-<id>.md -> docs/review-<id>.md
 ```
 
 `docs/prd/` son documentos **tuyos**: se siembran una sola vez si faltan, ningun
-reinstall los pisa y **`--reset` no los borra** (a diferencia de los tres docs del
+reinstall los pisa y **`--reset` no los borra** (a diferencia de los docs del
 arnes, que si se limpian por ser plantillas regenerables).
 
-Los cuatro docs base se siembran **solo si faltan** y un reinstall **nunca los
+Los docs base se siembran **solo si faltan** y un reinstall **nunca los
 pisa**: si tu equipo ya tiene un `docs/conventions.md`, queda intacto. Para
 refrescar una plantilla, borra el archivo y reinstala (o usa `--force`, que por
-contrato sobrescribe sin backup). `--reset` limpia solo los tres docs generados
+contrato sobrescribe sin backup). `--reset` limpia solo los docs generados
 y conserva la constitution y los artefactos de feature.
 
 Instalaciones anteriores que tengan esos docs en `harness_process/docs/` se

@@ -79,7 +79,8 @@ $script:SurfaceDir = $script:RepoRoot
 $script:HarnessDocs = @(
     "architecture.md",
     "conventions.md",
-    "verification.md"
+    "verification.md",
+    "kimi-cli-uso-eficiente.md"
 )
 
 # Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
@@ -90,6 +91,16 @@ $script:HarnessDocs = @(
 $script:PrdDocs = @(
     "PRD-master.md",
     "SDD-master.md"
+)
+
+# Dotfiles de contexto para agentes (Kimi y otros): .kimiignore (exclusiones
+# de contexto, espejo de .gitignore) y .kimirules (reglas fijas del proyecto,
+# referenciado desde el AGENTS.md de la raiz). Documentos del USUARIO en la
+# RAIZ: se siembran solo si faltan, no se respaldan, no se regeneran y NO
+# entran en los reset targets. Paridad con KIMI_DOTFILES de setup_harness.sh.
+$script:KimiDotfiles = @(
+    ".kimiignore",
+    ".kimirules"
 )
 
 # Guardrail: nunca escribir superficies en el HOME del usuario (pisaria
@@ -422,9 +433,12 @@ function Assert-HarnessAssets {
             "docs/architecture.md",
             "docs/conventions.md",
             "docs/verification.md",
+            "docs/kimi-cli-uso-eficiente.md",
             "docs/constitution.md",
             "docs/prd/PRD-master.md",
             "docs/prd/SDD-master.md",
+            ".kimiignore",
+            ".kimirules",
             "roles/README.md",
             "roles/leader.md",
             "roles/implementer.md",
@@ -638,6 +652,10 @@ Before changing code:
    `... harness_cli.ps1 advance --nota "Decision usuario: <...>"`.
 7. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
 8. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
+
+Efficient Kimi Code CLI usage: see `docs/kimi-cli-uso-eficiente.md` (context
+exclusions, fixed project rules in `.kimirules`, file-scoped prompts, `/new`
+between tasks).
 
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;
@@ -1475,6 +1493,18 @@ try {
             $prdDest = Join-Path $script:SurfaceDir "docs/prd/$prdDoc"
             if (-not (Test-Path -LiteralPath $prdDest)) {
                 Install-HarnessAsset -Asset "docs/prd/$prdDoc" -Destination $prdDest
+            } else {
+                $script:Counters.skipped++
+            }
+        }
+        # Dotfiles Kimi (.kimiignore/.kimirules): documentos del USUARIO en la
+        # RAIZ. Mismo criterio que PRD/SDD: se siembran SOLO si faltan y ni
+        # -Force los pisa (lo escrito ahi son las reglas del proyecto, no una
+        # plantilla refrescable). Paridad con KIMI_DOTFILES de setup_harness.sh.
+        foreach ($kimiDotfile in $script:KimiDotfiles) {
+            $dotfileDest = Join-Path $script:SurfaceDir $kimiDotfile
+            if (-not (Test-Path -LiteralPath $dotfileDest)) {
+                Install-HarnessAsset -Asset $kimiDotfile -Destination $dotfileDest
             } else {
                 $script:Counters.skipped++
             }

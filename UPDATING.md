@@ -53,10 +53,14 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
 - `docs/constitution.md` (sembrada solo si falta; nunca pisa la del usuario)
-- `docs/architecture.md`, `docs/conventions.md` y `docs/verification.md` en el
+- `docs/architecture.md`, `docs/conventions.md`, `docs/verification.md` y
+  `docs/kimi-cli-uso-eficiente.md` en el
   `docs/` de la **raíz** del proyecto (mismo criterio: solo si faltan)
 - `docs/prd/PRD-master.md` y `docs/prd/SDD-master.md` (planillas maestras del
   proyecto; solo si faltan, y `--reset` no las borra)
+- `.kimiignore` y `.kimirules` en la **raíz** del proyecto (exclusiones de
+  contexto y reglas fijas para agentes; solo si faltan, y ni `--force` ni
+  `--reset` los toca)
 - El subcomando `harness_cli check-spec` y el gate de spec aprobado
   (`require_spec_approved`) en `advance`, `close --status done` y
   `harness_check.sh`
@@ -136,14 +140,14 @@ junto a `docs/constitution.md`, los specs y los planes. Antes vivían en
   vieja queda donde está y el instalador avisa con un `WARN`.
 - Si `harness_process/docs/` queda vacío tras la migración, se elimina.
 
-Además cambió el criterio de refresco: estos tres docs ahora se siembran
+Además cambió el criterio de refresco: estos docs del arnés ahora se siembran
 **solo si faltan** (igual que la constitution), porque comparten carpeta con la
 documentación del equipo y un `docs/conventions.md` propio no debe perderse en un
 reinstall. Para refrescar una plantilla: borra el archivo y reinstala, o usa
 `--force` (que por contrato sobrescribe **sin** backup).
 
-`--reset` sigue limpiando solo lo generado —los tres docs, en su ubicación nueva
-y en la vieja— y conserva la constitution y los artefactos de feature
+`--reset` sigue limpiando solo lo generado —los docs del arnés, en su ubicación
+nueva y en la vieja— y conserva la constitution y los artefactos de feature
 (`spec-*`, `plan-*`, `impl-*`, `review-*`).
 
 ## Planillas maestras PRD y SDD (`docs/prd/`)
@@ -165,8 +169,9 @@ Garantías (mismo criterio que `docs/constitution.md`):
 - Se siembran **solo si faltan**. Un reinstall nunca las pisa, y **ni `--force`**
   las sobrescribe: lo que hay escrito ahí es tu proyecto, no una plantilla
   refrescable.
-- **`--reset` no las borra.** No son superficie generada del arnés. Los tres docs
-  del arnés (`architecture.md`, `conventions.md`, `verification.md`) sí se
+- **`--reset` no las borra.** No son superficie generada del arnés. Los docs
+  del arnés (`architecture.md`, `conventions.md`, `verification.md`,
+  `kimi-cli-uso-eficiente.md`) sí se
   limpian con `--reset`; `docs/prd/` no.
 
 En instalaciones existentes aparecen al re-correr el instalador, sin tocar nada

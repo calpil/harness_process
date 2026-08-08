@@ -150,6 +150,11 @@ test -f "$ROOT_LAYOUT/.codex/hooks.json"
 test -d "$ROOT_LAYOUT/templates"
 # Constitution SDD sembrada en el docs/ de la RAIZ (en root, RAIZ == harness dir).
 test -f "$ROOT_LAYOUT/docs/constitution.md"
+# Feature #11 / AC-2: la guia de uso eficiente se siembra en docs/ (layout root).
+test -f "$ROOT_LAYOUT/docs/kimi-cli-uso-eficiente.md"
+# Feature #11 (companion KIMI_DOTFILES): .kimiignore/.kimirules se siembran en la RAIZ.
+test -f "$ROOT_LAYOUT/.kimiignore"
+test -f "$ROOT_LAYOUT/.kimirules"
 grep -qx 'postgres' "$ROOT_LAYOUT/.harness_backend"
 # Hooks y superficies deben invocar el shim, no python3 directo.
 grep -Fq 'harness_cli\" nudge' "$ROOT_LAYOUT/.claude/settings.json"
@@ -210,6 +215,11 @@ test -f "$SUBDIR_ROOT/docs/constitution.md"
 test -f "$SUBDIR_ROOT/docs/architecture.md"
 test -f "$SUBDIR_ROOT/docs/conventions.md"
 test -f "$SUBDIR_ROOT/docs/verification.md"
+# Feature #11 / AC-2: la guia de uso eficiente se siembra en docs/ (layout subdir).
+test -f "$SUBDIR_ROOT/docs/kimi-cli-uso-eficiente.md"
+# Feature #11 (companion KIMI_DOTFILES): .kimiignore/.kimirules en la RAIZ multi-repo.
+test -f "$SUBDIR_ROOT/.kimiignore"
+test -f "$SUBDIR_ROOT/.kimirules"
 test ! -e "$SUBDIR_HARNESS/docs/architecture.md"
 test ! -e "$SUBDIR_HARNESS/docs/conventions.md"
 test ! -e "$SUBDIR_HARNESS/docs/verification.md"
@@ -225,6 +235,9 @@ grep -q '^## 4. Decisiones tecnicas' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'docs/architecture.md' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
 grep -Fq 'harness_process/harness_cli" graph mapa' "$SUBDIR_ROOT/AGENTS.md"
+# Feature #11 / AC-3: la superficie instalada enlaza la guia de uso eficiente.
+grep -q 'kimi-cli-uso-eficiente' "$SUBDIR_ROOT/AGENTS.md" \
+    || { echo "[FALLO] AGENTS.md instalado no enlaza docs/kimi-cli-uso-eficiente.md"; exit 1; }
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
 mkdir -p "$SUBDIR_ROOT/service"
 codex_start="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$SUBDIR_ROOT/.codex/hooks.json")"
@@ -453,6 +466,15 @@ test ! -f "$RESET_TEST/docs/conventions.md" \
     || { echo "[FALLO] reset no limpio el doc generado conventions.md"; exit 1; }
 test ! -f "$RESET_TEST/docs/verification.md" \
     || { echo "[FALLO] reset no limpio el doc generado verification.md"; exit 1; }
+# Feature #11 / AC-2: la guia es HARNESS_DOCS, asi que el reset tambien la limpia.
+test ! -f "$RESET_TEST/docs/kimi-cli-uso-eficiente.md" \
+    || { echo "[FALLO] reset no limpio el doc generado kimi-cli-uso-eficiente.md"; exit 1; }
+# Feature #11 (companion KIMI_DOTFILES): los dotfiles son documentos del USUARIO
+# y sobreviven al reset (mismo criterio que PRD/SDD).
+test -f "$RESET_TEST/.kimiignore" \
+    || { echo "[FALLO] reset borro el .kimiignore del usuario"; exit 1; }
+test -f "$RESET_TEST/.kimirules" \
+    || { echo "[FALLO] reset borro el .kimirules del usuario"; exit 1; }
 # Feature #4 / AC-6: los artefactos de feature sobreviven al reset.
 for artifact in spec-feature-1-demo.md plan-feature-1-demo.md review-1.md; do
     test -f "$RESET_TEST/docs/$artifact" \

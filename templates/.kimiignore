@@ -1,0 +1,32 @@
+# .kimiignore — exclusiones de contexto para agentes LLM (plantilla del arnes)
+# Espejo de tu .gitignore: copia estas mismas lineas a .gitignore y manten
+# ambos archivos sincronizados. Kimi Code ya respeta .gitignore en sus
+# busquedas; este archivo deja las exclusiones explicitas para cualquier
+# agente o herramienta que lo lea. Ajusta las rutas a tu stack.
+
+# Dependencias masivas (bloqueo critico de tokens)
+/vendor/
+/node_modules/
+/target/
+/dist/
+/public/build/
+
+# Entornos y credenciales
+.env
+.env.backup
+.env.local
+.phpunit.result.cache
+*.pem
+*.key
+
+# Archivos pesados de Docker y bases de datos
+.docker/
+/mysql_data/
+/*.sql
+
+# Logs y cache local del sistema
+*.log
+/storage/*.log
+/bootstrap/cache/
+.zed/
+.kimi/

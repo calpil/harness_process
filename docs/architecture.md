@@ -141,11 +141,22 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   igual); el check solo reporta y el remedio es re-correr el instalador. Los
   espejos ausentes no fallan (condicionalidad por existencia).
 - TODA la documentacion del proceso se instala en el `docs/` de la RAIZ
-  (`SURFACE_DIR/docs`): `constitution.md` mas los tres docs del arnes
-  (`architecture.md`, `conventions.md`, `verification.md`, lista `HARNESS_DOCS` /
-  `$script:HarnessDocs`). Ninguno esta en los assets regenerables: se siembran
-  solo-si-faltan, no se respaldan y un reinstall no los pisa (solo `--force`).
+  (`SURFACE_DIR/docs`): `constitution.md` mas los docs del arnes
+  (`architecture.md`, `conventions.md`, `verification.md`,
+  `kimi-cli-uso-eficiente.md`, lista `HARNESS_DOCS` / `$script:HarnessDocs`).
+  Ninguno esta en los assets regenerables: se siembran solo-si-faltan, no se
+  respaldan y un reinstall no los pisa (solo `--force`).
   El arnes ya no crea un `docs/` propio.
+- La guia `docs/kimi-cli-uso-eficiente.md` (feature #11) es un `HARNESS_DOCS`
+  mas (mismo ciclo: backup en `--reset`, refresh con reinstall o `--force`) y
+  las superficies generadas (`write_agent_surface` sh, `Write-AgentSurface`
+  ps1) la enlazan en su lista de archivos principales; el `AGENTS.md` raiz de
+  este repo la enlaza a mano (dogfooding).
+- Dotfiles de contexto para agentes: `.kimiignore` (exclusiones de contexto,
+  espejo de `.gitignore`) y `.kimirules` (reglas fijas del proyecto), listas
+  `KIMI_DOTFILES` / `$script:KimiDotfiles`. Documentos del USUARIO en la RAIZ:
+  se siembran solo-si-faltan, ni `--force` los pisa y NO entran en los reset
+  targets (mismo criterio que `PRD_DOCS`).
 - Planillas maestras del proyecto: `docs/prd/PRD-master.md` y
   `docs/prd/SDD-master.md` (listas `PRD_DOCS` / `$script:PrdDocs`) se siembran en
   `SURFACE_DIR/docs/prd` solo-si-faltan. Son documentos del USUARIO: ni `--force`
@@ -154,8 +165,9 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
 - Migracion: `migrate_harness_docs()` (sh) / `Move-HarnessDocsToRoot` (ps1)
   mueven los docs que quedaron en `<harness>/docs/` de instalaciones previas,
   solo cuando faltan en la raiz; si ya existen, avisan y no pisan nada.
-- `--reset` borra los tres docs generados en ambas ubicaciones (nueva y vieja) y
-  conserva la constitution y los artefactos de feature.
+- `--reset` borra los docs generados del arnes en ambas ubicaciones (nueva y
+  vieja) y conserva la constitution, los dotfiles Kimi y los artefactos de
+  feature.
 
 ## Memory Hub
 

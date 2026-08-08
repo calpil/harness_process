@@ -128,9 +128,14 @@ exit 0
     Assert-True ($implementerText -match 'approve-spec --yes') "Seeded implementer role does not describe the approval ritual."
 
     # Feature #4 / AC-2: en layout root los tres docs del arnes se siembran en el
-    # docs/ de la RAIZ (que aqui es el propio fixture).
-    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md")) {
+    # docs/ de la RAIZ (que aqui es el propio fixture). Feature #11: + la guia.
+    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc")) "Harness doc $harnessDoc was not seeded into the root docs/."
+    }
+    # Feature #11 (companion KimiDotfiles): .kimiignore/.kimirules se siembran en
+    # la RAIZ (paridad con KIMI_DOTFILES del smoke sh).
+    foreach ($kimiDotfile in @(".kimiignore", ".kimirules")) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $fixture $kimiDotfile)) "Kimi dotfile $kimiDotfile was not seeded into the project root."
     }
     # Feature #5 / AC-2: las planillas maestras PRD y SDD se siembran en docs/prd/.
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md")) "PRD-master.md was not seeded into docs/prd/."
@@ -142,6 +147,11 @@ exit 0
     $sddText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md") -Raw
     Assert-True ($sddText -match '## 4\. Decisiones tecnicas') "SDD-master.md is missing the technical decisions section."
     Assert-True ($sddText -match 'docs/architecture\.md') "SDD-master.md does not distinguish itself from docs/architecture.md."
+
+    # Feature #11 / AC-4: la superficie que genera el ps1 referencia la guia de
+    # uso eficiente de Kimi CLI (paridad con el grep del smoke sh).
+    $agentsText = Get-Content -LiteralPath (Join-Path $fixture "AGENTS.md") -Raw
+    Assert-True ($agentsText -match 'kimi-cli-uso-eficiente') "Seeded AGENTS.md does not reference the efficient Kimi CLI usage guide."
 
     # Feature #4 / AC-4 (reinstall): comparten carpeta con la documentacion del
     # equipo, asi que se siembran solo-si-faltan y un reinstall NO los pisa.
@@ -167,8 +177,13 @@ exit 0
     foreach ($artifact in @("spec-feature-1-demo.md", "plan-feature-1-demo.md")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/$artifact")) "Reset removed the feature artifact $artifact."
     }
-    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md")) {
+    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md")) {
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc"))) "Reset did not clean the generated doc $harnessDoc."
+    }
+    # Feature #11 (companion KimiDotfiles): los dotfiles son documentos del
+    # USUARIO y sobreviven al reset (mismo criterio que PRD/SDD).
+    foreach ($kimiDotfile in @(".kimiignore", ".kimirules")) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $fixture $kimiDotfile)) "Reset removed the user's $kimiDotfile."
     }
     # Feature #5 / AC-4: las planillas maestras NO son superficie generada y
     # sobreviven al reset con el contenido que escribio el usuario.
@@ -199,6 +214,12 @@ exit 0
     Assert-True (Test-Path -LiteralPath (Join-Path $subdirRoot "docs/prd/PRD-master.md")) "PRD-master.md was not seeded into the multi-repo root docs/prd/."
     Assert-True (Test-Path -LiteralPath (Join-Path $subdirRoot "docs/prd/SDD-master.md")) "SDD-master.md was not seeded into the multi-repo root docs/prd/."
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $subdirHarness "docs/prd"))) "docs/prd/ was created inside the harness subfolder."
+    # Feature #11 (companion KimiDotfiles): los dotfiles se siembran en la RAIZ
+    # multi-repo, no en la subcarpeta del arnes.
+    foreach ($kimiDotfile in @(".kimiignore", ".kimirules")) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $subdirRoot $kimiDotfile)) "Kimi dotfile $kimiDotfile was not seeded into the multi-repo root."
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $subdirHarness $kimiDotfile))) "Kimi dotfile $kimiDotfile was created inside the harness subfolder."
+    }
     # AC-3: se movio el contenido viejo (no se regenero desde la plantilla).
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/architecture.md") -Raw).Trim() -eq "VIEJO-ARCHITECTURE") "architecture.md was not migrated with its content."
     Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/verification.md") -Raw).Trim() -eq "VIEJO-VERIFICATION") "verification.md was not migrated with its content."
@@ -546,7 +567,7 @@ command = "echo hook-del-usuario"
         $env:KIMI_CODE_HOME = $oldKimiHomeEnv
     }
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), and Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global)."
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite; incl. efficient Kimi CLI usage guide linked from the surface), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), and Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global)."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

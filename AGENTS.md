@@ -46,6 +46,9 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
 - `docs/conventions.md` (RAIZ): convenciones del equipo.
 - `docs/verification.md` (RAIZ): comandos de validacion.
+- `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
+  CLI (exclusiones de contexto, `.kimirules`, acotamiento por archivo, `/new`
+  entre tareas).
 - `.claude/agents/leader.md`: rol lider.
 - `.claude/agents/implementer.md`: rol implementador.
 - `.claude/agents/reviewer.md`: rol revisor.

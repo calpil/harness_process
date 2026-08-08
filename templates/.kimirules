@@ -1,0 +1,32 @@
+# .kimirules — reglas fijas del proyecto (plantilla del arnes)
+#
+# QUE ES: contexto estatico que no cambia entre comandos (dominio, moneda,
+# identificadores, invariantes de negocio). Se escribe UNA vez y aplica a
+# todas las sesiones.
+#
+# OJO: Kimi Code CLI no lee este archivo por si solo; el AGENTS.md de la raiz
+# (que SI se lee automaticamente en cada sesion) apunta aqui. Otros agentes
+# lo descubren por la misma via.
+#
+# COMO COMPLETARLO:
+# 1. Reemplaza el bloque marcado abajo con el contexto fijo de TU proyecto
+#    (sacalo de tu reunion/PRD una sola vez) y borra este encabezado: cada
+#    linea que quede se envia como contexto en cada sesion.
+# 2. Mecanica de comandos eficiente (poco texto, maxima precision):
+#    - Acotamiento por archivo: pasa la ruta exacta y el cambio concreto.
+#      Ineficiente: "haz la base de datos de usuarios con los roles de la reunion"
+#      Eficiente:   "Genera la migracion database/migrations/create_users_table.php
+#                    con el enum de roles broker/owner/tenant y el campo rut unico"
+#    - Boton de reinicio: cuando una tarea queda lista, ejecuta /new (alias
+#      /clear) antes de la siguiente; el historial viejo se reenvia en cada
+#      comando y multiplica tokens.
+#
+# EJEMPLO de reglas fijas (borrar al completar):
+#   - Moneda: pesos chilenos (CLP), montos enteros sin decimales.
+#   - RUT: identificador tributario unico por persona/empresa, con digito verificador.
+#   - Impuestos: IVA 19% y logica de facturacion del SII (Servicio de Impuestos Internos).
+
+# === REGLAS FIJAS DEL PROYECTO ===
+<<PEGA AQUI EL CONTEXTO EXACTO DE TU PROYECTO: dominio, moneda, identificadores,
+invariantes de negocio, integraciones externas y decisiones congeladas de la reunion.>>
+# === FIN REGLAS ===
