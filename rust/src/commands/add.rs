@@ -4,6 +4,7 @@ use serde_json::{Map, Value, json};
 
 use crate::features::{features_slice, load_features, save_features};
 use crate::paths::HarnessPaths;
+use crate::prd;
 use crate::progress::log;
 use crate::pycompat::py_str;
 
@@ -12,7 +13,14 @@ pub fn run(
     name: &str,
     services: &[String],
     acceptance: &[String],
+    prd_ref: Option<&str>,
 ) -> anyhow::Result<()> {
+    // El PRD se resuelve ANTES de tocar el backlog: una referencia mala no deja
+    // una feature a medio cargar.
+    let prd_slug = match prd_ref {
+        Some(reference) => Some(prd::resolve(paths, reference)?),
+        None => None,
+    };
     let mut data = load_features(paths)?;
     // Python: int(id) para los ids cuyo str() es puramente digito.
     let max_id = features_slice(&data)
@@ -40,6 +48,10 @@ pub fn run(
         Value::Array(acceptance.iter().map(|s| json!(s)).collect()),
     );
     feature.insert("status".to_string(), json!("pending"));
+    // Campo OPCIONAL: sin --prd la feature se guarda exactamente como siempre.
+    if let Some(target) = &prd_slug {
+        feature.insert("prd".to_string(), json!(target.reference()));
+    }
     // data.setdefault("features", []).append(feature)
     let Some(obj) = data.as_object_mut() else {
         anyhow::bail!("feature_list.json: raiz no es un objeto");
@@ -52,5 +64,8 @@ pub fn run(
     save_features(paths, &data)?;
     log(paths, &format!("add feature #{fid} {name}"))?;
     println!("Feature #{fid} agregada.");
+    if let Some(target) = &prd_slug {
+        println!("  PRD de origen: {}", prd::rel_path(&target.slug));
+    }
     Ok(())
 }

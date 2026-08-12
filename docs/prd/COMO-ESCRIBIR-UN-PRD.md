@@ -68,6 +68,45 @@ PRD  el producto nuevo completo
       `-- PRD  ...
 ```
 
+En este arnes eso no es una metafora: el arbol vive en carpetas, y hay comandos
+que lo crean, lo dibujan y lo validan.
+
+**Partir un PRD en dos:**
+
+```
+sh harness_cli prd add --name cobranza                  # hijo del maestro
+sh harness_cli prd add --name mora --parent cobranza    # nieto
+```
+
+Cada PRD hijo nace con las mismas 12 secciones del metodo, declarando su
+`Padre:`, y queda enlazado en la seccion `## PRDs anidados` de su padre. En
+disco, la carpeta lleva el segmento propio y el archivo la cadena completa (asi
+el nombre es unico en todo el repo y se puede grepear sin ambiguedad):
+
+```
+docs/prd/
+  PRD-master.md                        el producto entero
+  cobranza/
+    PRD-cobranza.md                    una parte          (Padre: master)
+    mora/
+      PRD-cobranza-mora.md             una pieza de esa parte (Padre: cobranza)
+```
+
+**Ver el arbol** — con los hitos que declara cada PRD y como van sus features:
+
+```
+$ sh harness_cli prd tree
+PRD-master                  2 hitos | features: 1/2 done
+ `-- PRD-cobranza           [!] sin hitos
+     `-- PRD-cobranza-mora  1 hito | features: 1/1 done
+```
+
+Los PRDs son **documentos tuyos**: el arnes los crea una vez y despues solo
+vuelve a tocarlos para marcar un hito cerrado (ver el paso 5). Si moves o
+renombras un archivo a mano y el arbol queda incoherente, `harness_check.sh` te
+avisa: PRD fuera de lugar, carpeta sin PRD, encabezado `Padre:` que no coincide
+con su ubicacion, o una feature que apunta a un PRD que no existe.
+
 ## 4. Anatomia: las partes de un PRD
 
 Las secciones, en el orden en que aparecen. El ejemplo — una llamada de
@@ -155,26 +194,40 @@ El metodo esta anidado en las plantillas que ya usas:
 | Nivel | Archivo | Que cuenta |
 | --- | --- | --- |
 | Producto | `docs/prd/PRD-master.md` | la historia del producto, objetivos O-n, los datos y el acuerdo a nivel producto, y los hitos |
+| Parte | `docs/prd/<parte>/PRD-<cadena>.md` | **un PRD anidado**: una parte del producto con su propia historia, sus datos y sus hitos (lo crea `prd add`) |
 | Como tecnico | `docs/prd/SDD-master.md` | arquitectura objetivo y decisiones que ninguna feature re-litiga |
-| Cambio | `docs/spec-feature-<id>-<slug>.md` | **el PRD anidado de cada cambio**: su historia, su hoy->despues, sus datos, su pseudo-codigo y sus AC-n |
+| Cambio | `docs/spec-feature-<id>-<slug>.md` | **el PRD del cambio**: su historia, su hoy->despues, sus datos, su pseudo-codigo y sus AC-n |
 
 La cadena completa:
 
 ```
-docs/prd/PRD-master.md          (hitos priorizados)
-        |  sh harness_cli add --name <slug> --service <svc> --acceptance "<criterio>"
+docs/prd/PRD-master.md          (el producto entero)
+        |  sh harness_cli prd add --name <parte> [--parent <ruta>]
         v
-feature_list.json               (backlog ejecutable)
+docs/prd/<parte>/PRD-<cadena>.md   (hitos priorizados de esa parte)
+        |  sh harness_cli add --name <slug> --service <svc> --acceptance "<criterio>" --prd <ruta>
+        v
+feature_list.json               (backlog ejecutable, con su PRD de origen)
         |  sh harness_cli start --feature <id>
         v
-docs/spec-feature-<id>-<slug>.md   <- el PRD del cambio, ya con las secciones del metodo
+docs/spec-feature-<id>-<slug>.md   <- el PRD del cambio; su encabezado cita el PRD del que salio
         |  lo aprueba el USUARIO (Estado: approved)
         v
 implementacion -> docs/impl-<id>.md -> docs/review-<id>.md
+        |  sh harness_cli close --feature <id> --status done
+        v
+el PRD de origen queda marcado: el hito pasa a `done (fecha)` y su `## Bitacora`
+guarda el rastro (feature, spec, impl)
 ```
 
-El pseudo-codigo vinculante de cada cambio vive en su spec, no en el maestro:
-asi el PRD del producto no se desactualiza feature tras feature.
+Una feature sin `--prd` cuenta para el maestro: la cadena nunca queda huerfana.
+
+**Que se actualiza solo y que no.** Al cerrar, el arnes marca el hito y deja
+bitacora — nada mas. El **cuerpo** del PRD (la historia, los datos, el
+pseudo-codigo) no lo reescribe nadie: si lo que quedo implementado difiere de lo
+que promete el documento, actualizalo vos. El pseudo-codigo vinculante de cada
+cambio vive en su spec, no en el maestro, y por eso el PRD del producto no se
+desactualiza feature tras feature.
 
 ## 6. Ahora te toca
 

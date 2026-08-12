@@ -87,6 +87,15 @@ pub enum Command {
         service: Vec<String>,
         #[arg(long = "acceptance")]
         acceptance: Vec<String>,
+        /// PRD del que sale este hito (ruta `cobranza/mora`, ultimo segmento si
+        /// es unico, o `master`). Sin el, la feature cuenta para el maestro.
+        #[arg(long)]
+        prd: Option<String>,
+    },
+    /// PRDs anidados: el arbol de producto de docs/prd/
+    Prd {
+        #[command(subcommand)]
+        command: PrdCommand,
     },
     /// Memory Hub PostgreSQL (port de graph_memory.py)
     Graph {
@@ -102,6 +111,24 @@ pub enum Command {
         stale: PathBuf,
         #[arg(long)]
         lock: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PrdCommand {
+    /// Crea un PRD hijo desde plantilla y lo enlaza en su padre
+    Add {
+        #[arg(long)]
+        name: String,
+        /// PRD padre (`master` por defecto)
+        #[arg(long)]
+        parent: Option<String>,
+    },
+    /// Dibuja el arbol con hitos y estado de features
+    Tree {
+        /// Subarbol a dibujar (`master` por defecto)
+        #[arg(long)]
+        prd: Option<String>,
     },
 }
 
@@ -192,7 +219,22 @@ pub fn run() -> anyhow::Result<()> {
             name,
             service,
             acceptance,
-        } => commands::add::run(&HarnessPaths::resolve()?, &name, &service, &acceptance),
+            prd,
+        } => commands::add::run(
+            &HarnessPaths::resolve()?,
+            &name,
+            &service,
+            &acceptance,
+            prd.as_deref(),
+        ),
+        Command::Prd { command } => match command {
+            PrdCommand::Add { name, parent } => {
+                commands::prd::add(&HarnessPaths::resolve()?, &name, parent.as_deref())
+            }
+            PrdCommand::Tree { prd } => {
+                commands::prd::tree(&HarnessPaths::resolve()?, prd.as_deref())
+            }
+        },
         Command::Graph { command } => graph::run(command),
         Command::GraphifyWorker { root, stale, lock } => graphify::worker(&root, &stale, &lock),
     }

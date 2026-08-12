@@ -48,7 +48,20 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
 - `plan.rs`: plantilla y firma del plan (`plan_signature` = dict
   path/mtime/size/hash), `is_plan_stale`, `plan_staleness_message`, `write_plan`,
   `update_plan_sig`.
-- `spec.rs`: gemelo de `plan.rs` para el spec (ver seccion SDD).
+- `spec.rs`: gemelo de `plan.rs` para el spec (ver seccion SDD). Su encabezado
+  incluye `PRD: <ruta>`, derivado del campo `prd` de la feature (o el maestro).
+- `prd.rs`: el arbol de PRDs anidados. La identidad de un PRD es su cadena de
+  segmentos (`cobranza/mora`), y de ella salen carpeta y archivo sin registro
+  intermedio: el FILESYSTEM es la fuente de verdad y el `Padre:` del encabezado
+  es una declaracion contrastable. Expone `scan` (walk acotado a `docs/prd/`,
+  ignora lo que esta fuera de lugar), `resolve` (ruta completa, `master`, o
+  ultimo segmento si es unico; ambiguo/inexistente => `Exit` con candidatos),
+  `child_template` (12 secciones), `link_child` (seccion `## PRDs anidados` del
+  padre: la crea al final si falta, agrega fila, nunca duplica),
+  `milestone_rows` / `milestone_count` (ignora encabezado, separador y el
+  ejemplo `<...>` de la plantilla), `echo_close` (marca el hito y deja
+  `## Bitacora`; idempotente, conserva la fecha del primer cierre) y
+  `render_tree`.
 - `progress.rs`: `current.md` / `history.md` (estado vivo y bitacora).
 - `memories.rs`, `graphify.rs`, `graph/` (`commands`, `derive`, `ids`, `store`,
   `tls`): Memory Hub y su integracion con graphify.
@@ -56,8 +69,10 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
 
 ### Comandos (`rust/src/commands/`)
 
-`add`, `next`, `start`, `status`, `advance`, `close`, `autocheck`, `nudge`,
-`check_plan`, `check_spec`. Los gates duros viven en `advance`, `close`
+`add` (con `--prd <ref>` opcional), `next`, `start`, `status`, `advance`,
+`close` (que ademas devuelve el cierre al PRD de origen, best-effort: un PRD
+ausente NUNCA impide cerrar), `autocheck`, `nudge`, `check_plan`, `check_spec`,
+`prd` (`add` / `tree`). Los gates duros viven en `advance`, `close`
 (solo `--status done`), `check_spec` y `harness_check.sh`; `autocheck` y `nudge`
 son best-effort y NUNCA bloquean (tragan errores y re-firman en segundo plano).
 
@@ -81,6 +96,14 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
    tabla "Hitos -> features" del PRD se carga al backlog con `harness_cli add`.
    Paso opcional: ningun gate lo exige, y las planillas no las genera ni vigila
    el binario, solo las siembra el instalador.
+0b. (Producto grande) `harness_cli prd add --name <parte> [--parent <ruta>]`
+   parte el PRD en PRDs ANIDADOS: carpetas reales bajo `docs/prd/`, con la
+   carpeta llevando el segmento propio y el archivo la cadena completa
+   (`docs/prd/cobranza/mora/PRD-cobranza-mora.md`). El hijo nace con las 12
+   secciones del metodo y su `Padre:`, y queda enlazado en la seccion
+   `## PRDs anidados` del padre. `prd tree` dibuja el arbol con hitos y estado
+   de features; `harness_check.sh` valida su integridad. Detalle en el modulo
+   `prd.rs` mas abajo.
 1. `harness_cli start --feature <id>` siembra SIEMPRE (aunque la regla este
    apagada) `docs/spec-feature-<id>-<slug>.md` con `Estado: draft` ademas del
    plan, y firma ambos (`last_spec_sig` reusa `plan::plan_signature`).
@@ -163,7 +186,9 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   `docs/prd/SDD-master.md` (listas `PRD_DOCS` / `$script:PrdDocs`) se siembran en
   `SURFACE_DIR/docs/prd` solo-si-faltan. Son documentos del USUARIO: ni `--force`
   las pisa y NO figuran en los reset targets, a diferencia de `HARNESS_DOCS`, que
-  son plantillas regenerables del arnes.
+  son plantillas regenerables del arnes. Los PRDs anidados que crea
+  `harness_cli prd add` heredan ese regimen: el instalador no los conoce y nadie
+  los pisa.
 - Guia del metodo: `docs/prd/COMO-ESCRIBIR-UN-PRD.md` es la excepcion en esa
   carpeta: entra en `HARNESS_DOCS` / `$script:HarnessDocs` con la ruta
   `prd/COMO-ESCRIBIR-UN-PRD.md` (primer elemento con subdirectorio; la siembra,

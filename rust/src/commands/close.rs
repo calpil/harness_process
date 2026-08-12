@@ -8,9 +8,10 @@ use crate::features::{feature_at, feature_mut, find_feature_index, load_features
 use crate::memories::update_memories;
 use crate::paths::HarnessPaths;
 use crate::plan::{plan_path, slugify};
+use crate::prd;
 use crate::progress::{log, now_stamp};
 use crate::pycompat::{py_str, relpath};
-use crate::spec::{close_requires_spec, spec_gate};
+use crate::spec::{close_requires_spec, spec_gate, spec_path};
 
 pub fn run(
     paths: &HarnessPaths,
@@ -51,6 +52,14 @@ pub fn run(
         )
     };
     save_features(paths, &data)?;
+    // Vuelta al PRD: cerrar como done marca el hito y deja bitacora en el PRD de
+    // origen. Nunca reescribe el cuerpo del documento (es del USUARIO) y nunca
+    // bloquea el cierre: si el PRD no esta, avisa y sigue.
+    if status == "done"
+        && let Some(feature) = feature_at(&data, idx).as_object()
+    {
+        echo_to_prd(paths, feature, &stamp);
+    }
     if plan.exists() {
         let mut f = std::fs::OpenOptions::new().append(true).open(&plan)?;
         write!(f, "\n---\nCerrado: {stamp} - status={status} - {note_text}\n")?;
@@ -108,4 +117,38 @@ pub fn run(
     }
     println!("{msg}");
     Ok(())
+}
+
+/// Marca el hito y deja bitacora en el PRD de origen de la feature. Best-effort
+/// por diseno: un PRD ausente o ilegible NO puede impedir cerrar una feature.
+fn echo_to_prd(paths: &HarnessPaths, feature: &serde_json::Map<String, Value>, stamp: &str) {
+    let slug = prd::normalize_parent(feature.get("prd").and_then(Value::as_str));
+    let file = prd::file_for(paths, &prd::segments(&slug));
+    let rel = prd::rel_path(&slug);
+    if !file.is_file() {
+        println!("[i] Sin vuelta al PRD: falta {rel}.");
+        return;
+    }
+    let fid = py_str(feature.get("id"));
+    let name = feature
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let date = stamp.get(..10).unwrap_or(stamp);
+    let spec_rel = relpath(&spec_path(paths, feature), &paths.repo_root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let impl_rel = format!("docs/impl-{fid}.md");
+    match prd::echo_close(&file, &fid, name, date, &spec_rel, &impl_rel) {
+        Ok(echo) if echo.milestone_marked || echo.logged => {
+            let what = if echo.milestone_marked {
+                "hito marcado done + bitacora"
+            } else {
+                "bitacora"
+            };
+            println!("PRD actualizado ({what}): {rel}");
+        }
+        Ok(_) => println!("[i] El PRD {rel} ya tenia registrada esta feature."),
+        Err(err) => println!("[i] No se pudo actualizar {rel}: {err}"),
+    }
 }

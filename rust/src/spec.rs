@@ -37,6 +37,9 @@ pub fn spec_template(feature: &Map<String, Value>) -> String {
         String::new(),
         "Estado: draft".to_string(),
         format!("Plan: docs/plan-feature-{id}-{}.md", slugify(name)),
+        // PRD de origen: el que declaro `add --prd`, o el maestro (las features
+        // sin PRD explicito cuentan para el producto entero).
+        format!("PRD: {}", crate::prd::feature_prd_rel(feature)),
         "Constitution: docs/constitution.md".to_string(),
         "Metodo: docs/prd/COMO-ESCRIBIR-UN-PRD.md (este spec es el PRD del cambio)".to_string(),
     ];
@@ -347,7 +350,7 @@ mod tests {
         let f = feature(3, "Pago QR");
         let t = spec_template(&f);
         assert!(t.starts_with(
-            "# Spec - Feature #3: Pago QR\n\nEstado: draft\nPlan: docs/plan-feature-3-pago-qr.md\nConstitution: docs/constitution.md\n"
+            "# Spec - Feature #3: Pago QR\n\nEstado: draft\nPlan: docs/plan-feature-3-pago-qr.md\nPRD: docs/prd/PRD-master.md\nConstitution: docs/constitution.md\n"
         ));
         // `Estado:` sigue en la linea 3: spec_state solo mira las primeras diez.
         assert_eq!(t.lines().nth(2), Some("Estado: draft"));

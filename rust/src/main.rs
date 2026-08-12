@@ -11,6 +11,7 @@ mod graphify;
 mod memories;
 mod paths;
 mod plan;
+mod prd;
 mod progress;
 mod pycompat;
 mod spec;

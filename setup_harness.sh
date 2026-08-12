@@ -959,6 +959,13 @@ Archivos principales:
   antes/despues, objetivos O-n/NO-n, los datos, el acuerdo en pseudo-codigo,
   metricas e hitos); sus hitos alimentan `feature_list.json`. Para proyectos que
   arrancan de cero, se completa antes de la primera feature.
+- `docs/prd/<parte>/PRD-<cadena>.md` (RAIZ): PRDs anidados, el arbol de producto.
+  Se crean con `sh harness_cli prd add --name <parte> [--parent <ruta>]` (nacen
+  con las 12 secciones y quedan enlazados en su padre) y se ven con
+  `sh harness_cli prd tree`. Cada hito se carga con
+  `harness_cli add ... --prd <ruta>`: el spec de esa feature cita su PRD, y al
+  cerrarla (`close --status done`) el arnes marca el hito y deja bitacora ahi.
+  El cuerpo del PRD no lo reescribe nadie: es del USUARIO.
 - `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
   proyecto (distinta de `docs/architecture.md`, que mapea lo que YA existe).
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.

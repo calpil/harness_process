@@ -190,6 +190,62 @@ reinstall. Para refrescar una plantilla: borra el archivo y reinstala, o usa
 nueva y en la vieja— y conserva la constitution y los artefactos de feature
 (`spec-*`, `plan-*`, `impl-*`, `review-*`).
 
+## PRDs anidados: el árbol de producto (`prd add` / `prd tree`)
+
+Desde esta versión la promesa de "un PRD puede contener otros PRDs" dejó de ser
+sólo prosa de la guía: el árbol es real y el arnés lo crea, lo dibuja y lo
+valida.
+
+**Layout.** La identidad de un PRD es su **cadena de segmentos**. La carpeta
+lleva el segmento propio y el archivo la cadena completa, así cada nombre de
+archivo es único en todo el repo:
+
+```
+docs/prd/
+  PRD-master.md                        el producto entero
+  cobranza/
+    PRD-cobranza.md                    Padre: master
+    mora/
+      PRD-cobranza-mora.md             Padre: cobranza
+```
+
+**Comandos nuevos:**
+
+- `sh harness_cli prd add --name <parte> [--parent <ruta>]` crea el PRD hijo con
+  las mismas 12 secciones del método y su `Padre:` declarado, y lo enlaza en la
+  sección `## PRDs anidados` del padre (la crea al final si falta; nunca
+  duplica una fila ni reordena el documento). Se niega si el padre no existe
+  (listando los PRDs disponibles), si el destino ya existe o si el nombre no
+  deja ningún carácter utilizable.
+- `sh harness_cli prd tree [--prd <ref>]` dibuja el árbol con los hitos que
+  declara cada PRD y cuántas de sus features están `done`.
+- `sh harness_cli add ... --prd <ref>` guarda el PRD de origen en la feature.
+  `<ref>` acepta la ruta completa (`cobranza/mora`), `master`, o el último
+  segmento si es único en el árbol (`mora`); ambigua o inexistente falla con
+  exit 1 y lista los candidatos.
+
+**La cadena, ahora en los dos sentidos.** El spec que genera `start` cita su PRD
+de origen en el encabezado (`PRD: docs/prd/...`; sin `--prd`, el maestro), y al
+cerrar la feature con `close --status done` el arnés **vuelve al PRD**: marca la
+fila del hito (`Estado` → `done (YYYY-MM-DD)`) y agrega una línea a su
+`## Bitacora` con la feature, su spec y su `docs/impl-<id>.md`. Es idempotente
+(re-cerrar no duplica ni reescribe la fecha del primer cierre) y **best-effort**:
+un PRD ausente o ilegible avisa con `[i]` y jamás impide cerrar.
+
+El **cuerpo** del PRD (historia, datos, pseudo-código) no lo reescribe nadie: si
+lo implementado difiere de lo que promete el documento, actualizarlo es tuyo.
+
+**Gate en `harness_check.sh`.** Si existe `docs/prd/`, el check valida el árbol:
+un `PRD-*.md` fuera de lugar, una carpeta sin su PRD, un encabezado `Padre:` que
+no coincide con la ubicación real o una feature que apunta a un PRD inexistente
+**suman fallo** (exit 2 en modo `block`); un PRD sin hitos sólo avisa con `[i]`.
+Sin `docs/prd/` el bloque entero se omite.
+
+**Compatibilidad.** El campo `prd` de `feature_list.json` es **opcional**: las
+features que ya tenías siguen válidas y cuentan para el maestro. Los PRDs
+anidados heredan el régimen de las planillas maestras: son documentos del
+USUARIO, ningún reinstall ni `--force` los pisa y `--reset` no los borra.
+
 ## Planillas maestras PRD y SDD (`docs/prd/`)
 
 Desde esta versión el instalador siembra dos planillas para proyectos que
@@ -209,7 +265,9 @@ arrancan de cero, en el `docs/prd/` de la **raíz del proyecto**:
   dibujado dos veces (hoy → cómo va a funcionar), **los datos** (disparador,
   interruptor, candado) y el **pseudo-código del acuerdo** a nivel producto,
   restricciones, tabla **Hitos → features** (cada fila se carga al backlog con
-  `harness_cli add`), riesgos y decisiones abiertas.
+  `harness_cli add`), riesgos y decisiones abiertas, más las secciones
+  `## PRDs anidados` (donde `prd add` engancha a los hijos) y `## Bitacora`
+  (donde `close` deja el rastro de cada hito cerrado).
 - `docs/prd/SDD-master.md` — cómo se construye, a nivel proyecto: arquitectura
   objetivo, stack, contratos entre componentes, decisiones técnicas tipo ADR,
   datos, no funcionales, estrategia de verificación, riesgos y decisiones

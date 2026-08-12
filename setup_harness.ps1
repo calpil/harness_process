@@ -666,6 +666,14 @@ the size the change decides, nested PRDs, and the hard rule: pseudo-code and
 explanations, never final code). Each `docs/spec-feature-<id>-<slug>.md` is the
 PRD of that change and already ships those sections.
 
+Nested PRDs are real folders under `docs/prd/`: create one with
+`... harness_cli.ps1 prd add --name <part> [--parent <path>]` (it ships the 12
+sections and links itself into its parent), draw the tree with
+`... harness_cli.ps1 prd tree`, and load each milestone with
+`... harness_cli.ps1 add ... --prd <path>` so the spec cites its source PRD.
+Closing the feature as done marks that milestone and logs it in the PRD; the
+body of the PRD is never rewritten by the harness.
+
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;
 Git for Windows Bash remains required by the existing POSIX project hooks.

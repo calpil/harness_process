@@ -244,6 +244,14 @@ grep -q '^## 2. La historia' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 grep -q '^## 8. Pseudo-codigo (el acuerdo)' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 grep -q '^## 10. Hitos -> features' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 grep -q 'harness_cli add' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+# Feature #13 / AC-11: el maestro declara donde se cuelgan los hijos y la bitacora.
+grep -q '^## PRDs anidados' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+grep -q '^## Bitacora' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+grep -q -- '--prd <ruta>' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+# Feature #13 / AC-10: la guia documenta los comandos reales del arbol.
+grep -q 'prd add --name cobranza' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
+grep -q 'harness_cli prd tree' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
+grep -q 'PRD-cobranza-mora.md' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
 grep -q '^## 4. Decisiones tecnicas' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'docs/architecture.md' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
@@ -254,6 +262,11 @@ grep -q 'kimi-cli-uso-eficiente' "$SUBDIR_ROOT/AGENTS.md" \
 # Feature #12 / AC-8: la superficie instalada enlaza el metodo para escribir PRDs.
 grep -q 'COMO-ESCRIBIR-UN-PRD' "$SUBDIR_ROOT/AGENTS.md" \
     || { echo "[FALLO] AGENTS.md instalado no enlaza docs/prd/COMO-ESCRIBIR-UN-PRD.md"; exit 1; }
+# Feature #13 / AC-12: y describe el arbol de PRDs anidados con sus comandos.
+grep -q 'prd add --name' "$SUBDIR_ROOT/AGENTS.md" \
+    || { echo "[FALLO] AGENTS.md instalado no describe los comandos de PRDs anidados"; exit 1; }
+grep -q 'prd tree' "$SUBDIR_ROOT/AGENTS.md" \
+    || { echo "[FALLO] AGENTS.md instalado no menciona 'prd tree'"; exit 1; }
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
 mkdir -p "$SUBDIR_ROOT/service"
 codex_start="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$SUBDIR_ROOT/.codex/hooks.json")"
@@ -417,6 +430,125 @@ rc=0; spec_cli check-spec >/dev/null 2>&1 || rc=$?
 test "$rc" -eq 0 || { echo "[!] check-spec debio dar rc=0 con spec aprobado (rc=$rc)." >&2; exit 1; }
 echo "[Ok] gate de spec (SDD): draft bloquea advance/check-spec; aprobado abre; constitution sembrada + no-pisa."
 echo "[Ok] approve-spec: exige --yes, sella la aprobacion del usuario, re-firma (check-spec limpio) y es idempotente."
+
+# --- E2E Feature #13: PRDs anidados (arbol, cadena y gate) -----------------
+# Fixture root-layout dedicado: el arbol se crea, se encadena hasta el spec, se
+# devuelve al PRD en el cierre y se rompe a proposito para ver el gate.
+PRD_E2E="$TMP_ROOT/prd-e2e"
+copy_fixture "$PRD_E2E"
+run_setup "$PRD_E2E" --root
+
+prd_cli() {
+    HOME="$TMP_ROOT/home" \
+    HARNESS_HUB="$PRD_E2E/.test-hub" \
+    HARNESS_REPO_ROOT="$PRD_E2E" \
+    DB_HOST=127.0.0.1 \
+    DB_PORT=9 \
+    DB_USER=harness \
+    DB_PASSWORD=secret \
+    DB_NAME=harness \
+    DB_SSL_MODE=disable \
+    sh "$PRD_E2E/harness_cli" "$@"
+}
+prd_check() {
+    (
+        cd "$PRD_E2E"
+        env -u CLAUDE_PROJECT_DIR -u CODEX_PROJECT_DIR -u GEMINI_PROJECT_DIR \
+            -u GROK_PROJECT_DIR -u ANTIGRAVITY_PROJECT_DIR \
+            HOME="$TMP_ROOT/home" \
+            HARNESS_HUB="$PRD_E2E/.test-hub" \
+            HARNESS_REPO_ROOT="$PRD_E2E" \
+            bash harness_check.sh < /dev/null
+    )
+}
+
+# AC-1: dos niveles reales de carpetas; la carpeta lleva el segmento propio y el
+# archivo la cadena completa.
+prd_cli prd add --name cobranza >/dev/null 2>&1
+prd_cli prd add --name mora --parent cobranza >/dev/null 2>&1
+test -f "$PRD_E2E/docs/prd/cobranza/PRD-cobranza.md" \
+    || { echo "[!] prd add no creo docs/prd/cobranza/PRD-cobranza.md" >&2; exit 1; }
+test -f "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md" \
+    || { echo "[!] prd add no anido docs/prd/cobranza/mora/PRD-cobranza-mora.md" >&2; exit 1; }
+# AC-3: el hijo nace con el metodo puesto y su padre declarado.
+grep -q '^Padre: cobranza' "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md"
+grep -q '^## 10. Hitos -> features' "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md"
+grep -q '^## 2. La historia' "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md"
+# AC-4: el padre queda enlazado, sin duplicar al repetir el comando.
+grep -q '| cobranza | \[cobranza/PRD-cobranza.md\]' "$PRD_E2E/docs/prd/PRD-master.md" \
+    || { echo "[!] el maestro no enlaza al PRD hijo." >&2; exit 1; }
+prd_cli prd add --name cobranza >/dev/null 2>&1 && \
+    { echo "[!] prd add debio negarse a pisar un PRD existente." >&2; exit 1; }
+test "$(grep -c '| cobranza | \[cobranza/PRD-cobranza.md\]' "$PRD_E2E/docs/prd/PRD-master.md")" -eq 1
+
+# AC-5 + AC-6: la cadena PRD hoja -> feature -> spec, con --prd por segmento unico.
+python3 - "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace(
+    "| 1 | <hito> | <slug_snake_case> | <O1> | <que tiene que ser cierto> | pendiente |",
+    "| 1 | Avisar la mora | avisar_mora | O1 | llega el aviso | pendiente |")
+open(p, "w").write(s)
+PYEOF
+prd_cli add --name avisar_mora --service cobranza --acceptance "llega el aviso" --prd mora >/dev/null 2>&1
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["features"][0].get("prd") == "cobranza/mora" else 1)' \
+    "$PRD_E2E/feature_list.json" \
+    || { echo "[!] add --prd no guardo la ruta canonica en feature_list.json" >&2; exit 1; }
+rc=0; prd_cli add --name x --service y --acceptance "z" --prd noexiste >/dev/null 2>&1 || rc=$?
+test "$rc" -ne 0 || { echo "[!] add --prd debio fallar con un PRD inexistente." >&2; exit 1; }
+prd_cli start --feature 1 >/dev/null 2>&1
+grep -q '^PRD: docs/prd/cobranza/mora/PRD-cobranza-mora.md' "$PRD_E2E/docs/spec-feature-1-avisar-mora.md" \
+    || { echo "[!] el spec no cita su PRD de origen en el encabezado." >&2; exit 1; }
+
+# AC-7: el arbol se dibuja con los dos niveles, sus hitos y sus features.
+prd_cli prd tree > "$TMP_ROOT/prd-tree.log" 2>&1
+grep -q '^PRD-master' "$TMP_ROOT/prd-tree.log"
+grep -q 'PRD-cobranza-mora' "$TMP_ROOT/prd-tree.log"
+grep -q '1 hito | features: 0/1 done' "$TMP_ROOT/prd-tree.log" \
+    || { echo "[!] prd tree no conto hitos/features del PRD hoja:" >&2; cat "$TMP_ROOT/prd-tree.log" >&2; exit 1; }
+
+# AC-17: cerrar como done vuelve al PRD (hito marcado + bitacora), idempotente.
+prd_cli approve-spec --feature 1 --yes >/dev/null 2>&1
+prd_cli close --feature 1 --status done >/dev/null 2>&1
+grep -qE '^\| 1 \| Avisar la mora \| avisar_mora \|.*\| done \([0-9]{4}-[0-9]{2}-[0-9]{2}\) \|$' \
+    "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md" \
+    || { echo "[!] close --status done no marco el hito en el PRD." >&2; exit 1; }
+grep -q '^## Bitacora' "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md"
+grep -q 'impl: docs/impl-1.md' "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md"
+prd_cli close --feature 1 --status done >/dev/null 2>&1
+test "$(grep -c '^- #1 avisar_mora' "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md")" -eq 1 \
+    || { echo "[!] la bitacora del PRD se duplico al re-cerrar." >&2; exit 1; }
+
+# AC-8 (sano): el arbol integro no agrega fallos; los [i] de PRDs sin hitos no bloquean.
+rc=0; prd_check > "$TMP_ROOT/prd-check-ok.log" 2>&1 || rc=$?
+test "$rc" -eq 0 \
+    || { echo "[!] harness_check.sh debio pasar con el arbol sano (rc=$rc):" >&2; cat "$TMP_ROOT/prd-check-ok.log" >&2; exit 1; }
+grep -q '^\[i\] docs/prd/cobranza/PRD-cobranza.md no declara hitos' "$TMP_ROOT/prd-check-ok.log" \
+    || { echo "[!] el check no aviso del PRD sin hitos." >&2; exit 1; }
+
+# AC-8 (roto): las cuatro incoherencias que si pueden ocurrir con carpetas.
+mv "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md" "$PRD_E2E/docs/prd/cobranza/mora/PRD-mora.md"
+mkdir -p "$PRD_E2E/docs/prd/huerfana"
+sed -i.bak 's/^Padre: master/Padre: ventas/' "$PRD_E2E/docs/prd/cobranza/PRD-cobranza.md" && rm -f "$PRD_E2E/docs/prd/cobranza/PRD-cobranza.md.bak"
+rc=0; prd_check > "$TMP_ROOT/prd-check-roto.log" 2>&1 || rc=$?
+test "$rc" -eq 2 \
+    || { echo "[!] harness_check.sh debio salir 2 con el arbol roto (rc=$rc):" >&2; cat "$TMP_ROOT/prd-check-roto.log" >&2; exit 1; }
+grep -q 'PRD fuera de lugar' "$TMP_ROOT/prd-check-roto.log"
+grep -q 'no contiene su PRD-cobranza-mora.md' "$TMP_ROOT/prd-check-roto.log"
+grep -q 'no contiene su PRD-huerfana.md' "$TMP_ROOT/prd-check-roto.log"
+grep -q "declara 'Padre: ventas'" "$TMP_ROOT/prd-check-roto.log"
+grep -q "declara 'prd: cobranza/mora' y ese PRD no existe" "$TMP_ROOT/prd-check-roto.log"
+# AC-9: sin docs/prd/ el bloque entero se omite y el check vuelve a pasar.
+rm -rf "$PRD_E2E/docs/prd"
+python3 -c 'import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["features"][0].pop("prd", None); json.dump(d, open(p,"w"), indent=2)' \
+    "$PRD_E2E/feature_list.json"
+rc=0; prd_check > "$TMP_ROOT/prd-check-sinprd.log" 2>&1 || rc=$?
+test "$rc" -eq 0 \
+    || { echo "[!] harness_check.sh debio pasar sin docs/prd/ (rc=$rc):" >&2; cat "$TMP_ROOT/prd-check-sinprd.log" >&2; exit 1; }
+prd_cli prd tree 2>&1 | grep -q 'No hay PRDs todavia' \
+    || { echo "[!] prd tree debio informar que no hay arbol." >&2; exit 1; }
+echo "[Ok] PRDs anidados: arbol en carpetas, enlace en el padre, cadena --prd -> spec, vuelta del cierre y gate del arbol."
 
 if bash "$REPO_ROOT/setup_harness.sh" --json-hub >/dev/null 2>&1; then
     echo "[!] --json-hub ya no debe estar soportado." >&2

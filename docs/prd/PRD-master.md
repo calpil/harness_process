@@ -146,9 +146,11 @@ contesta, no insiste>.
 ## 10. Hitos -> features
 
 <Cada fila se carga al backlog con:
- sh harness_cli add --name <slug> --service <servicio> --acceptance "<criterio>"
-y al arrancarla (`start`) genera su spec con AC-n. Cada hito es un PRD anidado:
-si uno no entra en una historia sola, partilo en dos.>
+ sh harness_cli add --name <slug> --service <servicio> --acceptance "<criterio>" [--prd <ruta>]
+y al arrancarla (`start`) genera su spec con AC-n, citando su PRD de origen. Al
+cerrarla (`close --status done`) el arnes marca aca su Estado y deja bitacora.
+Si un hito no entra en una historia sola, no lo escribas aca: dale su propio PRD
+anidado con `sh harness_cli prd add --name <parte>`.>
 
 | # | Hito | Slug de feature | Objetivo que cumple | Criterio de aceptacion (resumen) | Estado |
 | --- | --- | --- | --- | --- | --- |
@@ -168,3 +170,22 @@ con su fecha.>
 
 - <pregunta> — DECIDIDO (<usuario>, <fecha>): <respuesta>
 - <pregunta> — ABIERTA
+
+## PRDs anidados
+
+<Las partes en las que se divide este producto. Cada fila la agrega
+ `sh harness_cli prd add --name <parte>`, que crea el PRD hijo con las mismas 12
+ secciones y lo deja colgado aca. Cada hijo cuenta su propia historia; este
+ documento no carga con todo el peso. Para ver el arbol entero con sus hitos:
+ `sh harness_cli prd tree`.>
+
+| PRD | Archivo | Que cuenta |
+| --- | --- | --- |
+| <parte> | <parte>/PRD-<parte>.md | <en una linea: que cuenta ese PRD> |
+
+## Bitacora
+
+<Lo que el arnes cerro contra este PRD. Si lo implementado difiere de lo que
+ promete este documento, actualiza el documento: esa parte es tuya.>
+
+-

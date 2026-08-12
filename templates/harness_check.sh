@@ -240,6 +240,99 @@ if [ -d "$HARNESS_DIR/roles" ] && [ ! -f "$REPO_ROOT/docs/constitution.md" ]; th
     failures=$((failures + 1))
 fi
 
+# Integridad del arbol de PRDs anidados (docs/prd/ de la RAIZ). La identidad de
+# un PRD es su cadena de segmentos: la carpeta lleva el segmento propio y el
+# archivo la cadena completa (docs/prd/cobranza/mora/PRD-cobranza-mora.md). El
+# FILESYSTEM es la fuente de verdad; el `Padre:` del encabezado es una
+# declaracion que se contrasta contra la ubicacion real. Sin docs/prd/ (proyecto
+# sin PRDs o instalacion minima) el bloque entero se omite.
+prd_root="$REPO_ROOT/docs/prd"
+if [ -d "$prd_root" ]; then
+    # Nombre de archivo esperado para una cadena de segmentos ("" -> master).
+    prd_expected_file() {
+        if [ -z "$1" ]; then
+            echo "PRD-master.md"
+        else
+            echo "PRD-$(printf '%s' "$1" | tr '/' '-').md"
+        fi
+    }
+
+    # 1) Cada PRD-*.md tiene que estar donde dice su cadena.
+    while IFS= read -r prd_file; do
+        [ -z "$prd_file" ] && continue
+        prd_rel="${prd_file#"$prd_root"/}"
+        prd_base="$(basename "$prd_rel")"
+        prd_chain="$(dirname "$prd_rel")"
+        [ "$prd_chain" = "." ] && prd_chain=""
+        prd_want="$(prd_expected_file "$prd_chain")"
+        if [ "$prd_base" != "$prd_want" ]; then
+            echo "[!] PRD fuera de lugar: docs/prd/$prd_rel deberia llamarse $prd_want segun su carpeta. Movelo a docs/prd/$(printf '%s' "${prd_base#PRD-}" | sed 's/\.md$//' | tr '-' '/')/$prd_base o renombralo." >&2
+            failures=$((failures + 1))
+            continue
+        fi
+        # 3) El `Padre:` declarado tiene que coincidir con la ubicacion real.
+        prd_declared="$(sed -n '1,15p' "$prd_file" | sed -n 's/^Padre:[[:space:]]*//p' | head -n 1)"
+        if [ -n "$prd_declared" ]; then
+            prd_parent="$(dirname "$prd_chain")"
+            if [ "$prd_parent" = "." ] || [ -z "$prd_chain" ]; then
+                prd_parent="master"
+            fi
+            if [ "$prd_declared" != "$prd_parent" ]; then
+                echo "[!] docs/prd/$prd_rel declara 'Padre: $prd_declared' pero su lugar en el arbol dice '$prd_parent'. Corregi el encabezado o mové el archivo." >&2
+                failures=$((failures + 1))
+            fi
+        fi
+        # 5) Un PRD sin hitos avisa, pero NO bloquea: puede estar recien creado.
+        prd_hitos="$(awk -F'|' '
+            /^## 10\. Hitos -> features/ { inside = 1; next }
+            /^## / { inside = 0 }
+            inside && /^\|/ {
+                cell = $3
+                gsub(/^[ \t]+|[ \t]+$/, "", cell)
+                if (cell == "Hito" || cell ~ /^-+$/ || cell == "") next
+                if (cell ~ /^</ && cell ~ />$/) next
+                n++
+            }
+            END { print n + 0 }' "$prd_file")"
+        if [ "$prd_hitos" -eq 0 ]; then
+            echo "[i] docs/prd/$prd_rel no declara hitos todavia (tabla '10. Hitos -> features' vacia): ninguna feature puede salir de el." >&2
+        fi
+    done <<EOF
+$(find "$prd_root" -type f -name 'PRD-*.md' | sort)
+EOF
+
+    # 2) Cada carpeta del arbol tiene que contener su PRD.
+    while IFS= read -r prd_dir; do
+        [ -z "$prd_dir" ] && continue
+        prd_rel="${prd_dir#"$prd_root"/}"
+        prd_want="$(prd_expected_file "$prd_rel")"
+        if [ ! -f "$prd_dir/$prd_want" ]; then
+            echo "[!] docs/prd/$prd_rel no contiene su $prd_want: es una carpeta del arbol sin PRD. Crealo con 'sh harness_cli prd add' o borra la carpeta." >&2
+            failures=$((failures + 1))
+        fi
+    done <<EOF
+$(find "$prd_root" -mindepth 1 -type d | sort)
+EOF
+
+    # 4) Ninguna feature puede apuntar a un PRD que no existe.
+    if [ -f "$HARNESS_DIR/feature_list.json" ]; then
+        while IFS= read -r prd_ref; do
+            [ -z "$prd_ref" ] && continue
+            if [ "$prd_ref" = "master" ]; then
+                prd_target="$prd_root/PRD-master.md"
+            else
+                prd_target="$prd_root/$prd_ref/$(prd_expected_file "$prd_ref")"
+            fi
+            if [ ! -f "$prd_target" ]; then
+                echo "[!] feature_list.json declara 'prd: $prd_ref' y ese PRD no existe. Crealo con 'sh harness_cli prd add' o corregi la feature." >&2
+                failures=$((failures + 1))
+            fi
+        done <<EOF
+$(grep -o '"prd"[[:space:]]*:[[:space:]]*"[^"]*"' "$HARNESS_DIR/feature_list.json" 2>/dev/null | sed -E 's/.*"([^"]*)"$/\1/' | sort -u)
+EOF
+    fi
+fi
+
 if [ "$failures" -gt 0 ]; then
     echo "[Harness] Check fallo con $failures problema(s)." >&2
     [ "$MODE" = "warn" ] && exit 0

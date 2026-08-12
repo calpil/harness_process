@@ -158,12 +158,41 @@ exit 0
     Assert-True ($sddText -match '## 4\. Decisiones tecnicas') "SDD-master.md is missing the technical decisions section."
     Assert-True ($sddText -match 'docs/architecture\.md') "SDD-master.md does not distinguish itself from docs/architecture.md."
 
+    # Feature #13 / AC-11: el maestro declara donde se cuelgan los PRDs anidados
+    # y como se cierra el ciclo (bitacora del cierre).
+    Assert-True ($prdText -match '## PRDs anidados') "PRD-master.md is missing the nested-PRD section."
+    Assert-True ($prdText -match '## Bitacora') "PRD-master.md is missing the close log section."
+    Assert-True ($prdText -match '--prd <ruta>') "PRD-master.md does not link milestones to their nested PRD."
+    # Feature #13 / AC-10: la guia documenta los comandos reales del arbol.
+    Assert-True ($prdGuideText -match 'prd add --name cobranza') "The PRD guide does not document 'prd add'."
+    Assert-True ($prdGuideText -match 'harness_cli prd tree') "The PRD guide does not document 'prd tree'."
+    Assert-True ($prdGuideText -match 'PRD-cobranza-mora\.md') "The PRD guide does not show the nested folder layout."
+
+    # Feature #13 / AC-1 + AC-4 + AC-7: el arbol de PRDs anidados de punta a
+    # punta con el binario ya sembrado (paridad con el bloque PRD_E2E del sh).
+    & (Join-Path $fixture "harness_cli.ps1") prd add --name cobranza | Out-Null
+    & (Join-Path $fixture "harness_cli.ps1") prd add --name mora --parent cobranza | Out-Null
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/cobranza/PRD-cobranza.md")) "prd add did not create the child PRD folder."
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md")) "prd add did not nest the grandchild PRD."
+    $childText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md") -Raw
+    Assert-True ($childText -match '(?m)^Padre: cobranza') "The nested PRD does not declare its parent."
+    Assert-True ($childText -match '## 10\. Hitos -> features') "The nested PRD is missing the milestones table."
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match '\| cobranza \| \[cobranza/PRD-cobranza\.md\]') "The master PRD does not link its child."
+    $treeOut = (& (Join-Path $fixture "harness_cli.ps1") prd tree | Out-String)
+    Assert-True ($treeOut -match 'PRD-cobranza-mora') "prd tree did not draw the nested PRD."
+    # Feature #13 / AC-5 + AC-6: la cadena PRD hoja -> feature -> spec.
+    & (Join-Path $fixture "harness_cli.ps1") add --name avisar_mora --service cobranza --acceptance "llega el aviso" --prd mora | Out-Null
+    & (Join-Path $fixture "harness_cli.ps1") start --feature 1 | Out-Null
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/spec-feature-1-avisar-mora.md") -Raw) -match '(?m)^PRD: docs/prd/cobranza/mora/PRD-cobranza-mora\.md') "The generated spec does not cite its source PRD."
+
     # Feature #11 / AC-4: la superficie que genera el ps1 referencia la guia de
     # uso eficiente de Kimi CLI (paridad con el grep del smoke sh).
     $agentsText = Get-Content -LiteralPath (Join-Path $fixture "AGENTS.md") -Raw
     Assert-True ($agentsText -match 'kimi-cli-uso-eficiente') "Seeded AGENTS.md does not reference the efficient Kimi CLI usage guide."
     # Feature #12 / AC-8: y tambien el metodo para escribir PRDs.
     Assert-True ($agentsText -match 'COMO-ESCRIBIR-UN-PRD') "Seeded AGENTS.md does not reference the PRD writing method."
+    # Feature #13 / AC-12: y el arbol de PRDs anidados con sus comandos.
+    Assert-True ($agentsText -match 'prd add --name') "Seeded AGENTS.md does not document the nested-PRD commands."
 
     # Feature #4 / AC-4 (reinstall): comparten carpeta con la documentacion del
     # equipo, asi que se siembran solo-si-faltan y un reinstall NO los pisa.

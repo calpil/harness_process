@@ -48,6 +48,12 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto (historia,
   objetivos O-n/NO-n, los datos, el acuerdo, hitos); sus hitos alimentan
   `feature_list.json`.
+- `docs/prd/<parte>/PRD-<cadena>.md` (RAIZ): PRDs anidados, el arbol de
+  producto. `sh harness_cli prd add --name <parte> [--parent <ruta>]` crea el
+  hijo (12 secciones + `Padre:`) y lo enlaza en su padre; `prd tree` dibuja el
+  arbol; `add ... --prd <ruta>` encadena hito -> feature -> spec (el spec cita
+  su PRD) y `close --status done` vuelve al PRD a marcar el hito y dejar
+  bitacora. El cuerpo del PRD no lo reescribe nadie: es del USUARIO.
 - `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
   proyecto (distinta de `docs/architecture.md`, que mapea lo que ya existe).
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.

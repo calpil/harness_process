@@ -284,7 +284,10 @@ miproyecto/
 |   |-- prd/
 |   |   |-- COMO-ESCRIBIR-UN-PRD.md  el metodo para escribir un PRD (guia del arnes)
 |   |   |-- PRD-master.md            que se construye y por que (planilla)
-|   |   `-- SDD-master.md            como se construye, a nivel proyecto (planilla)
+|   |   |-- SDD-master.md            como se construye, a nivel proyecto (planilla)
+|   |   `-- <parte>/                 PRDs anidados: una carpeta por parte del producto
+|   |       |-- PRD-<parte>.md       su historia, sus datos, sus hitos
+|   |       `-- <pieza>/PRD-<parte>-<pieza>.md
 |   |-- spec-feature-<id>-<slug>.md  spec de la feature (AC-n)
 |   |-- plan-feature-<id>-<slug>.md  plan del lider
 |   `-- impl-<id>.md / review-<id>.md
@@ -307,20 +310,57 @@ datos que se tocan y Pseudo-codigo (el acuerdo), ademas de los recorridos y los
 AC-n. El flujo queda encadenado:
 
 ```
-docs/prd/PRD-master.md   (hitos priorizados)
-        |  sh harness_cli add --name <slug> --service <svc> --acceptance "<criterio>"
+docs/prd/PRD-master.md   (el producto entero)
+        |  sh harness_cli prd add --name <parte> [--parent <ruta>]
         v
-feature_list.json        (backlog ejecutable)
+docs/prd/<parte>/PRD-<cadena>.md   (PRD anidado: hitos de esa parte)
+        |  sh harness_cli add --name <slug> --service <svc> --acceptance "<criterio>" --prd <ruta>
+        v
+feature_list.json        (backlog ejecutable, con su PRD de origen)
         |  sh harness_cli start --feature <id>
         v
 docs/spec-feature-<id>-<slug>.md  +  docs/plan-feature-<id>-<slug>.md
         |  aprobacion del usuario (Estado: approved)
         v
 implementacion -> docs/impl-<id>.md -> docs/review-<id>.md
+        |  sh harness_cli close --feature <id> --status done
+        v
+el PRD de origen: hito marcado `done (fecha)` + linea en su `## Bitacora`
 ```
 
-`PRD-master.md` y `SDD-master.md` son documentos **tuyos**: se siembran una sola
-vez si faltan, ningun reinstall los pisa y **`--reset` no los borra** (a
+### PRDs anidados: el arbol de producto
+
+Un producto grande no entra en un documento. `prd add` parte el PRD en hijos
+reales — carpetas bajo `docs/prd/`, con la carpeta llevando el segmento propio y
+el archivo la cadena completa, asi cada nombre es unico en el repo:
+
+```
+$ sh harness_cli prd add --name cobranza
+PRD anidado creado: docs/prd/cobranza/PRD-cobranza.md
+Enlazado en docs/prd/PRD-master.md (seccion "PRDs anidados")
+
+$ sh harness_cli prd add --name mora --parent cobranza
+PRD anidado creado: docs/prd/cobranza/mora/PRD-cobranza-mora.md
+
+$ sh harness_cli prd tree
+PRD-master                  2 hitos | features: 1/2 done
+ `-- PRD-cobranza           [!] sin hitos
+     `-- PRD-cobranza-mora  1 hito | features: 1/1 done
+```
+
+El hijo nace con las mismas 12 secciones del metodo y su `Padre:` declarado, y
+queda enlazado en la seccion `## PRDs anidados` del padre. `--prd` acepta la ruta
+completa (`cobranza/mora`) o el ultimo segmento si es unico (`mora`); una feature
+sin `--prd` cuenta para el maestro.
+
+`harness_check.sh` valida el arbol: PRD fuera de lugar, carpeta sin PRD,
+encabezado `Padre:` que no coincide con su ubicacion o feature que apunta a un
+PRD inexistente **bloquean**; un PRD sin hitos solo avisa con `[i]`. Sin
+`docs/prd/` el bloque entero se omite.
+
+`PRD-master.md`, `SDD-master.md` y todo PRD anidado son documentos **tuyos**: se
+siembran (o se crean) una sola vez, ningun reinstall los pisa y **`--reset` no
+los borra** (a
 diferencia de los docs del arnes, que si se limpian por ser plantillas
 regenerables). `COMO-ESCRIBIR-UN-PRD.md`, en cambio, es plantilla del arnes: vive
 en la misma carpeta pero se refresca reinstalando (o con `--force`) y entra en
