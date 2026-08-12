@@ -366,11 +366,14 @@ USAGE
 # docs/ de la RAIZ del proyecto (SURFACE_DIR), junto a docs/constitution.md y a
 # los artefactos SDD (spec-*/plan-*). La constitution NO esta en esta lista: es
 # documento del usuario, se siembra solo si falta y nunca se respalda ni se borra.
+# Las rutas pueden traer subdirectorio (p.ej. `prd/...`): los tres consumidores
+# de esta lista (siembra, reset targets y migracion) crean el directorio destino.
 HARNESS_DOCS=(
     "architecture.md"
     "conventions.md"
     "verification.md"
     "kimi-cli-uso-eficiente.md"
+    "prd/COMO-ESCRIBIR-UN-PRD.md"
 )
 
 # Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
@@ -940,15 +943,22 @@ Archivos principales:
   equipo.
 - `docs/constitution.md` (RAIZ): principios del proyecto; los specs y planes
   deben cumplirlo y el reviewer lo verifica.
-- `docs/spec-feature-<id>-<slug>.md` (RAIZ): spec de la feature (recorridos
-  priorizados y criterios AC-n); debe estar `Estado: approved` antes de
-  implementar. El agente lo muestra, pregunta y registra el si del usuario con
-  `harness_cli approve-spec --yes`; nunca aprueba por su cuenta.
+- `docs/spec-feature-<id>-<slug>.md` (RAIZ): spec de la feature; es el PRD del
+  cambio (historia antes/despues, hoy -> como va a funcionar, los datos,
+  pseudo-codigo del acuerdo, recorridos priorizados y criterios AC-n); debe
+  estar `Estado: approved` antes de implementar. El agente lo muestra, pregunta
+  y registra el si del usuario con `harness_cli approve-spec --yes`; nunca
+  aprueba por su cuenta.
 - `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
 - `__HREL__progress/history.md`: bitacora append-only.
-- `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto (problema,
-  metricas, alcance, hitos); sus hitos alimentan `feature_list.json`. Para
-  proyectos que arrancan de cero, se completa antes de la primera feature.
+- `docs/prd/COMO-ESCRIBIR-UN-PRD.md` (RAIZ): el metodo para escribir el PRD (la
+  historia primero, el tamano que decide el cambio, PRDs anidados y la regla
+  dura: pseudo-codigo y explicaciones, nunca codigo final). Leela antes de
+  escribir o completar un PRD o un spec.
+- `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto (historia
+  antes/despues, objetivos O-n/NO-n, los datos, el acuerdo en pseudo-codigo,
+  metricas e hitos); sus hitos alimentan `feature_list.json`. Para proyectos que
+  arrancan de cero, se completa antes de la primera feature.
 - `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
   proyecto (distinta de `docs/architecture.md`, que mapea lo que YA existe).
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
@@ -1624,6 +1634,7 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         "docs/verification.md"
         "docs/kimi-cli-uso-eficiente.md"
         "docs/constitution.md"
+        "docs/prd/COMO-ESCRIBIR-UN-PRD.md"
         "docs/prd/PRD-master.md"
         "docs/prd/SDD-master.md"
         ".kimiignore"

@@ -38,8 +38,25 @@ pub fn spec_template(feature: &Map<String, Value>) -> String {
         "Estado: draft".to_string(),
         format!("Plan: docs/plan-feature-{id}-{}.md", slugify(name)),
         "Constitution: docs/constitution.md".to_string(),
+        "Metodo: docs/prd/COMO-ESCRIBIR-UN-PRD.md (este spec es el PRD del cambio)".to_string(),
     ];
     for tail in [
+        "",
+        "## La historia (antes -> despues)",
+        "<!-- El corazon del spec: contala en palabras, sin tecnicismos, con una",
+        "     persona con nombre y un momento concreto. Si la historia no convence,",
+        "     el resto no importa. -->",
+        "ANTES: <que le pasa hoy a <persona>, y por que duele>.",
+        "DESPUES: <que vive esa misma persona cuando esto exista>.",
+        "",
+        "## Hoy -> Como va a funcionar",
+        "<!-- El flujo, dibujado dos veces: dibujar el HOY obliga a reusar lo que ya",
+        "     existe en vez de inventar arquitectura nueva. -->",
+        "```",
+        "HOY                      DESPUES",
+        "<evento> -> (nada)       <evento> -> <lo que ahora ocurre>",
+        "                              |__ <componente> -> <componente>",
+        "```",
         "",
         "## Recorridos de usuario (priorizados)",
         "<!-- P1 imprescindible, P2 importante. Cada recorrido independientemente testeable. -->",
@@ -48,6 +65,27 @@ pub fn spec_template(feature: &Map<String, Value>) -> String {
         "## Criterios de aceptacion (Given/When/Then)",
         "<!-- La Delegacion del plan cita estos IDs (AC-1, AC-2, ...); el reviewer exige evidencia por AC. -->",
         "- AC-1: Given <contexto>, When <accion>, Then <resultado observable>.",
+        "",
+        "## Los datos que se tocan",
+        "<!-- El plano de los datos: que dispara el flujo, que interruptor lo apaga y",
+        "     que candado evita que pase dos veces. Entidades y campos en palabras. -->",
+        "- disparador: <el evento o cambio de estado que arranca el flujo>",
+        "- interruptor: <flag por cliente/entorno para apagarlo en 1 clic>",
+        "- candado: <campo que evita repetir la accion sobre el mismo caso>",
+        "",
+        "## Pseudo-codigo (el acuerdo)",
+        "<!-- La receta en palabras: que lo dispara, que lo frena y que promete.",
+        "     SIN CODIGO FINAL: el spec fija la estructura, no la implementacion. -->",
+        "```",
+        "CUANDO <ocurre el disparador>",
+        "",
+        "  ¿<esta activado para este caso>?  -> si no, no hacemos nada",
+        "  ¿<ya lo hicimos antes>?           -> si si, no hacemos nada",
+        "",
+        "  ENTONCES <que hacemos, en una frase>,",
+        "           con <la restriccion que lo hace aceptable>.",
+        "```",
+        "Promesas: <una sola vez por caso> · <limite temporal> · <que NO hace>.",
         "",
         "## No funcionales",
         "- SLOs:",
@@ -311,14 +349,53 @@ mod tests {
         assert!(t.starts_with(
             "# Spec - Feature #3: Pago QR\n\nEstado: draft\nPlan: docs/plan-feature-3-pago-qr.md\nConstitution: docs/constitution.md\n"
         ));
+        // `Estado:` sigue en la linea 3: spec_state solo mira las primeras diez.
+        assert_eq!(t.lines().nth(2), Some("Estado: draft"));
+        assert!(t.contains("Metodo: docs/prd/COMO-ESCRIBIR-UN-PRD.md"));
+        // El spec es el PRD del cambio: historia, hoy->despues, datos y acuerdo.
+        assert!(t.contains("## La historia (antes -> despues)"));
+        assert!(t.contains("ANTES: "));
+        assert!(t.contains("DESPUES: "));
+        assert!(t.contains("## Hoy -> Como va a funcionar"));
         assert!(t.contains("## Recorridos de usuario (priorizados)"));
         assert!(t.contains("- P1: Como <rol>, quiero <accion>, para <resultado>."));
         assert!(t.contains("## Criterios de aceptacion (Given/When/Then)"));
         assert!(t.contains("- AC-1: Given <contexto>, When <accion>, Then <resultado observable>."));
+        assert!(t.contains("## Los datos que se tocan"));
+        assert!(t.contains("- disparador: "));
+        assert!(t.contains("- interruptor: "));
+        assert!(t.contains("- candado: "));
+        assert!(t.contains("## Pseudo-codigo (el acuerdo)"));
+        assert!(t.contains("CUANDO <ocurre el disparador>"));
+        assert!(t.contains("  ENTONCES <que hacemos, en una frase>,"));
+        assert!(t.contains("Promesas: "));
         assert!(t.contains("## No funcionales\n- SLOs:\n- Seguridad:\n- Observabilidad:\n"));
         assert!(t.contains("## Fuera de alcance"));
         assert!(t.contains("## Observaciones (decisiones pendientes)"));
         assert!(t.ends_with("-\n"));
+    }
+
+    #[test]
+    fn spec_template_sections_should_keep_the_prd_order() {
+        let t = spec_template(&feature(7, "Gracias post-venta"));
+        let order: Vec<&str> = t
+            .lines()
+            .filter(|l| l.starts_with("## "))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                "## La historia (antes -> despues)",
+                "## Hoy -> Como va a funcionar",
+                "## Recorridos de usuario (priorizados)",
+                "## Criterios de aceptacion (Given/When/Then)",
+                "## Los datos que se tocan",
+                "## Pseudo-codigo (el acuerdo)",
+                "## No funcionales",
+                "## Fuera de alcance",
+                "## Observaciones (decisiones pendientes)",
+            ]
+        );
     }
 
     #[test]

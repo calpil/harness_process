@@ -36,11 +36,18 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `progress/history.md`: bitacora append-only.
 - `docs/constitution.md`: principios no negociables (el spec y el plan los
   cumplen; el reviewer los verifica).
-- `docs/spec-feature-<id>-<slug>.md`: spec de la feature con AC-n
-  (Given/When/Then); se aprueba (draft -> approved) antes de implementar, via
-  `harness_cli approve-spec --yes` tras el si explicito del usuario.
-- `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto; sus hitos
-  alimentan `feature_list.json`.
+- `docs/spec-feature-<id>-<slug>.md`: spec de la feature; es el PRD del cambio
+  (historia antes/despues, hoy -> como va a funcionar, los datos, pseudo-codigo
+  del acuerdo) con sus AC-n (Given/When/Then); se aprueba (draft -> approved)
+  antes de implementar, via `harness_cli approve-spec --yes` tras el si explicito
+  del usuario.
+- `docs/prd/COMO-ESCRIBIR-UN-PRD.md` (RAIZ): el metodo para escribir un PRD (la
+  historia primero, el tamano que decide el cambio, PRDs anidados, y la regla
+  dura: pseudo-codigo y explicaciones, nunca codigo final). Leela antes de
+  escribir o completar un PRD o un spec.
+- `docs/prd/PRD-master.md` (RAIZ): planilla maestra de producto (historia,
+  objetivos O-n/NO-n, los datos, el acuerdo, hitos); sus hitos alimentan
+  `feature_list.json`.
 - `docs/prd/SDD-master.md` (RAIZ): planilla maestra de diseno tecnico del
   proyecto (distinta de `docs/architecture.md`, que mapea lo que ya existe).
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.

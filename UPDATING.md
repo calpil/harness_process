@@ -53,8 +53,8 @@ El instalador hace backups automáticos de los archivos que reemplaza (en `bkp/`
 - Hooks y launchers
 - Documentación interna como `CHECKPOINTS.md` y este mismo `UPDATING.md`
 - `docs/constitution.md` (sembrada solo si falta; nunca pisa la del usuario)
-- `docs/architecture.md`, `docs/conventions.md`, `docs/verification.md` y
-  `docs/kimi-cli-uso-eficiente.md` en el
+- `docs/architecture.md`, `docs/conventions.md`, `docs/verification.md`,
+  `docs/kimi-cli-uso-eficiente.md` y `docs/prd/COMO-ESCRIBIR-UN-PRD.md` en el
   `docs/` de la **raíz** del proyecto (mismo criterio: solo si faltan)
 - `docs/prd/PRD-master.md` y `docs/prd/SDD-master.md` (planillas maestras del
   proyecto; solo si faltan, y `--reset` no las borra)
@@ -155,9 +155,20 @@ nueva y en la vieja— y conserva la constitution y los artefactos de feature
 Desde esta versión el instalador siembra dos planillas para proyectos que
 arrancan de cero, en el `docs/prd/` de la **raíz del proyecto**:
 
-- `docs/prd/PRD-master.md` — qué se construye y por qué: problema, usuarios y
-  jobs-to-be-done, métricas de éxito, alcance y no-objetivos, restricciones,
-  recorridos P1/P2, tabla **Hitos → features** (cada fila se carga al backlog con
+- `docs/prd/COMO-ESCRIBIR-UN-PRD.md` — **el método** para escribir un PRD: qué
+  contiene y qué nunca contiene, la historia (antes/después) como corazón del
+  documento, el tamaño que decide el cambio (1 página un ajuste, 3-8 una
+  funcionalidad, 10+ una grande, PRDs anidados para un producto nuevo), la
+  anatomía sección por sección con un ejemplo, y la regla dura: el PRD fija la
+  estructura en pseudo-código y explicaciones, **nunca** en código final.
+  A diferencia de las otras dos, **es plantilla del arnés**: se refresca
+  reinstalando (o con `--force`) y entra en los reset targets.
+- `docs/prd/PRD-master.md` — qué se construye y por qué: resumen hoy → después,
+  **la historia** (antes/después, con nombre y momento), objetivos y no-objetivos
+  numerados (`O1`, `NO1`), usuarios y jobs-to-be-done, métricas de éxito, el flujo
+  dibujado dos veces (hoy → cómo va a funcionar), **los datos** (disparador,
+  interruptor, candado) y el **pseudo-código del acuerdo** a nivel producto,
+  restricciones, tabla **Hitos → features** (cada fila se carga al backlog con
   `harness_cli add`), riesgos y decisiones abiertas.
 - `docs/prd/SDD-master.md` — cómo se construye, a nivel proyecto: arquitectura
   objetivo, stack, contratos entre componentes, decisiones técnicas tipo ADR,
@@ -171,8 +182,15 @@ Garantías (mismo criterio que `docs/constitution.md`):
   refrescable.
 - **`--reset` no las borra.** No son superficie generada del arnés. Los docs
   del arnés (`architecture.md`, `conventions.md`, `verification.md`,
-  `kimi-cli-uso-eficiente.md`) sí se
-  limpian con `--reset`; `docs/prd/` no.
+  `kimi-cli-uso-eficiente.md` y la guía `prd/COMO-ESCRIBIR-UN-PRD.md`) sí se
+  limpian con `--reset`; el PRD y el SDD del proyecto no.
+
+El mismo método baja un nivel: cada `docs/spec-feature-<id>-<slug>.md` que genera
+`harness_cli start` es **el PRD de ese cambio** y nace con las secciones
+`La historia (antes -> despues)`, `Hoy -> Como va a funcionar`,
+`Los datos que se tocan` y `Pseudo-codigo (el acuerdo)`, además de los recorridos
+priorizados y los AC-n. Los specs ya existentes no se reescriben: la plantilla
+nueva rige para los que se generen de aquí en adelante.
 
 En instalaciones existentes aparecen al re-correr el instalador, sin tocar nada
 de lo que ya tengas.

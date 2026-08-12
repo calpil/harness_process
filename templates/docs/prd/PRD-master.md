@@ -1,7 +1,10 @@
 # PRD Master - <nombre del proyecto>
 
 Estado: draft
+Duenno: <quien responde por este documento>
 Ultima actualizacion: <YYYY-MM-DD>
+Alcance: <en una linea: que abarca este producto y que NO toca>
+Como se escribe: docs/prd/COMO-ESCRIBIR-UN-PRD.md
 Diseno tecnico: docs/prd/SDD-master.md
 Constitution: docs/constitution.md
 
@@ -12,71 +15,152 @@ Constitution: docs/constitution.md
 >
 > Para un proyecto que arranca de cero, completa este archivo ANTES de cargar la
 > primera feature. Borra los ejemplos entre <> a medida que los reemplazas.
+> Si no sabes cuanto escribir ni por donde empezar, lee primero
+> `docs/prd/COMO-ESCRIBIR-UN-PRD.md`.
 
-## 1. Problema
+---
 
-<Que problema real existe hoy, para quien, y por que ahora. Escribe el problema,
-no la solucion. Si no podes nombrar a quien le duele, todavia no hay PRD.>
+**LA REGLA DURA: SIN CODIGO. SOLO PSEUDO-CODIGO.** Este documento fija la
+**estructura** — la historia, que entidades se tocan y como cambian — en
+pseudo-codigo y explicaciones. Nunca lleva codigo final, la implementacion
+exacta, pantallas terminadas ni configuracion. Eso se escribe despues, en otra
+parte. Si la estructura esta bien en papel, el codigo es la parte facil; si esta
+mal, ningun codigo la arregla.
 
-## 2. Usuarios y jobs-to-be-done
+---
+
+## 1. Resumen (hoy -> despues)
+
+<El dibujo mas barato que existe: dos lineas. Si no podes escribirlas, todavia
+no entendes el cambio.>
+
+- **Hoy:** <que pasa hoy, y que no pasa>
+- **Despues:** <que pasa cuando esto exista>
+
+## 2. La historia
+
+<El corazon del documento. Tiene que poder contarse en palabras, sin
+tecnicismos, con una persona con nombre y un momento concreto. Si la historia no
+convence, el resto no importa.>
+
+**ANTES**
+
+<Marta cerro su compra un viernes a las 6 de la tarde. Nadie la llamo. El lunes
+le llego la misma plantilla de siempre, y esa confianza recien ganada se enfrio
+justo cuando mas cerca estaba de recomendarnos.>
+
+**DESPUES**
+
+<Cinco segundos despues de cerrar, suena su telefono: la saludan por su nombre y
+le agradecen la confianza. Marta cuelga sonriendo — y esa misma semana trae a
+una amiga.>
+
+> ASI NO: "escuchar el cambio de estado", "agendar una tarea de llamada",
+> "disparar el agente de voz". Eso es implementacion, no historia.
+> ASI SI: quien es el usuario, como lo usa, cual es el dolor y cual es la
+> experiencia que quiere vivir. Todo lo demas en este documento existe para
+> hacer esa historia realidad.
+
+## 3. Objetivos / No-objetivos
+
+<Con nombre y apellido: las secciones siguientes los citan ("cumple O2"). Los
+no-objetivos frenan el "ya que estamos...".>
+
+| ID | Objetivo | Como se ve cumplido |
+| --- | --- | --- |
+| O1 | <lo que tiene que lograr> | <senal observable> |
+| O2 | <...> | <...> |
+
+| ID | No-objetivo | Por que no |
+| --- | --- | --- |
+| NO1 | <lo que explicitamente NO se hace> | <razon> |
+
+## 4. Usuarios y jobs-to-be-done
 
 | Usuario | Que intenta lograr | Como lo resuelve hoy | Por que no alcanza |
 | --- | --- | --- | --- |
 | <rol> | <job> | <workaround actual> | <limitacion> |
 
-## 3. Metricas de exito
+## 5. Metricas de exito
 
-<Como sabras que funciono, en numeros. Cada metrica con su valor de partida y
-su objetivo. Sin metrica no hay forma de cerrar el proyecto.>
+<Como sabras que funciono, en numeros. Cada metrica con su valor de partida y su
+objetivo, y el objetivo O-n que mide. Sin metrica no hay forma de cerrar el
+proyecto.>
 
-| Metrica | Hoy | Objetivo | Como se mide |
-| --- | --- | --- | --- |
-| <ej. tiempo de alta de un cliente> | <45 min> | <5 min> | <log/dashboard> |
+| Metrica | Hoy | Objetivo | Mide | Como se mide |
+| --- | --- | --- | --- | --- |
+| <ej. tiempo de alta de un cliente> | <45 min> | <5 min> | <O1> | <log/dashboard> |
 
-## 4. Alcance
+## 6. Como funciona hoy -> como va a funcionar
 
-### Dentro
-- <capacidad 1 que el producto SI resuelve>
+<El flujo, dibujado dos veces. Dibujar el HOY obliga a reusar lo que ya existe
+en vez de inventar arquitectura nueva.>
 
-### Fuera (no-objetivos)
-- <lo que explicitamente NO se hace, y por que>
+```
+HOY                          DESPUES
+<evento> -> (nada)           <evento> -> <lo que se agenda>
+                                  |__ <componente> llama a <componente>
+                                            |__ <donde se guarda el resultado>
+```
 
-> Los no-objetivos son tan importantes como el alcance: son lo que evita que el
-> proyecto crezca sin control. Si algo aparece despues, se decide de nuevo, no
-> se asume.
+## 7. Los datos
 
-## 5. Restricciones y supuestos
+<El plano de los datos a nivel PRODUCTO: que dispara el flujo, que interruptor
+lo apaga por cliente y que candado evita que pase dos veces. Entidades y campos
+en palabras; el esquema fisico vive en `docs/prd/SDD-master.md`.>
+
+| Que | Entidad / campo | Para que |
+| --- | --- | --- |
+| disparador | <el lead pasa a estado «venta cerrada»> | <que arranca el flujo> |
+| interruptor | <cliente.<flag>: 'apagado' \| 'prueba' \| 'activo'> | <apagar por cliente en 1 clic> |
+| candado | <lead.<campo>_en: fecha> | <evitar repetir la accion> |
+
+## 8. Pseudo-codigo (el acuerdo)
+
+<La receta, en palabras: que lo dispara, que lo frena y que promete — sin una
+sola linea de codigo. Este es el acuerdo a nivel producto; cada feature refina
+el suyo, y el detalle vinculante de cada cambio vive en su
+`docs/spec-feature-<id>-<slug>.md`.>
+
+```
+CUANDO <ocurre el disparador>
+
+  ¿<el cliente activo la funcionalidad>?  -> si no, no hacemos nada
+  ¿<ya lo hicimos para este caso>?        -> si si, no hacemos nada
+  ¿<tenemos lo minimo para actuar>?       -> si no, no hacemos nada
+
+  ENTONCES <que hacemos, en una frase>,
+           con <la restriccion que lo hace aceptable>.
+```
+
+**Promesas:** <una sola vez por caso> · <nunca fuera de horario> · <si no
+contesta, no insiste>.
+
+## 9. Restricciones y supuestos
 
 - Tecnicas: <stack obligado, sistemas con los que hay que integrar>
 - Negocio / legales: <plazos, normativa, contratos>
 - Supuestos: <lo que damos por cierto y habria que validar; si un supuesto cae,
   el alcance cambia>
 
-## 6. Experiencia esperada
-
-<Recorridos principales en prosa o bullets, priorizados P1/P2. Estos recorridos
-son el insumo directo de la seccion "Recorridos de usuario" de cada spec.>
-
-- P1: Como <rol>, quiero <accion>, para <resultado>.
-- P2: Como <rol>, quiero <accion>, para <resultado>.
-
-## 7. Hitos -> features
+## 10. Hitos -> features
 
 <Cada fila se carga al backlog con:
  sh harness_cli add --name <slug> --service <servicio> --acceptance "<criterio>"
-y al arrancarla (`start`) genera su spec con AC-n.>
+y al arrancarla (`start`) genera su spec con AC-n. Cada hito es un PRD anidado:
+si uno no entra en una historia sola, partilo en dos.>
 
-| # | Hito | Slug de feature | Criterio de aceptacion (resumen) | Estado |
-| --- | --- | --- | --- | --- |
-| 1 | <hito> | <slug_snake_case> | <que tiene que ser cierto> | pendiente |
+| # | Hito | Slug de feature | Objetivo que cumple | Criterio de aceptacion (resumen) | Estado |
+| --- | --- | --- | --- | --- | --- |
+| 1 | <hito> | <slug_snake_case> | <O1> | <que tiene que ser cierto> | pendiente |
 
-## 8. Riesgos
+## 11. Riesgos
 
 | Riesgo | Impacto | Mitigacion |
 | --- | --- | --- |
 | <riesgo> | <alto/medio/bajo> | <que se hace al respecto> |
 
-## 9. Decisiones abiertas
+## 12. Decisiones abiertas
 
 <Mismo protocolo que los planes: una decision sin resolver se pregunta al
 USUARIO antes de implementar lo que dependa de ella. Registra aqui la respuesta

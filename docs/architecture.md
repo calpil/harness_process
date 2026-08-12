@@ -75,7 +75,9 @@ Inspirado en spec-kit, adaptado y con **layout plano** (specs junto a los planes
 en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
 
 0. (Proyecto nuevo) El USUARIO completa `docs/prd/PRD-master.md` (que se
-   construye y por que) y `docs/prd/SDD-master.md` (como, a nivel proyecto). La
+   construye y por que, con la historia antes/despues, objetivos O-n/NO-n, los
+   datos y el acuerdo en pseudo-codigo) y `docs/prd/SDD-master.md` (como, a nivel
+   proyecto), siguiendo el metodo de `docs/prd/COMO-ESCRIBIR-UN-PRD.md`. La
    tabla "Hitos -> features" del PRD se carga al backlog con `harness_cli add`.
    Paso opcional: ningun gate lo exige, y las planillas no las genera ni vigila
    el binario, solo las siembra el instalador.
@@ -162,6 +164,11 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   `SURFACE_DIR/docs/prd` solo-si-faltan. Son documentos del USUARIO: ni `--force`
   las pisa y NO figuran en los reset targets, a diferencia de `HARNESS_DOCS`, que
   son plantillas regenerables del arnes.
+- Guia del metodo: `docs/prd/COMO-ESCRIBIR-UN-PRD.md` es la excepcion en esa
+  carpeta: entra en `HARNESS_DOCS` / `$script:HarnessDocs` con la ruta
+  `prd/COMO-ESCRIBIR-UN-PRD.md` (primer elemento con subdirectorio; la siembra,
+  los reset targets y la migracion crean el directorio destino). Se refresca
+  reinstalando o con `--force` y las superficies multi-LLM la enlazan.
 - Migracion: `migrate_harness_docs()` (sh) / `Move-HarnessDocsToRoot` (ps1)
   mueven los docs que quedaron en `<harness>/docs/` de instalaciones previas,
   solo cuando faltan en la raiz; si ya existen, avisan y no pisan nada.

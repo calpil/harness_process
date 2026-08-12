@@ -282,6 +282,7 @@ miproyecto/
 |   |-- verification.md              comandos de validacion
 |   |-- kimi-cli-uso-eficiente.md    guia de uso eficiente de Kimi CLI
 |   |-- prd/
+|   |   |-- COMO-ESCRIBIR-UN-PRD.md  el metodo para escribir un PRD (guia del arnes)
 |   |   |-- PRD-master.md            que se construye y por que (planilla)
 |   |   `-- SDD-master.md            como se construye, a nivel proyecto (planilla)
 |   |-- spec-feature-<id>-<slug>.md  spec de la feature (AC-n)
@@ -293,7 +294,17 @@ miproyecto/
 ### Proyectos que arrancan de cero: `docs/prd/`
 
 `docs/prd/PRD-master.md` y `docs/prd/SDD-master.md` son planillas para completar
-antes de cargar la primera feature. El flujo queda encadenado:
+antes de cargar la primera feature, y `docs/prd/COMO-ESCRIBIR-UN-PRD.md` es el
+metodo con el que se escriben: la historia (antes/despues) primero, el tamano lo
+decide el cambio (1 pagina un ajuste, 3-8 una funcionalidad, PRDs anidados para
+un producto nuevo) y la regla dura de que el PRD fija la estructura en
+pseudo-codigo y explicaciones, **nunca** en codigo final.
+
+El PRD maestro cuenta el producto (historia, objetivos `O-n`/`NO-n`, los datos y
+el acuerdo en pseudo-codigo, hitos) y cada `docs/spec-feature-<id>-<slug>.md` es
+el **PRD de ese cambio**: nace con Historia, Hoy -> Como va a funcionar, Los
+datos que se tocan y Pseudo-codigo (el acuerdo), ademas de los recorridos y los
+AC-n. El flujo queda encadenado:
 
 ```
 docs/prd/PRD-master.md   (hitos priorizados)
@@ -308,9 +319,12 @@ docs/spec-feature-<id>-<slug>.md  +  docs/plan-feature-<id>-<slug>.md
 implementacion -> docs/impl-<id>.md -> docs/review-<id>.md
 ```
 
-`docs/prd/` son documentos **tuyos**: se siembran una sola vez si faltan, ningun
-reinstall los pisa y **`--reset` no los borra** (a diferencia de los docs del
-arnes, que si se limpian por ser plantillas regenerables).
+`PRD-master.md` y `SDD-master.md` son documentos **tuyos**: se siembran una sola
+vez si faltan, ningun reinstall los pisa y **`--reset` no los borra** (a
+diferencia de los docs del arnes, que si se limpian por ser plantillas
+regenerables). `COMO-ESCRIBIR-UN-PRD.md`, en cambio, es plantilla del arnes: vive
+en la misma carpeta pero se refresca reinstalando (o con `--force`) y entra en
+los reset targets, igual que `conventions.md` o `verification.md`.
 
 Los docs base se siembran **solo si faltan** y un reinstall **nunca los
 pisa**: si tu equipo ya tiene un `docs/conventions.md`, queda intacto. Para

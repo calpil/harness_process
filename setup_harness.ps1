@@ -76,11 +76,14 @@ $script:SurfaceDir = $script:RepoRoot
 # docs/ de la RAIZ del proyecto (SurfaceDir), junto a docs/constitution.md y a
 # los artefactos SDD (spec-*/plan-*). La constitution NO esta en esta lista: es
 # documento del usuario y tiene su propio tratamiento.
+# Las rutas pueden traer subdirectorio (p.ej. `prd/...`): la siembra, los reset
+# targets y la migracion crean el directorio destino. Paridad con HARNESS_DOCS.
 $script:HarnessDocs = @(
     "architecture.md",
     "conventions.md",
     "verification.md",
-    "kimi-cli-uso-eficiente.md"
+    "kimi-cli-uso-eficiente.md",
+    "prd/COMO-ESCRIBIR-UN-PRD.md"
 )
 
 # Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
@@ -435,6 +438,7 @@ function Assert-HarnessAssets {
             "docs/verification.md",
             "docs/kimi-cli-uso-eficiente.md",
             "docs/constitution.md",
+            "docs/prd/COMO-ESCRIBIR-UN-PRD.md",
             "docs/prd/PRD-master.md",
             "docs/prd/SDD-master.md",
             ".kimiignore",
@@ -656,6 +660,11 @@ Before changing code:
 Efficient Kimi Code CLI usage: see `docs/kimi-cli-uso-eficiente.md` (context
 exclusions, fixed project rules in `.kimirules`, file-scoped prompts, `/new`
 between tasks).
+
+How to write the PRD: see `docs/prd/COMO-ESCRIBIR-UN-PRD.md` (the story first,
+the size the change decides, nested PRDs, and the hard rule: pseudo-code and
+explanations, never final code). Each `docs/spec-feature-<id>-<slug>.md` is the
+PRD of that change and already ships those sections.
 
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;

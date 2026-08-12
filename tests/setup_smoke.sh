@@ -152,6 +152,9 @@ test -d "$ROOT_LAYOUT/templates"
 test -f "$ROOT_LAYOUT/docs/constitution.md"
 # Feature #11 / AC-2: la guia de uso eficiente se siembra en docs/ (layout root).
 test -f "$ROOT_LAYOUT/docs/kimi-cli-uso-eficiente.md"
+# Feature #12 / AC-5: la guia del metodo PRD se siembra en docs/prd/ (layout root).
+test -f "$ROOT_LAYOUT/docs/prd/COMO-ESCRIBIR-UN-PRD.md" \
+    || { echo "[FALLO] falta docs/prd/COMO-ESCRIBIR-UN-PRD.md en layout root"; exit 1; }
 # Feature #11 (companion KIMI_DOTFILES): .kimiignore/.kimirules se siembran en la RAIZ.
 test -f "$ROOT_LAYOUT/.kimiignore"
 test -f "$ROOT_LAYOUT/.kimirules"
@@ -228,8 +231,18 @@ test ! -d "$SUBDIR_HARNESS/docs"
 test -f "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 test -f "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 test ! -d "$SUBDIR_HARNESS/docs/prd"
-# AC-7 / AC-8: las planillas traen las secciones que las hacen utiles.
-grep -q '^## 7. Hitos -> features' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+# Feature #12 / AC-5: la guia del metodo PRD acompana a las planillas en la RAIZ.
+test -f "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md" \
+    || { echo "[FALLO] falta docs/prd/COMO-ESCRIBIR-UN-PRD.md en la raiz multi-repo"; exit 1; }
+# Feature #12 / AC-4: la guia trae el metodo completo (historia, tamano, sin codigo).
+grep -q '^## 2. Todo empieza con una historia' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
+grep -q '^## 3. El tamano lo decide el cambio' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
+grep -q 'NUNCA CONTIENE' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
+# AC-7 / AC-8 (feature #5) + Feature #12 / AC-1..AC-3: las planillas traen las
+# secciones que las hacen utiles, ya con la anatomia del metodo.
+grep -q '^## 2. La historia' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+grep -q '^## 8. Pseudo-codigo (el acuerdo)' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+grep -q '^## 10. Hitos -> features' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 grep -q 'harness_cli add' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 grep -q '^## 4. Decisiones tecnicas' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'docs/architecture.md' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
@@ -238,6 +251,9 @@ grep -Fq 'harness_process/harness_cli" graph mapa' "$SUBDIR_ROOT/AGENTS.md"
 # Feature #11 / AC-3: la superficie instalada enlaza la guia de uso eficiente.
 grep -q 'kimi-cli-uso-eficiente' "$SUBDIR_ROOT/AGENTS.md" \
     || { echo "[FALLO] AGENTS.md instalado no enlaza docs/kimi-cli-uso-eficiente.md"; exit 1; }
+# Feature #12 / AC-8: la superficie instalada enlaza el metodo para escribir PRDs.
+grep -q 'COMO-ESCRIBIR-UN-PRD' "$SUBDIR_ROOT/AGENTS.md" \
+    || { echo "[FALLO] AGENTS.md instalado no enlaza docs/prd/COMO-ESCRIBIR-UN-PRD.md"; exit 1; }
 grep -Fq "$SUBDIR_ROOT/bin/harness-hook" "$SUBDIR_ROOT/.codex/hooks.json"
 mkdir -p "$SUBDIR_ROOT/service"
 codex_start="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$SUBDIR_ROOT/.codex/hooks.json")"
@@ -469,6 +485,10 @@ test ! -f "$RESET_TEST/docs/verification.md" \
 # Feature #11 / AC-2: la guia es HARNESS_DOCS, asi que el reset tambien la limpia.
 test ! -f "$RESET_TEST/docs/kimi-cli-uso-eficiente.md" \
     || { echo "[FALLO] reset no limpio el doc generado kimi-cli-uso-eficiente.md"; exit 1; }
+# Feature #12 / AC-5: la guia del metodo es plantilla del arnes, asi que el reset
+# tambien la limpia (el PRD/SDD del usuario, en la misma carpeta, sobreviven).
+test ! -f "$RESET_TEST/docs/prd/COMO-ESCRIBIR-UN-PRD.md" \
+    || { echo "[FALLO] reset no limpio la guia generada COMO-ESCRIBIR-UN-PRD.md"; exit 1; }
 # Feature #11 (companion KIMI_DOTFILES): los dotfiles son documentos del USUARIO
 # y sobreviven al reset (mismo criterio que PRD/SDD).
 test -f "$RESET_TEST/.kimiignore" \
@@ -496,6 +516,9 @@ test -f "$RESET_TEST/docs/prd/SDD-master.md" \
 )
 grep -q "$RESET_SENTINEL" "$RESET_TEST/docs/constitution.md" \
     || { echo "[FALLO] reinstall tras reset piso la constitution del usuario"; exit 1; }
+# Feature #12 / AC-5: y la guia del metodo se vuelve a sembrar en el reinstall.
+test -f "$RESET_TEST/docs/prd/COMO-ESCRIBIR-UN-PRD.md" \
+    || { echo "[FALLO] reinstall tras reset no resembro COMO-ESCRIBIR-UN-PRD.md"; exit 1; }
 find "$RESET_TEST/bkp" -type f -name '*.bak.*' | head -1 | grep -q . || echo "[info] reset genero backups esperados (o carpeta limpia)"
 echo "[Ok] reset preserva la constitution del usuario (root) y limpia docs generados."
 

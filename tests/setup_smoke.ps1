@@ -129,7 +129,7 @@ exit 0
 
     # Feature #4 / AC-2: en layout root los tres docs del arnes se siembran en el
     # docs/ de la RAIZ (que aqui es el propio fixture). Feature #11: + la guia.
-    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md")) {
+    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md", "prd/COMO-ESCRIBIR-UN-PRD.md")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc")) "Harness doc $harnessDoc was not seeded into the root docs/."
     }
     # Feature #11 (companion KimiDotfiles): .kimiignore/.kimirules se siembran en
@@ -140,9 +140,19 @@ exit 0
     # Feature #5 / AC-2: las planillas maestras PRD y SDD se siembran en docs/prd/.
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md")) "PRD-master.md was not seeded into docs/prd/."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md")) "SDD-master.md was not seeded into docs/prd/."
-    # Feature #5 / AC-7 + AC-8: traen las secciones que las hacen utiles.
+    # Feature #12 / AC-5: la guia del metodo PRD acompana a las planillas.
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/COMO-ESCRIBIR-UN-PRD.md")) "COMO-ESCRIBIR-UN-PRD.md was not seeded into docs/prd/."
+    # Feature #12 / AC-4: la guia trae el metodo (historia, tamano, sin codigo final).
+    $prdGuideText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/COMO-ESCRIBIR-UN-PRD.md") -Raw
+    Assert-True ($prdGuideText -match '## 2\. Todo empieza con una historia') "The PRD guide is missing the story section."
+    Assert-True ($prdGuideText -match '## 3\. El tamano lo decide el cambio') "The PRD guide is missing the sizing table."
+    Assert-True ($prdGuideText -match 'NUNCA CONTIENE') "The PRD guide does not state what a PRD never contains."
+    # Feature #5 / AC-7 + AC-8 + Feature #12 / AC-1..AC-3: las planillas traen las
+    # secciones que las hacen utiles, ya con la anatomia del metodo.
     $prdText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw
-    Assert-True ($prdText -match '## 7\. Hitos -> features') "PRD-master.md is missing the milestones-to-features table."
+    Assert-True ($prdText -match '## 2\. La historia') "PRD-master.md is missing the story section."
+    Assert-True ($prdText -match '## 8\. Pseudo-codigo \(el acuerdo\)') "PRD-master.md is missing the pseudo-code agreement section."
+    Assert-True ($prdText -match '## 10\. Hitos -> features') "PRD-master.md is missing the milestones-to-features table."
     Assert-True ($prdText -match 'harness_cli add') "PRD-master.md does not link milestones to the backlog command."
     $sddText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md") -Raw
     Assert-True ($sddText -match '## 4\. Decisiones tecnicas') "SDD-master.md is missing the technical decisions section."
@@ -152,6 +162,8 @@ exit 0
     # uso eficiente de Kimi CLI (paridad con el grep del smoke sh).
     $agentsText = Get-Content -LiteralPath (Join-Path $fixture "AGENTS.md") -Raw
     Assert-True ($agentsText -match 'kimi-cli-uso-eficiente') "Seeded AGENTS.md does not reference the efficient Kimi CLI usage guide."
+    # Feature #12 / AC-8: y tambien el metodo para escribir PRDs.
+    Assert-True ($agentsText -match 'COMO-ESCRIBIR-UN-PRD') "Seeded AGENTS.md does not reference the PRD writing method."
 
     # Feature #4 / AC-4 (reinstall): comparten carpeta con la documentacion del
     # equipo, asi que se siembran solo-si-faltan y un reinstall NO los pisa.
@@ -177,7 +189,7 @@ exit 0
     foreach ($artifact in @("spec-feature-1-demo.md", "plan-feature-1-demo.md")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/$artifact")) "Reset removed the feature artifact $artifact."
     }
-    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md")) {
+    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md", "prd/COMO-ESCRIBIR-UN-PRD.md")) {
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc"))) "Reset did not clean the generated doc $harnessDoc."
     }
     # Feature #11 (companion KimiDotfiles): los dotfiles son documentos del
