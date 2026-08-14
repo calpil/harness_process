@@ -425,6 +425,45 @@ tools están verificados contra v0.29.2; si una versión futura de Kimi los
 renombra, el fallo es benigno (el hook no matchea) y el gate de espejo de
 roles no depende de Kimi.
 
+## Hub por lotes + instalación atómica del binario (feature #14)
+
+Desde esta versión (feature #14, decisiones del usuario 2026-08-14). Dos
+problemas que se notaban todos los días:
+
+- **El sync del hub tardaba minutos.** Cada comando que tocaba el hub
+  (`sync_git`, `start`, `advance`, `approve-spec`, `autocheck`…) reescribía el
+  grafo **entero, fila por fila**: en el hub de referencia eran 1047 nodos y
+  1641 aristas, o sea 2688 ida-y-vuelta contra un PostgreSQL remoto a 164 ms por
+  consulta (≈7 min por commit). Ahora el guardado escribe **solo lo que el
+  comando tocó**, y en **lotes** (`INSERT … SELECT * FROM UNNEST(…)`, hasta 1000
+  filas por sentencia, dentro de una única transacción). Un `sync_git` típico
+  pasó de 2688 sentencias a 2.
+- **El candado del hub era único para toda la máquina.** `$HARNESS_HUB/.lock`
+  serializaba TODOS los proyectos: un sync lento en un repo dejaba en cola a
+  `start`, `advance` y `approve-spec` de todos los demás. Ahora el candado es
+  **por proyecto**: `$HARNESS_HUB/.lock-<proyecto>`. Separarlo es seguro
+  justamente porque cada comando escribe solo sus filas.
+- **Nuevo `DB_STATEMENT_TIMEOUT`** (milisegundos; `30000` por defecto; `0`
+  desactiva), en el entorno o en `$HARNESS_HUB/.env`. Corta del lado del
+  servidor la sentencia que se pase de ese tiempo, más keepalives TCP: un hub
+  que deja de responder ahora falla con error legible en vez de colgar el
+  comando —y el candado— indefinidamente. `connect_timeout` solo cubría el
+  saludo inicial.
+- **El instalador ya no copia encima del binario vivo.** `setup_harness.sh` y
+  `setup_harness.ps1` escriben `harness` / `harness.exe` en un temporal
+  **hermano** del destino y lo mueven con un rename atómico. Copiar encima
+  reescribía el mismo inode, y en macOS eso le invalida al kernel la firma
+  cacheada del Mach-O: la corrida siguiente moría con `zsh: killed  harness`
+  (SIGKILL) **en cada actualización**. En Windows, si `harness.exe` está en uso,
+  el instalador aparta el destino en vez de dejarlo a medio escribir.
+
+**Importante al actualizar**: re-corre el instalador en **todos** los proyectos
+donde tengas el arnés instalado, no solo en uno. Mientras un proyecto conserve
+el binario viejo, ese binario sigue tomando el candado global (que el binario
+nuevo ya no mira) y sigue reescribiendo el grafo entero dentro de una
+transacción larga: puede bloquear las escrituras nuevas (que cortarán por
+`DB_STATEMENT_TIMEOUT`) y pisar con datos viejos filas recién actualizadas.
+
 ## Mantenimiento Rust only (post feature #2)
 
 El punto de entrada es **`harness_cli`** (sh y .ps1): ejecuta **exclusivamente** el binario Rust `harness` / `harness.exe` (compilado desde `rust/`). 

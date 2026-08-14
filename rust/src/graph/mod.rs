@@ -51,12 +51,37 @@ impl GraphEnv {
             None => home_dir().unwrap_or_default().join(".harness-hub"),
         };
         Ok(GraphEnv {
-            lock_file: hub_dir.join(".lock"),
+            // Candado POR PROYECTO (feature #14). Antes era `<hub>/.lock`, uno
+            // solo para toda la maquina: un sync lento de un proyecto dejaba en
+            // cola a todos los demas. Separarlo es seguro porque `save()`
+            // escribe unicamente las filas que el propio comando toco.
+            lock_file: hub_dir.join(format!(".lock-{}", lock_slug(&project))),
             base_dir,
             repo_root,
             project,
             hub_dir,
         })
+    }
+}
+
+/// Nombre del proyecto llevado a algo que sirva como nombre de archivo del
+/// candado (el proyecto puede venir de `HARNESS_PROJECT` con cualquier cosa).
+fn lock_slug(project: &str) -> String {
+    let slug: String = project
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('.').to_string();
+    if slug.is_empty() {
+        "proyecto".to_string()
+    } else {
+        slug
     }
 }
 
@@ -121,6 +146,17 @@ impl GraphMemoryManager {
         let sslmode = lookup("DB_SSL_MODE")
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| "require".to_string());
+        // Corte de sentencia: un hub que no responde debe fallar con un error
+        // legible, no colgar el comando (y el candado) indefinidamente.
+        // `0` lo desactiva; cualquier otra cosa que no sea un numero es error.
+        let statement_timeout_ms = match lookup("DB_STATEMENT_TIMEOUT").filter(|v| !v.is_empty()) {
+            None => store::DEFAULT_STATEMENT_TIMEOUT_MS,
+            Some(raw) => raw.trim().parse::<u64>().map_err(|_| {
+                Exit::msg(format!(
+                    "DB_STATEMENT_TIMEOUT invalido: '{raw}'. Usa milisegundos (por ejemplo 30000) o 0 para desactivarlo."
+                ))
+            })?,
+        };
         let host = get("DB_HOST");
         let store = PgGraphStore::new(
             &dbname,
@@ -129,6 +165,7 @@ impl GraphMemoryManager {
             &host,
             &port,
             &sslmode,
+            statement_timeout_ms,
         )?;
         let hub_location = format!("{dbname}@{host}:{port}");
         std::fs::create_dir_all(&env.hub_dir)?;

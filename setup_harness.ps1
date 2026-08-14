@@ -619,9 +619,49 @@ function Build-HarnessBinary {
         Write-HarnessLog WARN "Cargo succeeded but harness.exe was not found at: $builtBinary"
         return
     }
-    Copy-Item -LiteralPath $builtBinary -Destination (Join-Path $script:HarnessDir "harness.exe") -Force
+    if (-not (Install-BinaryAtomic -Source $builtBinary -Destination (Join-Path $script:HarnessDir "harness.exe"))) {
+        return
+    }
     $script:Counters.installed++
     Write-HarnessLog OK "Native harness.exe built and installed."
+}
+
+# Installs a BINARY without ever writing over the live one: copy to a sibling
+# temp file (same directory = same volume, required for the move to replace the
+# entry in one step) and only then move it onto the destination. Overwriting the
+# running binary in place is what leaves a half-written harness.exe when the old
+# one is locked (and, on macOS, what makes the installed binary die with
+# SIGKILL). On any failure the temp file is removed and the previous binary is
+# left intact.
+function Install-BinaryAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+    $destinationDir = Split-Path -Parent $Destination
+    $leaf = Split-Path -Leaf $Destination
+    $temporary = Join-Path $destinationDir (".{0}.new.{1}" -f $leaf, $PID)
+    $displaced = Join-Path $destinationDir (".{0}.old.{1}" -f $leaf, $PID)
+    try {
+        Copy-Item -LiteralPath $Source -Destination $temporary -Force
+        try {
+            Move-Item -LiteralPath $temporary -Destination $Destination -Force
+        }
+        catch {
+            # Windows keeps a running .exe locked: move the live one aside (that
+            # IS allowed) and put the new one in its place, instead of failing
+            # or leaving the destination half written.
+            Move-Item -LiteralPath $Destination -Destination $displaced -Force
+            Move-Item -LiteralPath $temporary -Destination $Destination -Force
+            Remove-Item -LiteralPath $displaced -Force -ErrorAction SilentlyContinue
+        }
+        return $true
+    }
+    catch {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        Write-HarnessLog ERROR "Could not install $leaf atomically: $($_.Exception.Message). The previous binary was left untouched."
+        return $false
+    }
 }
 
 function ConvertTo-PowerShellCommandPath {

@@ -665,20 +665,43 @@ cp -R "$REPO_ROOT/rust/src" "$RUST_TEST/rust/src"
 # cache: capturamos los reales ANTES de pisar HOME.
 REAL_RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 REAL_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-(
-    cd "$RUST_TEST"
-    HOME="$TMP_ROOT/home" \
-    RUSTUP_HOME="$REAL_RUSTUP_HOME" \
-    CARGO_HOME="$REAL_CARGO_HOME" \
-    HARNESS_HUB="$TMP_ROOT/rust-hub" \
-    CARGO_TARGET_DIR="$REPO_ROOT/rust/target" \
-    DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
-    bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1
-)
+run_rust_setup() {
+    (
+        cd "$RUST_TEST"
+        HOME="$TMP_ROOT/home" \
+        RUSTUP_HOME="$REAL_RUSTUP_HOME" \
+        CARGO_HOME="$REAL_CARGO_HOME" \
+        HARNESS_HUB="$TMP_ROOT/rust-hub" \
+        CARGO_TARGET_DIR="$REPO_ROOT/rust/target" \
+        DB_HOST=postgres.example DB_USER=harness DB_PASSWORD=secret DB_NAME=harness DB_SSL_MODE=require \
+        bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1
+    )
+}
+run_rust_setup
 test -x "$RUST_TEST/harness"
 # grep SIN -q: consume todo el stdout y evita SIGPIPE temprano.
 sh "$RUST_TEST/harness_cli" status | grep '^Backlog:' >/dev/null
 echo "[Ok] binario Rust compilado por el setup e integrado via harness_cli."
+
+# Feature #14 / AC-10 + AC-13: ACTUALIZAR no puede reescribir el binario vivo.
+# La segunda instalacion sobre el mismo directorio tiene que dejar el destino
+# con un inode NUEVO (senal de que hubo rename atomico y no un cp encima; eso
+# ultimo es lo que en macOS invalida la firma del Mach-O y mata al binario ya
+# instalado con SIGKILL) y sin temporales colgados.
+INODE_BEFORE="$(ls -i "$RUST_TEST/harness" | awk '{print $1}')"
+run_rust_setup
+INODE_AFTER="$(ls -i "$RUST_TEST/harness" | awk '{print $1}')"
+if [ "$INODE_BEFORE" = "$INODE_AFTER" ]; then
+    echo "[!] La re-instalacion reescribio el binario en su lugar (inode $INODE_AFTER sin cambios): vuelve el SIGKILL de macOS." >&2
+    exit 1
+fi
+test -x "$RUST_TEST/harness"
+if ls "$RUST_TEST"/.harness*.new.* >/dev/null 2>&1; then
+    echo "[!] La instalacion del binario dejo temporales sin borrar en $RUST_TEST." >&2
+    exit 1
+fi
+sh "$RUST_TEST/harness_cli" status | grep '^Backlog:' >/dev/null
+echo "[Ok] re-instalacion atomica del binario: inode nuevo, sin temporales, y el binario responde."
 
 # --- Feature #7: harness_check robusto (gate de espejo + checkout fuente) ---
 # (a) AC-12b: harness_check.sh corre y pasa LIMPIO en una fixture recien

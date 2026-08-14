@@ -91,6 +91,15 @@ $env:DB_SSL_MODE = "require"
 Tambien se pueden guardar esas variables en `$HARNESS_HUB/.env`.
 `DB_SSL_MODE` usa `require` por defecto.
 
+`DB_STATEMENT_TIMEOUT` (milisegundos, `30000` por defecto, `0` desactiva) corta
+del lado del servidor cualquier sentencia que se pase de ese tiempo: un hub que
+deja de responder falla con un error legible en vez de colgar el comando para
+siempre (`connect_timeout` solo cubre el saludo inicial). Junto con eso, el
+candado del hub es **por proyecto** (`$HARNESS_HUB/.lock-<proyecto>`), asi que
+varios repos de la misma maquina ya no hacen fila entre ellos; el guardado
+escribe unicamente las filas que el comando toco, en lotes, de modo que ningun
+proyecto reescribe las filas de otro.
+
 Al actualizar una instalacion antigua, `graph_db.json` y `progress/` se migran
 a PostgreSQL. Luego se respaldan bajo `bkp/memory-hub/` y se eliminan del Hub
 activo. Las consultas posteriores se realizan solo en PostgreSQL.

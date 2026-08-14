@@ -101,6 +101,50 @@ exit 0
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "harness.exe")) "Cargo output harness.exe was not installed."
     $cargoArgs = Get-Content -LiteralPath (Join-Path $fixture "rust/cargo-args.txt") -Raw
     Assert-True ($cargoArgs -match "build --release --locked") "Cargo was not invoked with build --release --locked."
+
+    # Feature #14 / AC-12 + AC-13 (paridad con el bloque del smoke sh): UPDATING
+    # no puede escribir sobre el binario vivo. La segunda instalacion tiene que
+    # reemplazar harness.exe via temporal + move y no dejar temporales colgados.
+    $secondCargo = if ($runningOnWindows) {
+        @'
+@echo off
+echo %*> "%CD%\cargo-args.txt"
+if not exist "%CARGO_TARGET_DIR%\release" mkdir "%CARGO_TARGET_DIR%\release"
+echo fake harness v2> "%CARGO_TARGET_DIR%\release\harness.exe"
+exit /b 0
+'@
+    }
+    else {
+        @'
+#!/bin/sh
+printf '%s\n' "$*" > "$PWD/cargo-args.txt"
+mkdir -p "$CARGO_TARGET_DIR/release"
+printf 'fake harness v2\n' > "$CARGO_TARGET_DIR/release/harness.exe"
+exit 0
+'@
+    }
+    if ($runningOnWindows) {
+        Set-Content -LiteralPath (Join-Path $fakeBin "cargo.cmd") -Value $secondCargo -Encoding Ascii
+    }
+    else {
+        $cargoPath = Join-Path $fakeBin "cargo"
+        Set-Content -LiteralPath $cargoPath -Value $secondCargo -Encoding utf8NoBOM
+        & chmod +x $cargoPath
+    }
+    $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
+    try {
+        & (Join-Path $fixture "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity `
+            -CargoTargetDir $cargoTarget
+    }
+    finally {
+        $env:PATH = $oldPath
+        $env:CARGO_TARGET_DIR = $oldCargoTarget
+    }
+    $reinstalled = (Get-Content -LiteralPath (Join-Path $fixture "harness.exe") -Raw)
+    Assert-True ($reinstalled -match "fake harness v2") "Re-running the installer did not replace harness.exe with the freshly built one."
+    $leftovers = @(Get-ChildItem -LiteralPath $fixture -Force -Filter ".harness.exe.*" -ErrorAction SilentlyContinue)
+    Assert-True ($leftovers.Count -eq 0) "The atomic install left temporary files behind: $($leftovers.Name -join ', ')"
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture ".codex/hooks.json")) "Codex hooks were not generated."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "bin/harness-hook.ps1")) "PowerShell hook runtime was not generated."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture ".gemini/commands/harness/check.toml")) "Gemini check command was not generated."

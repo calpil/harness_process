@@ -161,6 +161,10 @@ impl GraphMemoryManager {
                 if let Some(node) = m.store.nodes.get_mut(&s2) {
                     node.remove("tipo");
                 }
+                // Mutacion directa sobre `nodes`: sin marcarlo, el guardado por
+                // delta (feature #14) no lo escribiria. Se marca para que lo
+                // persistido sea identico a lo de antes del delta.
+                m.store.mark_node_dirty(&s2);
                 m.store.save()?;
                 println!("[Memoria] {s2} ya no esta marcado como transversal");
             } else {

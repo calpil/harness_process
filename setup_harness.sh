@@ -1679,6 +1679,31 @@ install_asset() {
     COUNT_CREATED=$((COUNT_CREATED + 1))
 }
 
+# Instala un BINARIO de forma atomica: copia a un temporal HERMANO del destino
+# (mismo directorio = mismo filesystem, unica forma de que el rename sea
+# atomico) y recien ahi lo mueve encima. Nunca se escribe sobre el binario que
+# ya esta instalado: en macOS reescribir el inode vivo le invalida al kernel la
+# firma cacheada del Mach-O y la corrida siguiente muere con SIGKILL
+# ("Killed: 9"). Si algo falla, borra el temporal y deja el binario previo
+# intacto y usable.
+install_binary_atomic() {
+    src="$1"
+    dest="$2"
+    dest_dir="$(dirname "$dest")"
+    tmp="$dest_dir/.$(basename "$dest").new.$$"
+    if [ ! -f "$src" ]; then
+        log_error "   -> no se encontro el binario compilado: $src"
+        return 1
+    fi
+    mkdir -p "$dest_dir"
+    rm -f "$tmp"
+    if cp "$src" "$tmp" && chmod +x "$tmp" && mv -f "$tmp" "$dest"; then
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
 # Migracion de instalaciones anteriores a la feature #4: los docs del arnes
 # vivian en <harness>/docs/. Ahora viven en el docs/ de la RAIZ, junto a la
 # constitution y a los artefactos SDD. Regla (decision usuario 2026-07-24):
@@ -2004,11 +2029,14 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) HARNESS_BIN_NAME="harness.exe" ;;
 esac
 if [ "$DRY_RUN" -eq 1 ]; then
-    log_info "[DRY-RUN] Se compilaria rust/ (cargo build --release --locked) y se copiaria $HARNESS_BIN_NAME"
+    log_info "[DRY-RUN] Se compilaria rust/ (cargo build --release --locked) y se instalaria $HARNESS_BIN_NAME con mv atomico"
 elif command -v cargo >/dev/null 2>&1 && [ -f "$HARNESS_DIR/rust/Cargo.toml" ]; then
+    # El binario se instala con mv atomico (ver install_binary_atomic): copiarlo
+    # encima del que ya existe deja el arnes muerto con SIGKILL en macOS.
     if (cd "$HARNESS_DIR/rust" && cargo build --release --quiet --locked) \
-        && cp "${CARGO_TARGET_DIR:-$HARNESS_DIR/rust/target}/release/$HARNESS_BIN_NAME" "$HARNESS_DIR/$HARNESS_BIN_NAME" \
-        && chmod +x "$HARNESS_DIR/$HARNESS_BIN_NAME"; then
+        && install_binary_atomic \
+            "${CARGO_TARGET_DIR:-$HARNESS_DIR/rust/target}/release/$HARNESS_BIN_NAME" \
+            "$HARNESS_DIR/$HARNESS_BIN_NAME"; then
         log_success "   -> binario harness compilado; harness_cli lo usara."
     else
         log_error "   -> fallo al compilar/copiar el binario harness. Instala rustup y re-ejecuta."
