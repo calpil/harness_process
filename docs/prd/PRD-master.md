@@ -189,3 +189,4 @@ con su fecha.>
  promete este documento, actualiza el documento: esa parte es tuya.>
 
 -
+- #14 hub_batch_upserts_atomic_install -> done 2026-08-14 · spec: docs/spec-feature-14-hub-batch-upserts-atomic-install.md · impl: docs/impl-14.md
