@@ -69,6 +69,7 @@ pub fn run(
     if let Some(feature) = feature_at(&data, idx).as_object() {
         crate::atlassian::emit::on_advance(paths, feature, nota);
     }
+    crate::atlassian::push::push_bg(paths);
     // 4) Memorias: hub (in_progress, con la nota) + graphify (best-effort).
     update_memories(
         "advance",

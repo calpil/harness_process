@@ -37,6 +37,24 @@ copy_flat_fixture() {
     chmod +x "$target/harness"
 }
 
+# El binario busca credenciales de Atlassian en el entorno, en .harness.env y en
+# ~/.config/harness/config. Un test JAMAS puede tomar las credenciales reales ni
+# hablarle a la API de verdad: toda invocacion del binario en este smoke pasa
+# por aca, con HOME aislado y las variables limpias.
+harness_bin() {
+    target="$1"
+    shift
+    (
+        cd "$target" || exit 1
+        HOME="$TMP_ROOT/home" \
+        USERPROFILE="$TMP_ROOT/home" \
+        HARNESS_ATLASSIAN_EMAIL= \
+        HARNESS_ATLASSIAN_TOKEN= \
+        HARNESS_ATLASSIAN_AUTO=0 \
+        ./harness "$@"
+    )
+}
+
 run_setup() {
     target="$1"
     shift
@@ -1239,7 +1257,7 @@ test ! -e "$ATLASSIAN_OFF/atlassian.json" \
 grep -q "sin binding (integracion apagada)" "$TMP_ROOT/atlassian-off.log" \
     || { echo "[!] AC-3: el instalador debe avisar que la integracion queda apagada." >&2; exit 1; }
 # AC-4: sin binding el flujo no crea nada de Atlassian.
-( cd "$ATLASSIAN_OFF" && ./harness add --name demo_sin_binding >/dev/null 2>&1 )
+harness_bin "$ATLASSIAN_OFF" add --name demo_sin_binding >/dev/null 2>&1
 test ! -e "$ATLASSIAN_OFF/progress/atlassian" \
     || { echo "[!] AC-4: sin binding el flujo no debe crear progress/atlassian." >&2; exit 1; }
 
@@ -1268,7 +1286,7 @@ grep -q '"project_key":"MIO"' "$ATLASSIAN_FLAGS/atlassian.json" \
 # Y con binding activo, el flujo SI deja su intent (AC-6).
 printf '%s' '{"site":"calpil.atlassian.net","enabled":true,"jira":{"project_key":"ADR"},"confluence":{"space_key":"SD"}}' \
     > "$ATLASSIAN_FLAGS/atlassian.json"
-( cd "$ATLASSIAN_FLAGS" && ./harness add --name demo_con_binding >/dev/null 2>&1 )
+harness_bin "$ATLASSIAN_FLAGS" add --name demo_con_binding >/dev/null 2>&1
 find "$ATLASSIAN_FLAGS/progress/atlassian/outbox" -name '*.json' -print -quit 2>/dev/null | grep -q . \
     || { echo "[!] AC-6: con binding activo, add debe dejar su intent en la outbox." >&2; exit 1; }
 
@@ -1317,6 +1335,22 @@ grep -qxF ".harness.env" "$ATLASSIAN_OFF/.gitignore" \
     || { echo "[!] .harness.env debe ignorarse tambien sin binding de Atlassian." >&2; exit 1; }
 grep -qF '".harness.env"' "$REPO_ROOT/setup_harness.ps1" \
     || { echo "[!] falta la paridad ps1 del ignore de .harness.env." >&2; exit 1; }
+
+# Feature #16: el instalador delega la verificacion del binding en el binario
+# (sin token, el binario avisa que la omite) y expone los flags de creacion.
+grep -q "verificacion: omitida" "$TMP_ROOT/atlassian-flags.log" \
+    || { echo "[!] el instalador debe verificar el binding via el binario (omitida sin token)." >&2; exit 1; }
+for flag in --create-jira-project --create-confluence-space; do
+    grep -qF -- "$flag" "$REPO_ROOT/setup_harness.sh" \
+        || { echo "[!] falta el flag $flag en el instalador." >&2; exit 1; }
+done
+grep -qF "CreateJiraProject" "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] falta la paridad ps1 de los flags de creacion." >&2; exit 1; }
+# El envio automatico no puede dispararse sin token: el binario lo dice.
+auto_status="$(harness_bin "$ATLASSIAN_FLAGS" atlassian status 2>&1 || true)"
+printf '%s' "$auto_status" | grep -q "Auto push  : apagado" \
+    || { echo "[!] sin token, el envio automatico debe reportarse apagado. Salida real:" >&2; printf '%s\n' "$auto_status" >&2; exit 1; }
+echo "[Ok] Atlassian #16: verificacion del binding delegada al binario, flags de creacion y auto push reportado."
 
 echo "[Ok] Atlassian: binding por flags y por config, apagado sin config, no-pisa, intent en la outbox y paridad ps1."
 

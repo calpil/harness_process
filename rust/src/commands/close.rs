@@ -65,6 +65,7 @@ pub fn run(
     if let Some(feature) = feature_at(&data, idx).as_object() {
         crate::atlassian::emit::on_close(paths, feature, status, Some(&note_text));
     }
+    crate::atlassian::push::push_bg(paths);
     if plan.exists() {
         let mut f = std::fs::OpenOptions::new().append(true).open(&plan)?;
         write!(f, "\n---\nCerrado: {stamp} - status={status} - {note_text}\n")?;

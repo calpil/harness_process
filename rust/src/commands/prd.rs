@@ -38,6 +38,10 @@ pub fn add(paths: &HarnessPaths, name: &str, parent: Option<&str>) -> anyhow::Re
     let rel_child = prd::rel_path(&slug);
     let rel_parent = prd::rel_path(&parent_prd.slug);
     log(paths, &format!("prd add {slug} (padre: {})", parent_prd.reference()))?;
+    // Feature #16 (AC-3): el PRD nuevo nace como epic sin esperar a que se le
+    // cargue la primera feature, y el worker detached lo empuja solo.
+    crate::atlassian::emit::on_prd_add(paths, &slug);
+    crate::atlassian::push::push_bg(paths);
     println!("PRD anidado creado: {rel_child}");
     if linked {
         println!("Enlazado en {rel_parent} (seccion \"{}\")", prd::CHILDREN_SECTION.trim_start_matches("## "));

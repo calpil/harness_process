@@ -78,6 +78,7 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
     if let Some(feature) = feature_at(&data, idx).as_object() {
         crate::atlassian::emit::on_start(paths, feature);
     }
+    crate::atlassian::push::push_bg(paths);
     std::fs::create_dir_all(&paths.progress)?;
     let mut current = format!("# Feature #{feature_id}: {feature_name}\n\n");
     current.push_str("Estado: in_progress\n");

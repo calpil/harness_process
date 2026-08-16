@@ -76,6 +76,38 @@ pub fn find_page(
     Ok(None)
 }
 
+/// True si el space existe y es visible para el token (AC-18).
+pub fn space_exists(client: &Client, space_key: &str) -> anyhow::Result<bool> {
+    match space_id(client, space_key) {
+        Ok(_) => Ok(true),
+        Err(err) => match err.downcast_ref::<crate::atlassian::http::ApiError>() {
+            Some(api) if api.status == 404 || api.status == 403 => Ok(false),
+            // `space_id` tambien falla con "no encontre el space" (lista vacia).
+            _ if err.to_string().contains("no encontre el space") => Ok(false),
+            _ => Err(err),
+        },
+    }
+}
+
+/// Crea el space (AC-22). Requiere permiso para crear spaces; se usa SOLO con
+/// `--create-space`.
+pub fn create_space(client: &Client, key: &str, name: &str) -> anyhow::Result<String> {
+    let res = client.post(
+        "/wiki/api/v2/spaces",
+        &json!({
+            "key": key,
+            "name": name,
+            "description": {
+                "value": "Creado por el arnes (harness_process) al configurar el binding.",
+                "representation": "plain"
+            },
+        }),
+    )?;
+    res.get("id")
+        .and_then(value_as_id)
+        .context("Confluence creo el space pero no devolvio su id")
+}
+
 /// Crea la pagina (publicada) y devuelve su id y version.
 pub fn create_page(
     client: &Client,

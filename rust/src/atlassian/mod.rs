@@ -22,4 +22,5 @@ pub mod http;
 pub mod jira;
 pub mod markdown;
 pub mod outbox;
+pub mod push;
 pub mod state;

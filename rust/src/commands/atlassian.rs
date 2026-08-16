@@ -78,6 +78,8 @@ pub fn bind(
     issue_type: Option<&str>,
     enable: bool,
     disable: bool,
+    create_project: bool,
+    create_space: bool,
 ) -> anyhow::Result<()> {
     let previous = Binding::load(paths);
     let site = site
@@ -110,6 +112,7 @@ pub fn bind(
         site: site.clone(),
         cloud_id: None,
         enabled: true,
+        auto: true,
         jira: JiraBinding::default(),
         confluence: ConfluenceBinding::default(),
     });
@@ -126,6 +129,11 @@ pub fn bind(
         binding.enabled = false;
     }
     binding.save(paths)?;
+
+    // Feature #16 (AC-18..AC-23): con token, el binding se verifica contra la
+    // API en el momento de configurarlo. Sin token no se puede verificar: se
+    // avisa y se sigue (el binding igual queda escrito).
+    verify_binding(paths, &binding, create_project, create_space)?;
 
     println!("[Atlassian] binding registrado en {}", Binding::path(paths).display());
     println!("  sitio    : {}", binding.site);
@@ -183,9 +191,33 @@ pub fn status(paths: &HarnessPaths) -> anyhow::Result<()> {
             None => "ausente (usa `drain` + agente con MCP)".to_string(),
         }
     );
+    // Feature #16: estado del envio automatico y del ultimo intento.
+    println!(
+        "Auto push  : {}",
+        match crate::atlassian::push::should_push(paths) {
+            Ok(_) => "encendido (cada transicion del flujo empuja sola)".to_string(),
+            Err(skip) => format!("apagado ({})", match skip {
+                crate::atlassian::push::Skip::NoBinding => "sin binding",
+                crate::atlassian::push::Skip::DisabledInBinding => "\"auto\": false en atlassian.json",
+                crate::atlassian::push::Skip::DisabledInEnv => "HARNESS_ATLASSIAN_AUTO=0",
+                crate::atlassian::push::Skip::NoToken => "sin token: usa `drain` + agente con MCP",
+            }),
+        }
+    );
+    let log = crate::atlassian::push::log_path(paths);
+    match std::fs::metadata(&log).and_then(|m| m.modified()) {
+        Ok(_) => println!("Ultimo push: {} (detalle en {})", last_push_line(&log), log.display()),
+        Err(_) => println!("Ultimo push: todavia ninguno"),
+    }
     match &state.sprint {
         Some(s) => println!("Sprint     : #{} {} ({})", s.id, s.name, s.state),
         None => println!("Sprint     : ninguno vigente"),
+    }
+
+    // AC-20: `status` valida el binding contra la API cuando hay token.
+    if Credentials::discover(paths).is_some() {
+        println!("\nVerificacion del binding:");
+        let _ = verify_binding(paths, &binding, false, false);
     }
 
     println!("\nMapeo local -> remoto:");
@@ -209,6 +241,74 @@ pub fn status(paths: &HarnessPaths) -> anyhow::Result<()> {
     }
     if pending.len() > 20 {
         println!("  ... y {} mas", pending.len() - 20);
+    }
+    Ok(())
+}
+
+/// Primera linea util del log del worker (lleva el timestamp de la corrida).
+fn last_push_line(log: &std::path::Path) -> String {
+    std::fs::read_to_string(log)
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with("== Atlassian push"))
+                .map(|l| l.trim_matches('=').trim().to_string())
+        })
+        .unwrap_or_else(|| "sin datos".to_string())
+}
+
+/// Verifica contra la API que el proyecto Jira y el space existan, y — SOLO con
+/// los flags explicitos — los crea (AC-18..AC-23).
+///
+/// Nunca hace fallar el comando por un problema de red: verificar es
+/// informativo. Lo que si devuelve error es un flag de creacion que no se pudo
+/// cumplir, porque ahi el usuario pidio algo concreto.
+pub fn verify_binding(
+    paths: &HarnessPaths,
+    binding: &Binding,
+    create_project: bool,
+    create_space: bool,
+) -> anyhow::Result<()> {
+    let Some(creds) = Credentials::discover(paths) else {
+        println!(
+            "  verificacion: omitida (sin token no se puede consultar la API). Define {} y {} para verificarlo.",
+            crate::atlassian::http::ENV_EMAIL,
+            crate::atlassian::http::ENV_TOKEN
+        );
+        return Ok(());
+    };
+    let client = Client::new(binding, &creds);
+    let key = binding.jira.project_key.clone();
+
+    match jira::project_exists(&client, &key) {
+        Ok(true) => println!("  verificacion: proyecto Jira {key} OK"),
+        Ok(false) if create_project => {
+            let lead = jira::my_account_id(&client)?;
+            let created = jira::create_project(&client, &key, &key, &lead)?;
+            println!("  verificacion: proyecto Jira {created} CREADO (software / scrum team-managed)");
+        }
+        Ok(false) => {
+            println!("  [!] el proyecto Jira '{key}' no existe (o no tenes permiso para verlo).");
+            println!("      Crealo en {}/jira/projects, o repeti el comando con --create-project.", binding.base_url());
+        }
+        Err(err) => println!("  [i] no pude verificar el proyecto ({err:#})"),
+    }
+
+    let space = binding.confluence.space_key.clone();
+    if space.trim().is_empty() {
+        return Ok(());
+    }
+    match confluence::space_exists(&client, &space) {
+        Ok(true) => println!("  verificacion: space de Confluence {space} OK"),
+        Ok(false) if create_space => {
+            let id = confluence::create_space(&client, &space, &space)?;
+            println!("  verificacion: space de Confluence {space} CREADO (id {id})");
+        }
+        Ok(false) => {
+            println!("  [!] el space de Confluence '{space}' no existe (o no tenes permiso).");
+            println!("      Crealo en {}/wiki/spacedirectory, o repeti el comando con --create-space.", binding.base_url());
+        }
+        Err(err) => println!("  [i] no pude verificar el space ({err:#})"),
     }
     Ok(())
 }
@@ -260,13 +360,14 @@ fn mcp_call(binding: &Binding, state: &State, intent: &Intent) -> Value {
             name,
             acceptance,
             prd,
+            issue_kind,
         } => {
             let parent = prd.as_ref().and_then(|s| state.prds.get(s)).cloned();
             json!({
                 "tool": "createJiraIssue",
                 "args": {
                     "projectKey": project,
-                    "issueTypeName": types.feature,
+                    "issueTypeName": types.for_kind(issue_kind.as_deref()),
                     "summary": jira::truncate_summary(&feature_summary(fid, name)),
                     "description": feature_description(acceptance),
                     "parent": parent,
@@ -406,6 +507,47 @@ fn record_result(state: &mut State, intent: &Intent, key: Option<&str>) -> anyho
 }
 
 // --------------------------------------------------------------------------
+// backfill (cargar lo que ya existe)
+// --------------------------------------------------------------------------
+
+/// AC-24..AC-28: emite los intents de TODO lo que ya vive en el repo — un epic
+/// por PRD del arbol y una historia por feature del backlog, con su estado y
+/// sus AC-n — para que el board sea espejo del repo desde el arranque (OBS-14).
+///
+/// Es idempotente: el dedupe de la #15 corta lo que ya esta mapeado, asi que
+/// correrlo dos veces no duplica nada.
+pub fn backfill(paths: &HarnessPaths, sin_acs: bool) -> anyhow::Result<()> {
+    let binding = require_binding(paths)?;
+    let before = outbox::pending(paths).len();
+
+    // 1. Un epic por cada PRD del arbol (el `add` normal solo emite el del PRD
+    //    de la feature que se carga).
+    for prd in crate::prd::scan(paths) {
+        emit::on_prd_add(paths, &prd.slug);
+    }
+
+    // 2. Una historia por cada feature del backlog, con su estado real.
+    let data = load_features(paths)?;
+    for feature in features_slice(&data) {
+        let Some(map) = feature.as_object() else {
+            continue;
+        };
+        emit::on_add(paths, map);
+        if !sin_acs {
+            emit::on_backfill_acs(paths, map);
+        }
+        emit::on_backfill_status(paths, map, &binding);
+    }
+
+    let emitted = outbox::pending(paths).len().saturating_sub(before);
+    println!("[Atlassian] backfill: {emitted} intent(s) nuevos en la outbox.");
+    if emitted > 0 {
+        println!("  Se aplican con `atlassian apply` (o solos, si el envio automatico esta encendido).");
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
 // apply (ejecutor REST)
 // --------------------------------------------------------------------------
 
@@ -467,7 +609,21 @@ fn execute(
     let project = &binding.jira.project_key;
     match &intent.kind {
         IntentKind::PrdEpic { slug, title, body } => {
-            let key = jira::create_issue(client, project, &types.epic, title, body, None)?;
+            // AC-29: si el equipo ya escribio ese epic a mano, se adopta en vez
+            // de crear un duplicado que hable de lo mismo.
+            let key = match jira::find_epic_by_title(client, project, &types.epic, title) {
+                Ok(Some(existing)) => {
+                    println!("  (epic existente adoptado: {existing})");
+                    existing
+                }
+                Ok(None) => jira::create_issue(client, project, &types.epic, title, body, None)?,
+                Err(err) => {
+                    // Buscar es una ayuda, no un requisito: si la busqueda falla
+                    // se crea igual, que es el comportamiento de la #15.
+                    println!("  (no pude buscar epics existentes: {err:#})");
+                    jira::create_issue(client, project, &types.epic, title, body, None)?
+                }
+            };
             state.prds.insert(slug.clone(), key.clone());
             Ok(Some(key))
         }
@@ -476,12 +632,13 @@ fn execute(
             name,
             acceptance,
             prd,
+            issue_kind,
         } => {
             let parent = prd.as_ref().and_then(|s| state.prds.get(s)).cloned();
             let key = jira::create_issue(
                 client,
                 project,
-                &types.feature,
+                types.for_kind(issue_kind.as_deref()),
                 &feature_summary(fid, name),
                 &feature_description(acceptance),
                 parent.as_deref(),
@@ -844,6 +1001,7 @@ mod tests {
             site: "calpil.atlassian.net".to_string(),
             cloud_id: None,
             enabled: true,
+            auto: true,
             jira: JiraBinding {
                 project_key: "ADR".to_string(),
                 ..Default::default()
@@ -869,6 +1027,7 @@ mod tests {
                 name: "demo".to_string(),
                 acceptance: vec!["algo".to_string()],
                 prd: Some("master".to_string()),
+                issue_kind: None,
             },
         );
         let call = mcp_call(&binding(), &state, &intent);
@@ -890,6 +1049,7 @@ mod tests {
                 name: "demo".to_string(),
                 acceptance: vec![],
                 prd: Some("master".to_string()),
+                issue_kind: None,
             },
         );
         let call = mcp_call(&binding(), &state, &intent);

@@ -29,6 +29,16 @@ fn cmd(bin: &Path) -> Command {
         c.env_remove(var);
     }
     c.env("HARNESS_HUB", bin.parent().unwrap().join("hub"));
+    // Aislamiento de credenciales (feature #16): el binario busca el token en
+    // el entorno y en ~/.config/harness/config. Un test JAMAS puede tomar las
+    // credenciales reales de la maquina ni, mucho menos, hablarle a la API de
+    // verdad: HOME apunta al sandbox y las variables se limpian.
+    let home = bin.parent().unwrap().join("fake-home");
+    let _ = std::fs::create_dir_all(&home);
+    c.env("HOME", &home);
+    c.env("USERPROFILE", &home);
+    c.env_remove("HARNESS_ATLASSIAN_EMAIL");
+    c.env_remove("HARNESS_ATLASSIAN_TOKEN");
     c
 }
 
@@ -828,4 +838,277 @@ fn close_should_emit_transition_and_comment() {
     // Decision OBS-7: blocked se marca con el flag Impediment, no transiciona.
     assert!(text.contains("Impediment"), "blocked usa el flag: {text}");
     assert!(text.contains("trabada"), "la nota viaja como comentario");
+}
+
+// ---------------------------------------------------------------------------
+// Feature #16: envio automatico, --kind y el interruptor.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn add_should_reject_an_invalid_kind_before_touching_the_backlog() {
+    // AC-10: exit 2 con la lista de validos, y el backlog intacto.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["add", "--name", "Demo", "--kind", "epica"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--kind invalido"))
+        .stderr(predicate::str::contains("feature, bug, task"));
+    // El backlog ni se crea: el rechazo ocurre antes de tocarlo.
+    let backlog = std::fs::read_to_string(dir.path().join("hp/feature_list.json"))
+        .unwrap_or_default();
+    assert!(!backlog.contains("Demo"), "una feature invalida no entra al backlog");
+}
+
+#[test]
+fn add_kind_should_be_optional_and_map_to_the_right_issue_type() {
+    // AC-8 + AC-9: con --kind bug queda registrado y el plan usa el tipo Bug;
+    // sin --kind, el backlog queda exactamente como antes.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    cmd(&bin).args(["add", "--name", "Normal"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Arreglo", "--kind", "bug"])
+        .assert()
+        .success();
+
+    let backlog: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap())
+            .unwrap();
+    let features = backlog["features"].as_array().unwrap();
+    assert!(features[0].get("kind").is_none(), "sin --kind no se agrega el campo");
+    assert_eq!(features[1]["kind"], "bug");
+
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let tipos: Vec<&str> = plan["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["call"]["args"]["issueTypeName"].as_str())
+        .collect();
+    assert!(tipos.contains(&"Story"), "la feature normal va como Story: {tipos:?}");
+    assert!(tipos.contains(&"Bug"), "el bug va como Bug: {tipos:?}");
+}
+
+#[test]
+fn prd_add_should_emit_its_epic_without_waiting_for_a_feature() {
+    // AC-3: el PRD nuevo nace como epic apenas se crea.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    std::fs::create_dir_all(dir.path().join("docs/prd")).unwrap();
+    std::fs::write(
+        dir.path().join("docs/prd/PRD-master.md"),
+        "# PRD maestro\n\n## 10. Hitos -> features\n",
+    )
+    .unwrap();
+
+    cmd(&bin)
+        .args(["prd", "add", "--name", "cobranza"])
+        .assert()
+        .success();
+
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let what: Vec<&str> = plan["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["what"].as_str().unwrap())
+        .collect();
+    assert!(
+        what.iter().any(|w| w.contains("epic del PRD cobranza")),
+        "el PRD nuevo deja su epic: {what:?}"
+    );
+}
+
+#[test]
+fn auto_push_should_be_reported_and_switchable() {
+    // AC-13 + AC-14: `status` dice por que no se empuja, y el env lo apaga.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    // Sin token (los tests estan aislados): apagado por falta de credenciales.
+    cmd(&bin)
+        .args(["atlassian", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Auto push  : apagado (sin token"));
+
+    // Con credenciales falsas en el repo, se enciende...
+    std::fs::write(
+        dir.path().join(".harness.env"),
+        "HARNESS_ATLASSIAN_EMAIL=a@b.cl\nHARNESS_ATLASSIAN_TOKEN=secreto\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["atlassian", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Auto push  : encendido"));
+
+    // ...y la variable de entorno lo apaga para esa corrida (AC-14).
+    cmd(&bin)
+        .env("HARNESS_ATLASSIAN_AUTO", "0")
+        .args(["atlassian", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("HARNESS_ATLASSIAN_AUTO=0"));
+}
+
+#[test]
+fn transitions_should_keep_their_exit_codes_with_auto_push_on() {
+    // AC-2: con el envio automatico encendido (credenciales falsas, sin red
+    // alcanzable) los comandos del flujo siguen saliendo 0 y con su salida.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    std::fs::write(
+        dir.path().join(".harness.env"),
+        "HARNESS_ATLASSIAN_EMAIL=a@b.cl\nHARNESS_ATLASSIAN_TOKEN=secreto\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["add", "--name", "Demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 agregada."));
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cerrada como blocked"));
+}
+
+#[test]
+fn backfill_should_load_prds_and_backlog_without_touching_the_network() {
+    // AC-24 + AC-27: el backfill emite epics de los PRDs, historias de TODAS
+    // las features y sus transiciones de estado, sin token (solo escribe la
+    // outbox; aplicarlo es otro paso).
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    std::fs::create_dir_all(dir.path().join("docs/prd")).unwrap();
+    std::fs::write(
+        dir.path().join("docs/prd/PRD-master.md"),
+        "# PRD maestro\n\n## 10. Hitos -> features\n",
+    )
+    .unwrap();
+
+    // Backlog con historia: una cerrada y una en curso.
+    cmd(&bin).args(["add", "--name", "Vieja"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Nueva"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
+    // Limpiamos la outbox para partir de cero y probar SOLO el backfill.
+    let outbox = dir.path().join("hp/progress/atlassian/outbox");
+    std::fs::remove_dir_all(&outbox).unwrap();
+
+    cmd(&bin)
+        .args(["atlassian", "backfill"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("backfill:"));
+
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let what: Vec<String> = plan["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["what"].as_str().unwrap().to_string())
+        .collect();
+    assert!(what.iter().any(|w| w.contains("epic del PRD master")), "{what:?}");
+    assert!(what.iter().any(|w| w.contains("feature #1")), "{what:?}");
+    assert!(what.iter().any(|w| w.contains("feature #2")), "{what:?}");
+    assert!(
+        what.iter().any(|w| w.contains("-> In Progress")),
+        "la feature en curso lleva su estado al board: {what:?}"
+    );
+}
+
+#[test]
+fn backfill_should_be_idempotent_and_respect_sin_acs() {
+    // AC-25 + AC-28: repetirlo no duplica, y --sin-acs omite las subtasks.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace(
+            "- AC-1: Given <contexto>, When <accion>, Then <resultado observable>.",
+            "- AC-1: Given algo, When otra cosa, Then un resultado.",
+        ),
+    )
+    .unwrap();
+    std::fs::remove_dir_all(dir.path().join("hp/progress/atlassian/outbox")).unwrap();
+
+    // Con --sin-acs no bajan subtasks...
+    cmd(&bin)
+        .args(["atlassian", "backfill", "--sin-acs"])
+        .assert()
+        .success();
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let text_plan = plan.to_string();
+    assert!(!text_plan.contains("subtask AC-1"), "--sin-acs no baja los AC");
+
+    // ...y sin el flag si, sumandose a lo ya emitido sin duplicarlo.
+    cmd(&bin).args(["atlassian", "backfill"]).assert().success();
+    let out2 = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan2: serde_json::Value = serde_json::from_slice(&out2.stdout).unwrap();
+    assert!(plan2.to_string().contains("subtask AC-1"));
+
+    let claves: Vec<&str> = plan2["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["key"].as_str().unwrap())
+        .collect();
+    let mut unicas = claves.clone();
+    unicas.sort_unstable();
+    unicas.dedup();
+    assert_eq!(claves.len(), unicas.len(), "el backfill no duplica intents: {claves:?}");
+}
+
+#[test]
+fn bind_should_report_that_it_cannot_verify_without_token() {
+    // AC-18: sin credenciales no se puede validar contra la API; se dice y se
+    // escribe el binding igual.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args([
+            "atlassian",
+            "bind",
+            "--site",
+            "calpil.atlassian.net",
+            "--jira-project",
+            "ADR",
+            "--confluence-space",
+            "SD",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verificacion: omitida"))
+        .stdout(predicate::str::contains("binding registrado"));
+}
+
+#[test]
+fn backfill_should_refuse_without_binding() {
+    // Sin binding no hay a donde cargar: exit 2 con la pregunta para el usuario.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["atlassian", "backfill"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lo voy a adivinar"));
 }

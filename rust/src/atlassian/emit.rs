@@ -123,6 +123,32 @@ pub fn on_add(paths: &HarnessPaths, feature: &Map<String, Value>) {
             name: py_str(feature.get("name")),
             acceptance,
             prd: Some(slug),
+            issue_kind: feature
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        },
+    );
+}
+
+/// `prd add`: un PRD nuevo nace como epic sin esperar a su primera feature
+/// (feature #16, AC-3).
+pub fn on_prd_add(paths: &HarnessPaths, slug: &str) {
+    if active(paths).is_none() {
+        return;
+    }
+    let key_slug = prd_key_slug(slug);
+    emit_best_effort(
+        paths,
+        &key_prd(slug),
+        "prd add",
+        IntentKind::PrdEpic {
+            slug: key_slug,
+            title: prd_title(paths, slug),
+            body: format!(
+                "Epic derivado del PRD `{}` del repo.",
+                crate::prd::rel_path(slug)
+            ),
         },
     );
 }
@@ -263,6 +289,67 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
         "close",
         IntentKind::Comment { fid, body },
     );
+}
+
+/// Backfill (feature #16): baja los AC-n del spec de una feature que ya existe,
+/// sin importar en que estado este. El dedupe evita repetir lo ya mapeado.
+pub fn on_backfill_acs(paths: &HarnessPaths, feature: &Map<String, Value>) {
+    if active(paths).is_none() {
+        return;
+    }
+    let fid = py_str(feature.get("id"));
+    for (ac, text) in spec_acceptance_criteria(paths, feature) {
+        emit_best_effort(
+            paths,
+            &key_ac(&fid, &ac),
+            "backfill",
+            IntentKind::AcSubtask {
+                fid: fid.clone(),
+                ac,
+                text,
+            },
+        );
+    }
+}
+
+/// Backfill: lleva la historia al estado que la feature tiene HOY en el
+/// backlog, para que el board sea espejo del repo (AC-24, AC-27).
+pub fn on_backfill_status(
+    paths: &HarnessPaths,
+    feature: &Map<String, Value>,
+    binding: &Binding,
+) {
+    if active(paths).is_none() {
+        return;
+    }
+    let fid = py_str(feature.get("id"));
+    let statuses = &binding.jira.statuses;
+    let status = feature
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("pending");
+    // `pending` es el estado inicial del board: no hace falta transicionar.
+    let target = match status {
+        "in_progress" => Some(statuses.in_progress.clone()),
+        "done" => Some(statuses.done.clone()),
+        _ => None,
+    };
+    if let Some(to) = target {
+        emit_best_effort(
+            paths,
+            &key_status(&fid, &to),
+            "backfill",
+            IntentKind::Transition { fid: fid.clone(), to },
+        );
+    }
+    if status == "blocked" {
+        emit_best_effort(
+            paths,
+            &key_flag(&fid, true),
+            "backfill",
+            IntentKind::BlockedFlag { fid, on: true },
+        );
+    }
 }
 
 /// Extrae los `AC-n` del spec de la feature: `- AC-1: <texto>` con sus lineas

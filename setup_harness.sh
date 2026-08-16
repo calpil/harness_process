@@ -54,6 +54,9 @@ ATLASSIAN_SITE="${HARNESS_ATLASSIAN_SITE:-}"
 JIRA_PROJECT="${HARNESS_JIRA_PROJECT:-}"
 CONFLUENCE_SPACE="${HARNESS_CONFLUENCE_SPACE:-}"
 JIRA_ISSUE_TYPE="${HARNESS_JIRA_ISSUE_TYPE:-Story}"
+# Feature #16: crear proyecto/space si faltan, SOLO con flag explicito.
+CREATE_JIRA_PROJECT=0
+CREATE_CONFLUENCE_SPACE=0
 
 # Nuevas opciones globales (mejoras)
 DRY_RUN=0
@@ -372,6 +375,11 @@ Opciones:
   --jira-project <KEY>         Proyecto Jira al que pertenece ESTE repo (ej: ADR).
   --confluence-space <KEY>     Space de Confluence donde se publican PRD/SDD/specs.
   --jira-issue-type <TIPO>     Tipo de issue para una feature (default: Story).
+  --create-jira-project        Si el proyecto Jira no existe, crearlo (requiere
+                               permiso de admin y token configurado).
+  --create-confluence-space    Si el space no existe, crearlo (requiere permiso).
+                               Sin estos dos flags el arnes NUNCA crea nada:
+                               solo avisa que falta y como crearlo.
                                Los cuatro tambien se leen del config file como
                                HARNESS_ATLASSIAN_SITE / HARNESS_JIRA_PROJECT /
                                HARNESS_CONFLUENCE_SPACE / HARNESS_JIRA_ISSUE_TYPE.
@@ -471,6 +479,8 @@ while [ "$#" -gt 0 ]; do
             shift
             JIRA_ISSUE_TYPE="$1"
             ;;
+        --create-jira-project) CREATE_JIRA_PROJECT=1 ;;
+        --create-confluence-space) CREATE_CONFLUENCE_SPACE=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
             log_error "Opcion desconocida: $1"
@@ -1050,8 +1060,12 @@ sh "__HREL__harness_cli" atlassian drain    # plan de llamadas (no muta nada)
 sh "__HREL__harness_cli" atlassian ack --intent <id> --key <ADR-n>
 ```
 
-Con token configurado, el arnes lo hace solo: `atlassian apply` (y
-`atlassian sprint start|close`, `atlassian publish`).
+Con token configurado el arnes lo hace SOLO: cada transicion lanza un worker en
+segundo plano que aplica lo pendiente y republica los documentos, asi que no
+tenes que correr nada (`atlassian apply`, `sprint start|close`, `publish` y
+`backfill` siguen disponibles a mano). Un bugfix se carga con
+`add --kind bug`. El envio automatico se apaga con `HARNESS_ATLASSIAN_AUTO=0` o
+`"auto": false` en `atlassian.json`.
 
 Si NO existe `atlassian.json` y el usuario quiere integrar Jira o Confluence,
 PREGUNTALE a que proyecto y a que space pertenece este repo — el arnes no lo
@@ -2018,6 +2032,19 @@ write_atlassian_binding() {
 JSONBINDING
     track_action "atlassian binding"
     log_success "Atlassian: binding escrito en $target (Jira $JIRA_PROJECT, Confluence ${CONFLUENCE_SPACE:-sin space})."
+    # Feature #16 (AC-18): verificar contra la API que el proyecto y el space
+    # existan. El instalador NO habla HTTP: delega en el binario, que ya sabe
+    # buscar las credenciales (entorno, .harness.env o config global). Sin token
+    # el propio binario avisa que omite la verificacion. Nunca bloquea el
+    # instalador: es informativo.
+    if [ -x "$HARNESS_DIR/harness" ]; then
+        verify_args=""
+        [ "$CREATE_JIRA_PROJECT" -eq 1 ] && verify_args="$verify_args --create-project"
+        [ "$CREATE_CONFLUENCE_SPACE" -eq 1 ] && verify_args="$verify_args --create-space"
+        # shellcheck disable=SC2086
+        "$HARNESS_DIR/harness" atlassian bind $verify_args 2>&1 | sed 's/^/    /' || \
+            log_info "Atlassian: la verificacion del binding no pudo completarse (se sigue igual)."
+    fi
     if [ -z "$CONFLUENCE_SPACE" ]; then
         log_info "Atlassian: sin space de Confluence no se publican PRD/SDD; agregalo con --confluence-space <KEY>."
     fi

@@ -23,6 +23,13 @@ sh harness_cli atlassian bind --site acme.atlassian.net \
 Eso escribe `atlassian.json` en la raiz del proyecto. Es versionable a
 proposito: solo nombra el sitio, el proyecto y el space — nunca credenciales.
 
+Si hay token configurado, el arnes **verifica** en el momento que el proyecto y
+el space existan de verdad y te avisa si falta alguno (tambien lo revisa en cada
+`atlassian status`). No los crea por su cuenta: para eso hay que pedirlo
+explicitamente con `--create-project` / `--create-space` en `atlassian bind`, o
+`--create-jira-project` / `--create-confluence-space` en el instalador, y hace
+falta permiso de administracion en Atlassian.
+
 **Sin ese archivo no pasa nada.** El arnes se comporta exactamente como si la
 integracion no existiera: mismo flujo, mismos exit codes, sin carpetas nuevas.
 
@@ -35,7 +42,9 @@ Los cuatro valores tambien se pueden dejar en el config file (`.harness.env`,
 | En el arnes | En Jira |
 | --- | --- |
 | PRD (maestro o anidado) | Epic |
-| Feature del backlog | Historia (`Story` por default, configurable a `Feature`) |
+| Feature del backlog | Historia (`Story` por default) |
+| Feature cargada con `add --kind bug` | `Bug` |
+| Feature cargada con `add --kind task` | `Task` |
 | AC-n del spec | Subtask `AC-n · <texto>` |
 | `start` | Transicion a **In Progress** (y entra al sprint vigente, si hay) |
 | `advance --nota` | Comentario con la nota |
@@ -48,7 +57,41 @@ pagina hija, respetando el arbol de `prd tree`), el SDD maestro y cada spec
 (colgado del PRD que lo origina). Cada pagina enlaza a su issue y cada issue a
 su pagina.
 
-## Como se ejecuta lo pendiente
+## Se envia solo (feature #16)
+
+Con binding + token, **no hay que correr nada a mano**: cada transicion del
+flujo (`prd add`, `add`, `start`, `advance`, `approve-spec`, `close`) lanza un
+worker en segundo plano que aplica lo pendiente en Jira y republica los
+documentos en Confluence. El comando que escribiste vuelve al instante: si
+Atlassian esta lento o caido, no te frena y lo pendiente se reintenta en la
+proxima transicion.
+
+```bash
+sh harness_cli atlassian status   # dice si el envio automatico esta encendido
+cat progress/atlassian/last-push.log   # que hizo el ultimo envio
+```
+
+Se apaga de dos maneras:
+
+- `"auto": false` en `atlassian.json` (este repo, de forma permanente);
+- `HARNESS_ATLASSIAN_AUTO=0` delante de un comando (solo esa corrida).
+
+Sin token no hay envio automatico posible: los intents quedan en la outbox
+esperando al agente con MCP, como antes.
+
+### La primera vez: se carga lo que ya existe
+
+Si activas el binding en un repo que ya tiene historia, el primer envio hace un
+**backfill**: crea un epic por cada PRD del arbol y una historia por cada
+feature del backlog, con su estado actual (y sus subtasks AC-n). La idea es que
+el board sea espejo del repo, no un resumen de lo nuevo.
+
+- Si el proyecto ya tiene un epic con el mismo titulo que tu PRD, el arnes lo
+  **adopta** en vez de crear un duplicado.
+- `sh harness_cli atlassian backfill` lo vuelve a correr cuando lo necesites
+  (es idempotente), y `--sin-acs` carga sin las subtasks de los AC-n.
+
+## Como se ejecuta lo pendiente (a mano)
 
 El binario del arnes no habla MCP, asi que primero **escribe la intencion** en
 `progress/atlassian/outbox/` y despues hay dos maneras de ejecutarla. Las dos

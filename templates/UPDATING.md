@@ -464,6 +464,39 @@ nuevo ya no mira) y sigue reescribiendo el grafo entero dentro de una
 transacción larga: puede bloquear las escrituras nuevas (que cortarán por
 `DB_STATEMENT_TIMEOUT`) y pisar con datos viejos filas recién actualizadas.
 
+## Envio automatico a Atlassian (feature #16)
+
+La feature #15 dejó el arnés y Atlassian hablando el mismo idioma, pero había
+que empujar a mano (`atlassian apply` / `atlassian publish`). Ahora **el flujo
+empuja solo**: cada transición (`prd add`, `add`, `start`, `advance`,
+`approve-spec`, `close`) lanza un worker en segundo plano que aplica lo
+pendiente en Jira y republica PRD, SDD y specs en Confluence.
+
+El comando que escribís sigue siendo instantáneo: el envío ocurre detached (el
+mismo patrón que ya usa graphify), así que Atlassian nunca te frena y lo que
+falle se reintenta en la próxima transición. El detalle queda en
+`progress/atlassian/last-push.log` y el estado en `atlassian status`.
+
+Novedades que trae:
+
+- **Backfill**: al activar el binding en un repo con historia, el primer envío
+  carga lo que ya existe (un epic por PRD, una historia por feature con su
+  estado y sus subtasks AC-n). Si ya hay un epic con el mismo título que tu PRD,
+  lo **adopta** en vez de duplicarlo. Se re-corre con `atlassian backfill`
+  (idempotente) y `--sin-acs` omite las subtasks.
+- **`add --kind bug|feature|task`**: un bugfix entra a Jira como `Bug` y no como
+  historia. Sin el flag, todo sigue igual que antes.
+- **Verificación del binding**: con token, `atlassian bind`, el instalador y
+  `atlassian status` comprueban que el proyecto Jira y el space existan. Si
+  faltan, avisan cómo crearlos; solo los crean si lo pedís con
+  `--create-project` / `--create-space` (o `--create-jira-project` /
+  `--create-confluence-space` en el instalador) y tenés permiso de admin.
+- **Interruptor**: `"auto": false` en `atlassian.json` lo apaga para el repo, y
+  `HARNESS_ATLASSIAN_AUTO=0` para una corrida puntual. Sin token no hay envío
+  automático: los intents esperan al agente con MCP, como antes.
+
+Nada de esto se activa en un repo sin `atlassian.json`.
+
 ## Atlassian: Jira y Confluence en el flujo (feature #15)
 
 Novedad opt-in y **por repo**: el arnés puede reflejar cada movimiento del

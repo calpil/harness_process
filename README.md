@@ -417,8 +417,18 @@ Con binding activo, el mapeo es:
 | `advance` y `approve-spec` | Comentarios con la bitacora |
 | `close --status blocked` | Flag `Impediment` |
 
+Con token configurado **el envio es automatico** (feature #16): cada transicion
+lanza un worker en segundo plano que aplica lo pendiente en Jira y republica los
+documentos en Confluence, sin frenar el comando. La primera vez carga lo que ya
+existe en el repo (un epic por PRD, una historia por feature, adoptando los
+epics que ya existan con ese titulo). Se apaga con `"auto": false` en
+`atlassian.json` o `HARNESS_ATLASSIAN_AUTO=0`.
+
+Un bugfix entra como `Bug` si lo cargas con `add --kind bug` (validos:
+`feature`, `bug`, `task`).
+
 Cada transicion escribe un intent en `progress/atlassian/outbox/` y hay dos
-ejecutores que producen lo mismo:
+ejecutores que producen lo mismo (los dos siguen disponibles a mano):
 
 ```bash
 # (a) con un agente que tenga MCP de Atlassian, sin credenciales
@@ -430,6 +440,7 @@ sh harness_cli atlassian apply
 sh harness_cli atlassian sprint start --name "Sprint 12" --days 14
 sh harness_cli atlassian sprint close
 sh harness_cli atlassian publish        # PRD + PRDs anidados + SDD + specs
+sh harness_cli atlassian backfill       # carga en Jira lo que ya existe en el repo
 ```
 
 Los sprints necesitan la ruta (b): el MCP oficial de Atlassian no expone boards

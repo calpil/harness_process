@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::paths::HarnessPaths;
-use crate::{commands, graph, graphify};
+use crate::{atlassian, commands, graph, graphify};
 
 #[derive(Parser)]
 #[command(
@@ -91,6 +91,9 @@ pub enum Command {
         /// es unico, o `master`). Sin el, la feature cuenta para el maestro.
         #[arg(long)]
         prd: Option<String>,
+        /// Que es esto en Jira: `feature` (default), `bug` o `task`.
+        #[arg(long)]
+        kind: Option<String>,
     },
     /// PRDs anidados: el arbol de producto de docs/prd/
     Prd {
@@ -106,6 +109,14 @@ pub enum Command {
     Graph {
         #[command(subcommand)]
         command: GraphCommand,
+    },
+    /// Interno: worker detached del envio a Atlassian (no usar a mano)
+    #[command(name = "atlassian-worker", hide = true)]
+    AtlassianWorker {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        lock: PathBuf,
     },
     /// Interno: worker detached del refresh de graphify (no usar a mano)
     #[command(name = "graphify-worker", hide = true)]
@@ -141,9 +152,21 @@ pub enum AtlassianCommand {
         /// Apaga la integracion sin perder el mapeo
         #[arg(long)]
         disable: bool,
+        /// Si el proyecto Jira no existe, crearlo (requiere permiso de admin)
+        #[arg(long = "create-project")]
+        create_project: bool,
+        /// Si el space de Confluence no existe, crearlo (requiere permiso)
+        #[arg(long = "create-space")]
+        create_space: bool,
     },
     /// Binding vigente, mapeo local -> remoto y pendientes
     Status,
+    /// Carga en Jira lo que ya existe en el repo (PRDs y backlog)
+    Backfill {
+        /// No bajar las subtasks de los AC-n (util en repos grandes)
+        #[arg(long = "sin-acs")]
+        sin_acs: bool,
+    },
     /// Plan de llamadas MCP para que lo ejecute un agente (no muta nada)
     Drain,
     /// Registra la clave que devolvio Jira para un intent
@@ -287,12 +310,14 @@ pub fn run() -> anyhow::Result<()> {
             service,
             acceptance,
             prd,
+            kind,
         } => commands::add::run(
             &HarnessPaths::resolve()?,
             &name,
             &service,
             &acceptance,
             prd.as_deref(),
+            kind.as_deref(),
         ),
         Command::Prd { command } => match command {
             PrdCommand::Add { name, parent } => {
@@ -312,6 +337,8 @@ pub fn run() -> anyhow::Result<()> {
                     issue_type,
                     enable,
                     disable,
+                    create_project,
+                    create_space,
                 } => commands::atlassian::bind(
                     &paths,
                     site.as_deref(),
@@ -320,7 +347,12 @@ pub fn run() -> anyhow::Result<()> {
                     issue_type.as_deref(),
                     enable,
                     disable,
+                    create_project,
+                    create_space,
                 ),
+                AtlassianCommand::Backfill { sin_acs } => {
+                    commands::atlassian::backfill(&paths, sin_acs)
+                }
                 AtlassianCommand::Status => commands::atlassian::status(&paths),
                 AtlassianCommand::Drain => commands::atlassian::drain(&paths),
                 AtlassianCommand::Ack { intent, key } => {
@@ -337,6 +369,7 @@ pub fn run() -> anyhow::Result<()> {
             }
         }
         Command::Graph { command } => graph::run(command),
+        Command::AtlassianWorker { root, lock } => atlassian::push::worker(&root, &lock),
         Command::GraphifyWorker { root, stale, lock } => graphify::worker(&root, &stale, &lock),
     }
 }

@@ -8,13 +8,31 @@ use crate::prd;
 use crate::progress::log;
 use crate::pycompat::py_str;
 
+/// Tipos validos de `--kind` (feature #16). El default es `feature`.
+pub const KINDS: [&str; 3] = ["feature", "bug", "task"];
+
 pub fn run(
     paths: &HarnessPaths,
     name: &str,
     services: &[String],
     acceptance: &[String],
     prd_ref: Option<&str>,
+    kind: Option<&str>,
 ) -> anyhow::Result<()> {
+    // AC-10: un kind invalido se rechaza ANTES de tocar el backlog, con la
+    // lista de validos en el mensaje.
+    if let Some(k) = kind
+        && !KINDS.contains(&k)
+    {
+        return Err(crate::exit::Exit {
+            code: 2,
+            message: Some(format!(
+                "--kind invalido: '{k}'. Validos: {} (default: feature).",
+                KINDS.join(", ")
+            )),
+        }
+        .into());
+    }
     // El PRD se resuelve ANTES de tocar el backlog: una referencia mala no deja
     // una feature a medio cargar.
     let prd_slug = match prd_ref {
@@ -48,6 +66,11 @@ pub fn run(
         Value::Array(acceptance.iter().map(|s| json!(s)).collect()),
     );
     feature.insert("status".to_string(), json!("pending"));
+    // Campo OPCIONAL (feature #16): sin --kind el backlog queda como siempre,
+    // asi que las features ya cargadas no se migran ni se tocan (AC-9).
+    if let Some(k) = kind.filter(|k| *k != "feature") {
+        feature.insert("kind".to_string(), json!(k));
+    }
     // Campo OPCIONAL: sin --prd la feature se guarda exactamente como siempre.
     if let Some(target) = &prd_slug {
         feature.insert("prd".to_string(), json!(target.reference()));
@@ -67,6 +90,8 @@ pub fn run(
     log(paths, &format!("add feature #{fid} {name}"))?;
     // Feature #15: el PRD nace como epic y la feature como historia (AC-6).
     crate::atlassian::emit::on_add(paths, &snapshot);
+    // Feature #16: y el worker detached lo empuja solo (AC-1).
+    crate::atlassian::push::push_bg(paths);
     println!("Feature #{fid} agregada.");
     if let Some(target) = &prd_slug {
         println!("  PRD de origen: {}", prd::rel_path(&target.slug));

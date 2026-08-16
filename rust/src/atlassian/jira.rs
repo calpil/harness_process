@@ -142,6 +142,90 @@ pub fn link_page(client: &Client, key: &str, title: &str, url: &str) -> anyhow::
     add_comment(client, key, &format!("Documento en Confluence: {title} - {url}"))
 }
 
+/// True si el proyecto existe y el usuario puede verlo (AC-18).
+pub fn project_exists(client: &Client, project_key: &str) -> anyhow::Result<bool> {
+    match client.get(&format!("/rest/api/3/project/{project_key}")) {
+        Ok(_) => Ok(true),
+        Err(err) => match err.downcast_ref::<crate::atlassian::http::ApiError>() {
+            // 404 (no existe) y 403 (sin permiso) son respuestas, no fallas.
+            Some(api) if api.status == 404 || api.status == 403 => Ok(false),
+            _ => Err(err),
+        },
+    }
+}
+
+/// Busca un epic por titulo EXACTO dentro del proyecto (AC-29): permite adoptar
+/// los epics que el equipo ya escribio a mano en vez de duplicarlos.
+pub fn find_epic_by_title(
+    client: &Client,
+    project_key: &str,
+    epic_type: &str,
+    title: &str,
+) -> anyhow::Result<Option<String>> {
+    // El texto va como parametro de JQL entre comillas: se escapan las comillas
+    // y las barras para no romper la consulta.
+    let safe = title.replace('\\', "\\\\").replace('"', "\\\"");
+    let jql = format!(
+        "project = \"{project_key}\" AND issuetype = \"{epic_type}\" AND summary ~ \"{safe}\""
+    );
+    let res = client.post(
+        "/rest/api/3/search/jql",
+        &json!({"jql": jql, "fields": ["summary"], "maxResults": 50}),
+    )?;
+    let Some(list) = res.get("issues").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    // `~` es busqueda por texto: confirmamos igualdad exacta del titulo.
+    for issue in list {
+        let summary = issue
+            .get("fields")
+            .and_then(|f| f.get("summary"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if summary.trim() == title.trim()
+            && let Some(key) = issue.get("key").and_then(Value::as_str)
+        {
+            return Ok(Some(key.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// Crea el proyecto (AC-21). Requiere permiso de administracion; se usa SOLO
+/// con `--create-project`.
+pub fn create_project(
+    client: &Client,
+    key: &str,
+    name: &str,
+    lead_account_id: &str,
+) -> anyhow::Result<String> {
+    let res = client.post(
+        "/rest/api/3/project",
+        &json!({
+            "key": key,
+            "name": name,
+            "projectTypeKey": "software",
+            // Team-managed scrum: el mismo tipo de proyecto que ya usa el sitio.
+            "projectTemplateKey": "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum",
+            "leadAccountId": lead_account_id,
+            "description": "Creado por el arnes (harness_process) al configurar el binding.",
+        }),
+    )?;
+    res.get("key")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .context("Jira creo el proyecto pero no devolvio su clave")
+}
+
+/// Cuenta del token (para poner al usuario como lead del proyecto nuevo).
+pub fn my_account_id(client: &Client) -> anyhow::Result<String> {
+    let res = client.get("/rest/api/3/myself")?;
+    res.get("accountId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .context("no pude resolver la cuenta del token")
+}
+
 // --------------------------------------------------------------------------
 // Agile 1.0: boards y sprints
 // --------------------------------------------------------------------------

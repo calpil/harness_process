@@ -48,6 +48,11 @@ pub enum IntentKind {
         acceptance: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prd: Option<String>,
+        /// `feature` | `bug` | `task` (feature #16). Ausente = feature, para
+        /// que los intents escritos antes de la #16 se sigan leyendo igual.
+        /// No se llama `kind` porque esa clave la usa el tag del enum.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        issue_kind: Option<String>,
     },
     /// AC-n del spec -> subtask de la historia.
     AcSubtask { fid: String, ac: String, text: String },
@@ -207,6 +212,7 @@ mod tests {
             name: "demo".to_string(),
             acceptance: vec!["algo verificable".to_string()],
             prd: None,
+            issue_kind: None,
         }
     }
 

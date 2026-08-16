@@ -33,6 +33,8 @@ param(
     [string]$JiraProject,
     [string]$ConfluenceSpace,
     [string]$JiraIssueType,
+    [switch]$CreateJiraProject,
+    [switch]$CreateConfluenceSpace,
     [string]$CargoTargetDir
 )
 
@@ -333,6 +335,20 @@ function Write-AtlassianBinding {
 "@
     Write-HarnessText -Path $target -Content ($binding + [Environment]::NewLine)
     Write-HarnessLog OK "Atlassian: binding escrito en $target (Jira $project, Confluence $(if ($space) { $space } else { 'sin space' }))."
+    # Feature #16 (AC-18): la verificacion se delega al binario, que sabe buscar
+    # las credenciales y hablar con la API. Paridad con setup_harness.sh.
+    $harnessBin = Join-Path $script:HarnessDir "harness.exe"
+    if (Test-Path -LiteralPath $harnessBin -PathType Leaf) {
+        $verifyArgs = @("atlassian", "bind")
+        if ($CreateJiraProject) { $verifyArgs += "--create-project" }
+        if ($CreateConfluenceSpace) { $verifyArgs += "--create-space" }
+        try {
+            & $harnessBin @verifyArgs 2>&1 | ForEach-Object { Write-Host "    $_" }
+        }
+        catch {
+            Write-HarnessLog INFO "Atlassian: la verificacion del binding no pudo completarse (se sigue igual)."
+        }
+    }
     if (-not $space) {
         Write-HarnessLog INFO "Atlassian: sin space de Confluence no se publican PRD/SDD; agregalo con -ConfluenceSpace <KEY>."
     }
@@ -840,8 +856,11 @@ Atlassian integration (only when `atlassian.json` exists in the root): every
 flow transition leaves an intent in `__HREL__progress/atlassian/outbox/`. Drain it with
 `... harness_cli.ps1 atlassian drain`, execute each call with your Atlassian MCP
 and record the created key with `... harness_cli.ps1 atlassian ack --intent <id>
---key <ADR-n>`. With a token configured the harness does it alone (`atlassian
-apply`, `atlassian sprint start|close`, `atlassian publish`). If the binding is
+--key <ADR-n>`. With a token configured the harness does it alone: every flow transition spawns
+a detached worker that applies pending intents and republishes the documents
+(`atlassian apply`, `sprint start|close`, `publish` and `backfill` remain
+available by hand). Load a bugfix with `add --kind bug`. Turn the automatic push
+off with `HARNESS_ATLASSIAN_AUTO=0` or `"auto": false` in `atlassian.json`. If the binding is
 missing and the user wants Jira/Confluence, ASK which project and space this
 repo belongs to: the harness never guesses. See `docs/atlassian-integracion.md`.
 

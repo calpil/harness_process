@@ -27,6 +27,12 @@ pub struct IssueTypes {
     /// AC-n del spec -> subtask.
     #[serde(default = "default_ac")]
     pub ac: String,
+    /// Feature cargada con `add --kind bug` (feature #16).
+    #[serde(default = "default_bug")]
+    pub bug: String,
+    /// Feature cargada con `add --kind task`.
+    #[serde(default = "default_task")]
+    pub task: String,
 }
 
 fn default_epic() -> String {
@@ -41,12 +47,35 @@ fn default_ac() -> String {
     "Subtask".to_string()
 }
 
+fn default_bug() -> String {
+    "Bug".to_string()
+}
+
+fn default_task() -> String {
+    "Task".to_string()
+}
+
 impl Default for IssueTypes {
     fn default() -> Self {
         IssueTypes {
             epic: default_epic(),
             feature: default_feature(),
             ac: default_ac(),
+            bug: default_bug(),
+            task: default_task(),
+        }
+    }
+}
+
+impl IssueTypes {
+    /// Tipo de issue para una feature del backlog segun su `kind`.
+    /// Un `kind` desconocido cae en el tipo por defecto: el backlog manda,
+    /// pero nunca rompe el envio.
+    pub fn for_kind(&self, kind: Option<&str>) -> &str {
+        match kind {
+            Some("bug") => &self.bug,
+            Some("task") => &self.task,
+            _ => &self.feature,
         }
     }
 }
@@ -124,6 +153,11 @@ pub struct Binding {
     /// Interruptor: `false` apaga la integracion sin perder el mapeo.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Envio automatico tras cada transicion del flujo (feature #16). Viene
+    /// encendido; `false` deja los intents en la outbox esperando un `apply`.
+    /// Uno solo para Jira y Confluence (decision OBS-8).
+    #[serde(default = "default_true")]
+    pub auto: bool,
     #[serde(default)]
     pub jira: JiraBinding,
     #[serde(default)]
@@ -217,6 +251,7 @@ mod tests {
             site: "calpil.atlassian.net".to_string(),
             cloud_id: None,
             enabled: true,
+            auto: true,
             jira: JiraBinding {
                 project_key: "ADR".to_string(),
                 ..Default::default()
@@ -245,6 +280,7 @@ mod tests {
             site: "calpil.atlassian.net".to_string(),
             cloud_id: None,
             enabled: false,
+            auto: true,
             jira: JiraBinding {
                 project_key: "ADR".to_string(),
                 ..Default::default()
@@ -263,6 +299,7 @@ mod tests {
             site: "https://calpil.atlassian.net/".to_string(),
             cloud_id: None,
             enabled: true,
+            auto: true,
             jira: JiraBinding::default(),
             confluence: ConfluenceBinding::default(),
         };

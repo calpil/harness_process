@@ -101,6 +101,7 @@ pub fn run(
             &crate::spec::approval_stamp_line(&stamp, nota),
         );
     }
+    crate::atlassian::push::push_bg(paths);
     // Hub best-effort (nunca bloquea la aprobacion): mismo criterio que advance.
     hub_register(
         "approve-spec",
