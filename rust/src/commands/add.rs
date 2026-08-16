@@ -58,11 +58,15 @@ pub fn run(
     };
     obj.entry("features")
         .or_insert_with(|| Value::Array(Vec::new()));
+    // Copia para los enganches de Atlassian: el original se muda al backlog.
+    let snapshot = feature.clone();
     if let Some(arr) = obj.get_mut("features").and_then(Value::as_array_mut) {
         arr.push(Value::Object(feature));
     }
     save_features(paths, &data)?;
     log(paths, &format!("add feature #{fid} {name}"))?;
+    // Feature #15: el PRD nace como epic y la feature como historia (AC-6).
+    crate::atlassian::emit::on_add(paths, &snapshot);
     println!("Feature #{fid} agregada.");
     if let Some(target) = &prd_slug {
         println!("  PRD de origen: {}", prd::rel_path(&target.slug));

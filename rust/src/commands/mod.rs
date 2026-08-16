@@ -1,5 +1,6 @@
 pub mod add;
 pub mod advance;
+pub mod atlassian;
 pub mod approve_spec;
 pub mod autocheck;
 pub mod check_plan;

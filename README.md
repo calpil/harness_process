@@ -385,6 +385,58 @@ Instalaciones anteriores que tengan esos docs en `harness_process/docs/` se
 migran solas al reinstalar: se mueven a la raiz si alli no existen, y si ya
 existen no se pisa nada (el instalador avisa y deja la copia vieja donde esta).
 
+## Atlassian: Jira y Confluence como reflejo del flujo (feature #15)
+
+El arnes puede dejar rastro de cada movimiento del desarrollo en Jira y publicar
+el PRD, el SDD y los specs en Confluence, sin copiar nada a mano. Es **opt-in
+por repo** y arranca por lo primero: a que proyecto pertenece este repositorio.
+
+```bash
+# Al instalar (lo normal)
+sh setup_harness.sh --atlassian-site acme.atlassian.net \
+                    --jira-project ADR \
+                    --confluence-space SD
+
+# O despues, desde el repo instalado
+sh harness_cli atlassian bind --site acme.atlassian.net --jira-project ADR --confluence-space SD
+```
+
+Eso escribe `atlassian.json` en la raiz del proyecto (versionable: solo nombra
+sitio, proyecto y space, nunca credenciales). **Sin ese archivo no cambia nada**:
+mismo flujo, mismos exit codes, sin carpetas nuevas. El arnes no adivina el
+proyecto ni el space; si no los sabe, se niega y pide preguntarle al usuario.
+
+Con binding activo, el mapeo es:
+
+| En el arnes | En Jira |
+| --- | --- |
+| PRD (maestro o anidado) | Epic |
+| Feature del backlog | Historia (`Story` por default) |
+| AC-n del spec | Subtask `AC-n · <texto>` |
+| `start` / `close --status done` | In Progress / Done (y entra al sprint vigente) |
+| `advance` y `approve-spec` | Comentarios con la bitacora |
+| `close --status blocked` | Flag `Impediment` |
+
+Cada transicion escribe un intent en `progress/atlassian/outbox/` y hay dos
+ejecutores que producen lo mismo:
+
+```bash
+# (a) con un agente que tenga MCP de Atlassian, sin credenciales
+sh harness_cli atlassian drain                          # plan de llamadas, no muta nada
+sh harness_cli atlassian ack --intent 0003 --key ADR-42 # el agente devuelve la clave
+
+# (b) con token en .harness.env (HARNESS_ATLASSIAN_EMAIL / HARNESS_ATLASSIAN_TOKEN)
+sh harness_cli atlassian apply
+sh harness_cli atlassian sprint start --name "Sprint 12" --days 14
+sh harness_cli atlassian sprint close
+sh harness_cli atlassian publish        # PRD + PRDs anidados + SDD + specs
+```
+
+Los sprints necesitan la ruta (b): el MCP oficial de Atlassian no expone boards
+ni sprints. `atlassian status` muestra binding, mapeo, sprint vigente y
+pendientes (del token solo dice si esta, nunca su valor). Guia completa en
+`docs/atlassian-integracion.md`.
+
 ## Verificacion
 
 ```bash

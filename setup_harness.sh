@@ -46,6 +46,15 @@ FORCE=0
 # raiz multi-repo, hermano de los microservicios.
 LAYOUT=subdir
 
+# Binding de Atlassian (feature #15): a que proyecto Jira y a que space de
+# Confluence pertenece ESTE repo. Precedencia flag > config file > nada; sin
+# valores no se escribe atlassian.json y la integracion queda apagada (AC-3).
+# Los nombres HARNESS_* los puede traer .harness.env / --config (AC-2).
+ATLASSIAN_SITE="${HARNESS_ATLASSIAN_SITE:-}"
+JIRA_PROJECT="${HARNESS_JIRA_PROJECT:-}"
+CONFLUENCE_SPACE="${HARNESS_CONFLUENCE_SPACE:-}"
+JIRA_ISSUE_TYPE="${HARNESS_JIRA_ISSUE_TYPE:-Story}"
+
 # Nuevas opciones globales (mejoras)
 DRY_RUN=0
 RESET=0
@@ -311,6 +320,18 @@ ensure_harness_not_committed() {
         } >> "$gitignore_file"
         echo "[Harness] .gitignore actualizado: $ignore_dir nunca debe commitearse."
     fi
+
+    # Feature #15 / Articulo 4: `.harness.env` puede llevar el email y el API
+    # token de Atlassian. Se ignora SIEMPRE y aparte del bloque de arriba, para
+    # que tambien lo gane una instalacion vieja que ya tenia su .gitignore.
+    if [ ! -f "$gitignore_file" ] || ! grep -qxF ".harness.env" "$gitignore_file" 2>/dev/null; then
+        {
+            echo ""
+            echo "# Config local del harness (puede llevar credenciales): NUNCA commitear"
+            echo ".harness.env"
+        } >> "$gitignore_file"
+        echo "[Harness] .gitignore actualizado: .harness.env (credenciales) nunca debe commitearse."
+    fi
 }
 
 usage() {
@@ -347,6 +368,16 @@ Opciones:
   --json               Salida final en JSON (reporte de acciones + estado).
   --log-file <path>    Escribe log (sin colores) a archivo ademas de stdout.
   --config <path>      Carga variables extra desde archivo (antes de .env del hub).
+  --atlassian-site <host>      Sitio Atlassian del proyecto (ej: acme.atlassian.net).
+  --jira-project <KEY>         Proyecto Jira al que pertenece ESTE repo (ej: ADR).
+  --confluence-space <KEY>     Space de Confluence donde se publican PRD/SDD/specs.
+  --jira-issue-type <TIPO>     Tipo de issue para una feature (default: Story).
+                               Los cuatro tambien se leen del config file como
+                               HARNESS_ATLASSIAN_SITE / HARNESS_JIRA_PROJECT /
+                               HARNESS_CONFLUENCE_SPACE / HARNESS_JIRA_ISSUE_TYPE.
+                               Sin proyecto y sitio no se escribe atlassian.json:
+                               la integracion queda apagada y el arnes funciona
+                               igual que siempre.
   -h, --help           Muestra esta ayuda.
 
 El layout por defecto es subdir (usa --root para el layout clasico). Por defecto
@@ -373,6 +404,7 @@ HARNESS_DOCS=(
     "conventions.md"
     "verification.md"
     "kimi-cli-uso-eficiente.md"
+    "atlassian-integracion.md"
     "prd/COMO-ESCRIBIR-UN-PRD.md"
 )
 
@@ -423,6 +455,22 @@ while [ "$#" -gt 0 ]; do
             shift
             HARNESS_CONFIG="$1"
             ;;
+        --atlassian-site)
+            shift
+            ATLASSIAN_SITE="$1"
+            ;;
+        --jira-project)
+            shift
+            JIRA_PROJECT="$1"
+            ;;
+        --confluence-space)
+            shift
+            CONFLUENCE_SPACE="$1"
+            ;;
+        --jira-issue-type)
+            shift
+            JIRA_ISSUE_TYPE="$1"
+            ;;
         -h|--help) usage; exit 0 ;;
         *)
             log_error "Opcion desconocida: $1"
@@ -435,6 +483,14 @@ done
 
 # Cargar config file lo antes posible (despues de parsear --config)
 load_config_file
+
+# Feature #15 / AC-2: el config file (.harness.env, ~/.config/harness/config)
+# recien se importa aca, asi que los valores que no vinieron por flag se
+# completan ahora. La precedencia queda flag > config file > nada.
+[ -z "$ATLASSIAN_SITE" ] && ATLASSIAN_SITE="${HARNESS_ATLASSIAN_SITE:-}"
+[ -z "$JIRA_PROJECT" ] && JIRA_PROJECT="${HARNESS_JIRA_PROJECT:-}"
+[ -z "$CONFLUENCE_SPACE" ] && CONFLUENCE_SPACE="${HARNESS_CONFLUENCE_SPACE:-}"
+[ -z "$JIRA_ISSUE_TYPE" ] && JIRA_ISSUE_TYPE="${HARNESS_JIRA_ISSUE_TYPE:-Story}"
 
 # Adquirir lock (salvo dry-run o force explicito en reset)
 if [ "$DRY_RUN" -eq 0 ]; then
@@ -977,6 +1033,30 @@ Archivos principales:
 - `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
   CLI (exclusiones de contexto, reglas fijas, acotamiento por archivo y `/new`
   entre tareas para no reenviar historial).
+- `docs/atlassian-integracion.md` (RAIZ): como el flujo se refleja en Jira y
+  Confluence (binding por repo, outbox, sprints y publicacion de PRD/SDD/specs).
+  Solo aplica si el proyecto tiene `atlassian.json`.
+
+## Atlassian (solo si el proyecto tiene binding)
+
+Si existe `atlassian.json` en la raiz, cada transicion del flujo (add, start,
+advance, approve-spec, close) deja un intent en `__HREL__progress/atlassian/outbox/`.
+Antes de cerrar tu turno, drena lo pendiente:
+
+```bash
+sh "__HREL__harness_cli" atlassian status   # binding, mapeo y pendientes
+sh "__HREL__harness_cli" atlassian drain    # plan de llamadas (no muta nada)
+# ejecuta cada llamada con tu MCP de Atlassian y registra la clave devuelta:
+sh "__HREL__harness_cli" atlassian ack --intent <id> --key <ADR-n>
+```
+
+Con token configurado, el arnes lo hace solo: `atlassian apply` (y
+`atlassian sprint start|close`, `atlassian publish`).
+
+Si NO existe `atlassian.json` y el usuario quiere integrar Jira o Confluence,
+PREGUNTALE a que proyecto y a que space pertenece este repo — el arnes no lo
+adivina — y registralo con `atlassian bind`. Detalle completo en
+`docs/atlassian-integracion.md`.
 
 Los documentos durables (plan, investigacion, evidencia) se escriben en `docs/`
 de la raiz; `__HREL__progress/` guarda solo el estado vivo. Una respuesta corta
@@ -1840,6 +1920,109 @@ else
     printf 'postgres\n' > "$HARNESS_DIR/.harness_backend"
     track_action "layout markers"
 fi
+
+# ---------------------------------------------------------------------------
+# Binding de Atlassian (feature #15): a que proyecto Jira y a que space de
+# Confluence pertenece ESTE repo. Sin proyecto no se escribe nada y el arnes
+# se comporta exactamente como antes (AC-3/AC-4): el arnes NO adivina.
+# ---------------------------------------------------------------------------
+seed_harness_env() {
+    # Feature #15: deja `.harness.env` listo en la RAIZ del proyecto, con las
+    # claves comentadas y explicadas, para que el usuario sepa donde poner el
+    # email y el token sin buscar en la documentacion.
+    #
+    # Es documento del USUARIO: se siembra SOLO si falta, nunca se pisa (puede
+    # tener el token real dentro), no se respalda y no entra en los targets de
+    # --reset. El .gitignore del proyecto ya lo cubre.
+    local target="$SURFACE_DIR/.harness.env"
+    if [ -f "$target" ]; then
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Sembraria $target (plantilla de config local)"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+        return 0
+    fi
+    cat > "$target" <<'HARNESSENVEOF'
+# Config local del arnes. NUNCA se commitea: el instalador lo deja en
+# .gitignore porque puede llevar credenciales.
+#
+# Alcance: este archivo vale para ESTE proyecto. Si preferis definirlo una sola
+# vez para todos tus proyectos, escribi las mismas claves en
+# ~/.config/harness/config (lo local siempre gana sobre lo global).
+
+# --- Atlassian: credenciales del ejecutor REST -----------------------------
+# Solo hacen falta para `atlassian apply`, `atlassian sprint` y
+# `atlassian publish`. Sin ellas la integracion igual funciona con un agente
+# que tenga MCP de Atlassian (`atlassian drain` + `atlassian ack`).
+# El API token se genera en:
+#   https://id.atlassian.com/manage-profile/security/api-tokens
+#HARNESS_ATLASSIAN_EMAIL=tu.correo@empresa.cl
+#HARNESS_ATLASSIAN_TOKEN=
+
+# --- Atlassian: a que proyecto y space pertenece este repo -----------------
+# Alternativa a los flags del instalador (--atlassian-site, --jira-project,
+# --confluence-space, --jira-issue-type). Lo que pasa por flag manda sobre esto.
+#HARNESS_ATLASSIAN_SITE=acme.atlassian.net
+#HARNESS_JIRA_PROJECT=ADR
+#HARNESS_CONFLUENCE_SPACE=SD
+#HARNESS_JIRA_ISSUE_TYPE=Story
+HARNESSENVEOF
+    track_action "harness env template"
+    log_info "Config local sembrada: $target (deja ahi el email y el token de Atlassian; ya esta en .gitignore)."
+}
+seed_harness_env
+
+write_atlassian_binding() {
+    local target="$SURFACE_DIR/atlassian.json"
+    if [ -z "$JIRA_PROJECT" ] || [ -z "$ATLASSIAN_SITE" ]; then
+        log_info "Atlassian: sin binding (integracion apagada). Para activarla, preguntale al USUARIO a que proyecto y space pertenece este repo y corre:"
+        log_info "    sh harness_cli atlassian bind --site <sitio>.atlassian.net --jira-project <KEY> --confluence-space <KEY>"
+        return 0
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Escribiria $target (Jira $JIRA_PROJECT, Confluence ${CONFLUENCE_SPACE:-sin space})"
+        COUNT_CREATED=$((COUNT_CREATED + 1))
+        return 0
+    fi
+    # El binding es del proyecto: si ya existe, no se pisa (puede tener
+    # board_id/space_id ya resueltos y ajustes del usuario).
+    if [ -f "$target" ] && [ "$FORCE" -ne 1 ]; then
+        log_info "Atlassian: $target ya existe (no se pisa; usa 'atlassian bind' para cambiarlo)."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    cat > "$target" <<JSONBINDING
+{
+  "site": "$ATLASSIAN_SITE",
+  "enabled": true,
+  "jira": {
+    "project_key": "$JIRA_PROJECT",
+    "issue_types": {
+      "epic": "Epic",
+      "feature": "$JIRA_ISSUE_TYPE",
+      "ac": "Subtask"
+    },
+    "statuses": {
+      "pending": "To Do",
+      "in_progress": "In Progress",
+      "done": "Done",
+      "blocked_flag": "Impediment"
+    }
+  },
+  "confluence": {
+    "space_key": "$CONFLUENCE_SPACE"
+  }
+}
+JSONBINDING
+    track_action "atlassian binding"
+    log_success "Atlassian: binding escrito en $target (Jira $JIRA_PROJECT, Confluence ${CONFLUENCE_SPACE:-sin space})."
+    if [ -z "$CONFLUENCE_SPACE" ]; then
+        log_info "Atlassian: sin space de Confluence no se publican PRD/SDD; agregalo con --confluence-space <KEY>."
+    fi
+}
+write_atlassian_binding
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"

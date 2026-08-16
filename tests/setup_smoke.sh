@@ -1227,4 +1227,97 @@ echo "[Ok] Kimi Code: espejos por rol (root+subdir, allowlist de tools), gate de
 
 echo "[Ok] docs del arnes en el docs/ de la RAIZ: destino, migracion, no-pisa y reset."
 echo "[Ok] planillas maestras docs/prd/ (PRD + SDD): siembra, no-pisa y supervivencia al reset."
+# ---------------------------------------------------------------------------
+# Feature #15 (AC-1/AC-2/AC-3/AC-13): binding de Atlassian escrito por el
+# instalador. Tres casos: sin config (apagado), por flags y por config file.
+# ---------------------------------------------------------------------------
+ATLASSIAN_OFF="$TMP_ROOT/atlassian-off"
+copy_flat_fixture "$ATLASSIAN_OFF"
+run_setup "$ATLASSIAN_OFF" --root > "$TMP_ROOT/atlassian-off.log" 2>&1
+test ! -e "$ATLASSIAN_OFF/atlassian.json" \
+    || { echo "[!] AC-3: sin flags NO se debe escribir atlassian.json." >&2; exit 1; }
+grep -q "sin binding (integracion apagada)" "$TMP_ROOT/atlassian-off.log" \
+    || { echo "[!] AC-3: el instalador debe avisar que la integracion queda apagada." >&2; exit 1; }
+# AC-4: sin binding el flujo no crea nada de Atlassian.
+( cd "$ATLASSIAN_OFF" && ./harness add --name demo_sin_binding >/dev/null 2>&1 )
+test ! -e "$ATLASSIAN_OFF/progress/atlassian" \
+    || { echo "[!] AC-4: sin binding el flujo no debe crear progress/atlassian." >&2; exit 1; }
+
+ATLASSIAN_FLAGS="$TMP_ROOT/atlassian-flags"
+copy_flat_fixture "$ATLASSIAN_FLAGS"
+run_setup "$ATLASSIAN_FLAGS" --root \
+    --atlassian-site calpil.atlassian.net \
+    --jira-project ADR \
+    --confluence-space SD > "$TMP_ROOT/atlassian-flags.log" 2>&1
+test -f "$ATLASSIAN_FLAGS/atlassian.json" \
+    || { echo "[!] AC-1: faltan atlassian.json con los flags." >&2; exit 1; }
+grep -q '"project_key": "ADR"' "$ATLASSIAN_FLAGS/atlassian.json" \
+    || { echo "[!] AC-1: atlassian.json sin el proyecto Jira." >&2; exit 1; }
+grep -q '"space_key": "SD"' "$ATLASSIAN_FLAGS/atlassian.json" \
+    || { echo "[!] AC-1: atlassian.json sin el space de Confluence." >&2; exit 1; }
+grep -q '"feature": "Story"' "$ATLASSIAN_FLAGS/atlassian.json" \
+    || { echo "[!] OBS-6: el tipo por default de una feature es Story." >&2; exit 1; }
+grep -q '"blocked_flag": "Impediment"' "$ATLASSIAN_FLAGS/atlassian.json" \
+    || { echo "[!] OBS-7: blocked se marca con el flag Impediment." >&2; exit 1; }
+# El binding existente no se pisa en la reinstalacion.
+printf '%s' '{"site":"x","enabled":false,"jira":{"project_key":"MIO"},"confluence":{"space_key":"MIO"}}' \
+    > "$ATLASSIAN_FLAGS/atlassian.json"
+run_setup "$ATLASSIAN_FLAGS" --root --atlassian-site otro.atlassian.net --jira-project OTRO >/dev/null 2>&1
+grep -q '"project_key":"MIO"' "$ATLASSIAN_FLAGS/atlassian.json" \
+    || { echo "[!] el binding del proyecto no se debe pisar en la reinstalacion." >&2; exit 1; }
+# Y con binding activo, el flujo SI deja su intent (AC-6).
+printf '%s' '{"site":"calpil.atlassian.net","enabled":true,"jira":{"project_key":"ADR"},"confluence":{"space_key":"SD"}}' \
+    > "$ATLASSIAN_FLAGS/atlassian.json"
+( cd "$ATLASSIAN_FLAGS" && ./harness add --name demo_con_binding >/dev/null 2>&1 )
+find "$ATLASSIAN_FLAGS/progress/atlassian/outbox" -name '*.json' -print -quit 2>/dev/null | grep -q . \
+    || { echo "[!] AC-6: con binding activo, add debe dejar su intent en la outbox." >&2; exit 1; }
+
+ATLASSIAN_CFG="$TMP_ROOT/atlassian-config"
+copy_flat_fixture "$ATLASSIAN_CFG"
+cat > "$ATLASSIAN_CFG/.harness.env" <<'CFGEOF'
+HARNESS_ATLASSIAN_SITE=calpil.atlassian.net
+HARNESS_JIRA_PROJECT=SCRUM
+HARNESS_CONFLUENCE_SPACE=SD
+CFGEOF
+run_setup "$ATLASSIAN_CFG" --root > "$TMP_ROOT/atlassian-config.log" 2>&1
+grep -q '"project_key": "SCRUM"' "$ATLASSIAN_CFG/atlassian.json" \
+    || { echo "[!] AC-2: el binding debe poder venir del config file." >&2; exit 1; }
+
+# AC-13: paridad del instalador PowerShell (verificacion estatica, como en las
+# features #1, #13 y #14: no hay pwsh en la maquina de desarrollo).
+grep -q "function Write-AtlassianBinding" "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-13: falta Write-AtlassianBinding en setup_harness.ps1." >&2; exit 1; }
+for campo in '"project_key": "$project"' '"space_key": "$space"' '"blocked_flag": "Impediment"'; do
+    grep -qF "$campo" "$REPO_ROOT/setup_harness.ps1" \
+        || { echo "[!] AC-13: el binding ps1 no tiene $campo." >&2; exit 1; }
+done
+grep -q 'AtlassianSite' "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-13: faltan los parametros de Atlassian en el param block ps1." >&2; exit 1; }
+
+# El instalador siembra `.harness.env` en la RAIZ del proyecto, con las claves
+# comentadas, y NO lo pisa si ya existe (puede tener el token real adentro).
+test -f "$ATLASSIAN_OFF/.harness.env" \
+    || { echo "[!] el instalador debe sembrar .harness.env en la raiz del proyecto." >&2; exit 1; }
+grep -q "HARNESS_ATLASSIAN_TOKEN" "$ATLASSIAN_OFF/.harness.env" \
+    || { echo "[!] la plantilla .harness.env debe nombrar HARNESS_ATLASSIAN_TOKEN." >&2; exit 1; }
+grep -qE "^#HARNESS_ATLASSIAN_TOKEN=" "$ATLASSIAN_OFF/.harness.env" \
+    || { echo "[!] las claves de la plantilla deben venir COMENTADAS." >&2; exit 1; }
+printf 'HARNESS_ATLASSIAN_TOKEN=miTokenReal\n' > "$ATLASSIAN_OFF/.harness.env"
+run_setup "$ATLASSIAN_OFF" --root > /dev/null 2>&1
+grep -qx "HARNESS_ATLASSIAN_TOKEN=miTokenReal" "$ATLASSIAN_OFF/.harness.env" \
+    || { echo "[!] el instalador JAMAS debe pisar un .harness.env existente (lleva credenciales)." >&2; exit 1; }
+grep -qF 'Initialize-HarnessEnvTemplate' "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] falta la paridad ps1 de la siembra de .harness.env." >&2; exit 1; }
+
+# Articulo 4: el instalador debe dejar `.harness.env` (credenciales) ignorado
+# por git en el proyecto destino, incluso si el .gitignore ya existia.
+grep -qxF ".harness.env" "$ATLASSIAN_FLAGS/.gitignore" \
+    || { echo "[!] el instalador debe ignorar .harness.env (puede llevar el token)." >&2; exit 1; }
+grep -qxF ".harness.env" "$ATLASSIAN_OFF/.gitignore" \
+    || { echo "[!] .harness.env debe ignorarse tambien sin binding de Atlassian." >&2; exit 1; }
+grep -qF '".harness.env"' "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] falta la paridad ps1 del ignore de .harness.env." >&2; exit 1; }
+
+echo "[Ok] Atlassian: binding por flags y por config, apagado sin config, no-pisa, intent en la outbox y paridad ps1."
+
 echo "[Ok] setup smoke: Rust-only, gate de credenciales, layouts, reinstall, dry-run, version, reset."

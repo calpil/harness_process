@@ -464,6 +464,47 @@ nuevo ya no mira) y sigue reescribiendo el grafo entero dentro de una
 transacción larga: puede bloquear las escrituras nuevas (que cortarán por
 `DB_STATEMENT_TIMEOUT`) y pisar con datos viejos filas recién actualizadas.
 
+## Atlassian: Jira y Confluence en el flujo (feature #15)
+
+Novedad opt-in y **por repo**: el arnés puede reflejar cada movimiento del
+desarrollo en Jira (epics, historias, subtasks de los AC-n, transiciones,
+comentarios y sprints) y publicar el PRD, el SDD y los specs en Confluence.
+
+**Nada cambia si no lo activás.** Sin `atlassian.json` en la raíz del proyecto,
+el flujo se comporta exactamente como antes: mismos comandos, mismos exit codes
+y ninguna carpeta nueva. Las instalaciones existentes siguen igual hasta que
+vuelvan a correr el instalador con los flags nuevos.
+
+Para activarlo hay que decirle **a qué proyecto y a qué space pertenece el
+repo** (el arnés no lo adivina: si no lo sabe, se niega y pide preguntar):
+
+```bash
+sh setup_harness.sh --atlassian-site acme.atlassian.net \
+                    --jira-project ADR \
+                    --confluence-space SD
+# o, ya instalado:
+sh harness_cli atlassian bind --site acme.atlassian.net --jira-project ADR --confluence-space SD
+```
+
+Los cuatro valores también se leen del config file (`.harness.env`,
+`~/.config/harness/config`) como `HARNESS_ATLASSIAN_SITE`, `HARNESS_JIRA_PROJECT`,
+`HARNESS_CONFLUENCE_SPACE` y `HARNESS_JIRA_ISSUE_TYPE`. El binding existente
+**no se pisa** al reinstalar.
+
+Dos ejecutores, una misma outbox (`progress/atlassian/outbox/`):
+
+- **Sin credenciales**: `atlassian drain` imprime el plan de llamadas MCP
+  ordenado por dependencia y el agente lo ejecuta, devolviendo cada clave con
+  `atlassian ack --intent <id> --key <ADR-n>`.
+- **Con token** (`HARNESS_ATLASSIAN_EMAIL` + `HARNESS_ATLASSIAN_TOKEN` en
+  `.harness.env`, que no se versiona): `atlassian apply` lo hace solo, y habilita
+  `atlassian sprint start|close` y `atlassian publish`. Los sprints solo existen
+  por esta vía: el MCP oficial de Atlassian no expone boards ni sprints.
+
+Detalles y tabla de mapeo completa: `docs/atlassian-integracion.md`. La
+dependencia HTTP nueva (`ureq`) está justificada en
+`docs/adr/ADR-0001-cliente-http-ureq.md`, como exige el Artículo 6.
+
 ## Mantenimiento Rust only (post feature #2)
 
 El punto de entrada es **`harness_cli`** (sh y .ps1): ejecuta **exclusivamente** el binario Rust `harness` / `harness.exe` (compilado desde `rust/`). 

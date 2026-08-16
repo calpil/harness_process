@@ -97,6 +97,11 @@ pub enum Command {
         #[command(subcommand)]
         command: PrdCommand,
     },
+    /// Integracion con Atlassian: binding, outbox, Jira, sprints y Confluence
+    Atlassian {
+        #[command(subcommand)]
+        command: AtlassianCommand,
+    },
     /// Memory Hub PostgreSQL (port de graph_memory.py)
     Graph {
         #[command(subcommand)]
@@ -112,6 +117,68 @@ pub enum Command {
         #[arg(long)]
         lock: PathBuf,
     },
+}
+
+#[derive(Subcommand)]
+pub enum AtlassianCommand {
+    /// Registra a que proyecto Jira y a que space pertenece este repo
+    Bind {
+        /// Host del sitio (`calpil.atlassian.net`)
+        #[arg(long)]
+        site: Option<String>,
+        /// Clave del proyecto Jira (`ADR`)
+        #[arg(long = "jira-project")]
+        jira_project: Option<String>,
+        /// Clave del space de Confluence (`SD`)
+        #[arg(long = "confluence-space")]
+        confluence_space: Option<String>,
+        /// Tipo de issue para una feature del backlog (default `Story`)
+        #[arg(long = "issue-type")]
+        issue_type: Option<String>,
+        /// Reactiva la integracion sin perder el mapeo
+        #[arg(long)]
+        enable: bool,
+        /// Apaga la integracion sin perder el mapeo
+        #[arg(long)]
+        disable: bool,
+    },
+    /// Binding vigente, mapeo local -> remoto y pendientes
+    Status,
+    /// Plan de llamadas MCP para que lo ejecute un agente (no muta nada)
+    Drain,
+    /// Registra la clave que devolvio Jira para un intent
+    Ack {
+        #[arg(long)]
+        intent: String,
+        /// Clave creada (`ADR-42`); no hace falta en comentarios y transiciones
+        #[arg(long)]
+        key: Option<String>,
+    },
+    /// Ejecuta los intents pendientes contra la API (requiere token)
+    Apply,
+    /// Sprints via Agile API (lo que el MCP no puede hacer)
+    Sprint {
+        #[command(subcommand)]
+        command: SprintCommand,
+    },
+    /// Publica PRD, SDD y specs en Confluence
+    Publish,
+}
+
+#[derive(Subcommand)]
+pub enum SprintCommand {
+    /// Abre un sprint en el board del proyecto y lo deja vigente
+    Start {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        goal: Option<String>,
+        /// Duracion en dias (default 14)
+        #[arg(long, default_value_t = 14)]
+        days: i64,
+    },
+    /// Cierra el sprint vigente y reporta lo que quedo sin terminar
+    Close,
 }
 
 #[derive(Subcommand)]
@@ -235,6 +302,40 @@ pub fn run() -> anyhow::Result<()> {
                 commands::prd::tree(&HarnessPaths::resolve()?, prd.as_deref())
             }
         },
+        Command::Atlassian { command } => {
+            let paths = HarnessPaths::resolve()?;
+            match command {
+                AtlassianCommand::Bind {
+                    site,
+                    jira_project,
+                    confluence_space,
+                    issue_type,
+                    enable,
+                    disable,
+                } => commands::atlassian::bind(
+                    &paths,
+                    site.as_deref(),
+                    jira_project.as_deref(),
+                    confluence_space.as_deref(),
+                    issue_type.as_deref(),
+                    enable,
+                    disable,
+                ),
+                AtlassianCommand::Status => commands::atlassian::status(&paths),
+                AtlassianCommand::Drain => commands::atlassian::drain(&paths),
+                AtlassianCommand::Ack { intent, key } => {
+                    commands::atlassian::ack(&paths, &intent, key.as_deref())
+                }
+                AtlassianCommand::Apply => commands::atlassian::apply(&paths),
+                AtlassianCommand::Sprint { command } => match command {
+                    SprintCommand::Start { name, goal, days } => {
+                        commands::atlassian::sprint_start(&paths, &name, goal.as_deref(), days)
+                    }
+                    SprintCommand::Close => commands::atlassian::sprint_close(&paths),
+                },
+                AtlassianCommand::Publish => commands::atlassian::publish(&paths),
+            }
+        }
         Command::Graph { command } => graph::run(command),
         Command::GraphifyWorker { root, stale, lock } => graphify::worker(&root, &stale, &lock),
     }

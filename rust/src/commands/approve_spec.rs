@@ -93,6 +93,14 @@ pub fn run(
         paths,
         &format!("approve-spec feature #{feature_id} estado=approved nota={nota}"),
     )?;
+    // Feature #15: la aprobacion del USUARIO tambien queda del otro lado (AC-8).
+    if let Some(feature) = feature_at(&data, idx).as_object() {
+        crate::atlassian::emit::on_approve_spec(
+            paths,
+            feature,
+            &crate::spec::approval_stamp_line(&stamp, nota),
+        );
+    }
     // Hub best-effort (nunca bloquea la aprobacion): mismo criterio que advance.
     hub_register(
         "approve-spec",

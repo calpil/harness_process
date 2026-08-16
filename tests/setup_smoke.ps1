@@ -652,7 +652,31 @@ command = "echo hook-del-usuario"
         $env:KIMI_CODE_HOME = $oldKimiHomeEnv
     }
 
-    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite; incl. efficient Kimi CLI usage guide linked from the surface), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), and Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global)."
+    # -----------------------------------------------------------------------
+    # Feature #15 (AC-1/AC-2/AC-3/AC-13): binding de Atlassian del instalador.
+    # -----------------------------------------------------------------------
+    $atlassianOff = Join-Path $tempRoot "atlassian-off"
+    Copy-Fixture -Target $atlassianOff
+    & (Join-Path $atlassianOff "setup_harness.ps1") `
+        -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi `
+        -CargoTargetDir (Join-Path $atlassianOff "cargo-target")
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $atlassianOff "atlassian.json"))) "Without flags no atlassian.json must be written (AC-3)."
+
+    $atlassianOn = Join-Path $tempRoot "atlassian-on"
+    Copy-Fixture -Target $atlassianOn
+    & (Join-Path $atlassianOn "setup_harness.ps1") `
+        -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi `
+        -AtlassianSite "calpil.atlassian.net" -JiraProject "ADR" -ConfluenceSpace "SD" `
+        -CargoTargetDir (Join-Path $atlassianOn "cargo-target")
+    $bindingPath = Join-Path $atlassianOn "atlassian.json"
+    Assert-True (Test-Path -LiteralPath $bindingPath) "The installer must write atlassian.json with the flags (AC-1)."
+    $binding = Get-Content -LiteralPath $bindingPath -Raw
+    Assert-True ($binding -match '"project_key": "ADR"') "atlassian.json must carry the Jira project (AC-1)."
+    Assert-True ($binding -match '"space_key": "SD"') "atlassian.json must carry the Confluence space (AC-1)."
+    Assert-True ($binding -match '"feature": "Story"') "Story is the default issue type for a feature (OBS-6)."
+    Assert-True ($binding -match '"blocked_flag": "Impediment"') "blocked maps to the Impediment flag (OBS-7)."
+
+    Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite; incl. efficient Kimi CLI usage guide linked from the surface), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global), and Atlassian binding (off without flags, written with flags, Story/Impediment defaults)."
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

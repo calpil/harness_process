@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 
 use crate::exit::Exit;
 use crate::features::{
-    feature_mut, feature_status, features_slice, find_feature_index, load_features, save_features,
+    feature_at, feature_mut, feature_status, features_slice, find_feature_index, load_features,
+    save_features,
 };
 use crate::memories::update_memories;
 use crate::paths::HarnessPaths;
@@ -72,6 +73,11 @@ pub fn run(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         )
     };
     save_features(paths, &data)?;
+    // Feature #15: la historia entra a In Progress y cada AC-n del spec baja
+    // como subtask (AC-7). El spec ya esta escrito en disco a esta altura.
+    if let Some(feature) = feature_at(&data, idx).as_object() {
+        crate::atlassian::emit::on_start(paths, feature);
+    }
     std::fs::create_dir_all(&paths.progress)?;
     let mut current = format!("# Feature #{feature_id}: {feature_name}\n\n");
     current.push_str("Estado: in_progress\n");

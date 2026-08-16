@@ -62,6 +62,14 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
   CLI (exclusiones de contexto, `.kimirules`, acotamiento por archivo, `/new`
   entre tareas).
+- `docs/atlassian-integracion.md` (RAIZ): como el flujo se refleja en Jira y
+  Confluence. Si el proyecto tiene `atlassian.json`, cada transicion deja un
+  intent en `progress/atlassian/outbox/`; drenalo con
+  `sh harness_cli atlassian drain`, ejecutalo con tu MCP de Atlassian y
+  registra la clave con `atlassian ack --intent <id> --key <ADR-n>` (o con
+  token, `atlassian apply`). Si NO hay binding y el usuario quiere integrar
+  Jira, PREGUNTALE a que proyecto y space pertenece el repo: el arnes no lo
+  adivina.
 - `.claude/agents/leader.md`: rol lider.
 - `.claude/agents/implementer.md`: rol implementador.
 - `.claude/agents/reviewer.md`: rol revisor.

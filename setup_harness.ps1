@@ -27,6 +27,12 @@ param(
     [switch]$Json,
     [string]$LogFile,
     [string]$Config,
+    # Binding de Atlassian (feature #15): paridad con --atlassian-site,
+    # --jira-project, --confluence-space y --jira-issue-type de setup_harness.sh.
+    [string]$AtlassianSite,
+    [string]$JiraProject,
+    [string]$ConfluenceSpace,
+    [string]$JiraIssueType,
     [string]$CargoTargetDir
 )
 
@@ -83,6 +89,7 @@ $script:HarnessDocs = @(
     "conventions.md",
     "verification.md",
     "kimi-cli-uso-eficiente.md",
+    "atlassian-integracion.md",
     "prd/COMO-ESCRIBIR-UN-PRD.md"
 )
 
@@ -228,6 +235,107 @@ function Import-HarnessConfiguration {
         Join-Path $HOME ".harness-hub"
     }
     Import-HarnessEnvFile -Path (Join-Path $hubDir ".env")
+}
+
+function Initialize-HarnessEnvTemplate {
+    # Feature #15: deja `.harness.env` listo en la RAIZ del proyecto con las
+    # claves comentadas. Documento del USUARIO: se siembra solo si falta, nunca
+    # se pisa (puede tener el token real) y no entra en los targets de -Reset.
+    # Paridad con seed_harness_env() de setup_harness.sh.
+    $target = Join-Path $script:SurfaceDir ".harness.env"
+    if (Test-Path -LiteralPath $target -PathType Leaf) {
+        $script:Counters.skipped++
+        return
+    }
+    if ($DryRun) {
+        Write-HarnessLog INFO "[DRY-RUN] Would seed $target (local config template)"
+        $script:Counters.created++
+        return
+    }
+    $template = @"
+# Config local del arnes. NUNCA se commitea: el instalador lo deja en
+# .gitignore porque puede llevar credenciales.
+#
+# Alcance: este archivo vale para ESTE proyecto. Si preferis definirlo una sola
+# vez para todos tus proyectos, escribi las mismas claves en
+# ~/.config/harness/config (lo local siempre gana sobre lo global).
+
+# --- Atlassian: credenciales del ejecutor REST -----------------------------
+# Solo hacen falta para ``atlassian apply``, ``atlassian sprint`` y
+# ``atlassian publish``. Sin ellas la integracion igual funciona con un agente
+# que tenga MCP de Atlassian (``atlassian drain`` + ``atlassian ack``).
+# El API token se genera en:
+#   https://id.atlassian.com/manage-profile/security/api-tokens
+#HARNESS_ATLASSIAN_EMAIL=tu.correo@empresa.cl
+#HARNESS_ATLASSIAN_TOKEN=
+
+# --- Atlassian: a que proyecto y space pertenece este repo -----------------
+# Alternativa a los parametros del instalador (-AtlassianSite, -JiraProject,
+# -ConfluenceSpace, -JiraIssueType). Lo que pasa por parametro manda sobre esto.
+#HARNESS_ATLASSIAN_SITE=acme.atlassian.net
+#HARNESS_JIRA_PROJECT=ADR
+#HARNESS_CONFLUENCE_SPACE=SD
+#HARNESS_JIRA_ISSUE_TYPE=Story
+"@
+    Write-HarnessText -Path $target -Content ($template + [Environment]::NewLine)
+    Write-HarnessLog INFO "Local config seeded: $target (put the Atlassian email and token there; already gitignored)."
+}
+
+function Write-AtlassianBinding {
+    # Feature #15 (AC-1/AC-2/AC-3/AC-13): a que proyecto Jira y a que space de
+    # Confluence pertenece ESTE repo. Precedencia parametro > config file >
+    # nada. Sin proyecto y sitio NO se escribe atlassian.json: la integracion
+    # queda apagada y el arnes se comporta igual que siempre. Paridad literal
+    # con write_atlassian_binding() de setup_harness.sh.
+    $site = if ($AtlassianSite) { $AtlassianSite } else { $env:HARNESS_ATLASSIAN_SITE }
+    $project = if ($JiraProject) { $JiraProject } else { $env:HARNESS_JIRA_PROJECT }
+    $space = if ($ConfluenceSpace) { $ConfluenceSpace } else { $env:HARNESS_CONFLUENCE_SPACE }
+    $issueType = if ($JiraIssueType) { $JiraIssueType } else { $env:HARNESS_JIRA_ISSUE_TYPE }
+    if (-not $issueType) { $issueType = "Story" }
+
+    $target = Join-Path $script:SurfaceDir "atlassian.json"
+    if (-not $project -or -not $site) {
+        Write-HarnessLog INFO "Atlassian: sin binding (integracion apagada). Para activarla, preguntale al USUARIO a que proyecto y space pertenece este repo y corre:"
+        Write-HarnessLog INFO "    sh harness_cli atlassian bind --site <sitio>.atlassian.net --jira-project <KEY> --confluence-space <KEY>"
+        return
+    }
+    if ($DryRun) {
+        Write-HarnessLog INFO "[DRY-RUN] Escribiria $target (Jira $project, Confluence $(if ($space) { $space } else { 'sin space' }))"
+        return
+    }
+    if ((Test-Path -LiteralPath $target -PathType Leaf) -and (-not $Force)) {
+        Write-HarnessLog INFO "Atlassian: $target ya existe (no se pisa; usa 'atlassian bind' para cambiarlo)."
+        return
+    }
+
+    $binding = @"
+{
+  "site": "$site",
+  "enabled": true,
+  "jira": {
+    "project_key": "$project",
+    "issue_types": {
+      "epic": "Epic",
+      "feature": "$issueType",
+      "ac": "Subtask"
+    },
+    "statuses": {
+      "pending": "To Do",
+      "in_progress": "In Progress",
+      "done": "Done",
+      "blocked_flag": "Impediment"
+    }
+  },
+  "confluence": {
+    "space_key": "$space"
+  }
+}
+"@
+    Write-HarnessText -Path $target -Content ($binding + [Environment]::NewLine)
+    Write-HarnessLog OK "Atlassian: binding escrito en $target (Jira $project, Confluence $(if ($space) { $space } else { 'sin space' }))."
+    if (-not $space) {
+        Write-HarnessLog INFO "Atlassian: sin space de Confluence no se publican PRD/SDD; agregalo con -ConfluenceSpace <KEY>."
+    }
 }
 
 function Enter-HarnessLock {
@@ -394,6 +502,19 @@ function Ensure-HarnessGitIgnore {
     if (Test-Path -LiteralPath $gitIgnore) {
         $existing = Get-Content -LiteralPath $gitIgnore
     }
+    # Feature #15 / Articulo 4: `.harness.env` puede llevar el email y el API
+    # token de Atlassian; se ignora SIEMPRE y aparte, para que tambien lo gane
+    # una instalacion vieja que ya tenia su .gitignore. Paridad con
+    # setup_harness.sh.
+    if (($existing -notcontains ".harness.env") -and (-not $DryRun)) {
+        $credBlock = @(
+            "",
+            "# Local harness config (may hold credentials): never commit",
+            ".harness.env"
+        ) -join [Environment]::NewLine
+        Add-Content -LiteralPath $gitIgnore -Value $credBlock
+        Write-HarnessLog INFO ".gitignore updated: .harness.env (credentials) must never be committed."
+    }
     if ($existing -contains $ignoreName) {
         $script:Counters.skipped++
         return
@@ -437,6 +558,7 @@ function Assert-HarnessAssets {
             "docs/conventions.md",
             "docs/verification.md",
             "docs/kimi-cli-uso-eficiente.md",
+            "docs/atlassian-integracion.md",
             "docs/constitution.md",
             "docs/prd/COMO-ESCRIBIR-UN-PRD.md",
             "docs/prd/PRD-master.md",
@@ -713,6 +835,15 @@ sections and links itself into its parent), draw the tree with
 `... harness_cli.ps1 add ... --prd <path>` so the spec cites its source PRD.
 Closing the feature as done marks that milestone and logs it in the PRD; the
 body of the PRD is never rewritten by the harness.
+
+Atlassian integration (only when `atlassian.json` exists in the root): every
+flow transition leaves an intent in `__HREL__progress/atlassian/outbox/`. Drain it with
+`... harness_cli.ps1 atlassian drain`, execute each call with your Atlassian MCP
+and record the created key with `... harness_cli.ps1 atlassian ack --intent <id>
+--key <ADR-n>`. With a token configured the harness does it alone (`atlassian
+apply`, `atlassian sprint start|close`, `atlassian publish`). If the binding is
+missing and the user wants Jira/Confluence, ASK which project and space this
+repo belongs to: the harness never guesses. See `docs/atlassian-integracion.md`.
 
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;
@@ -1489,6 +1620,9 @@ try {
     Backup-HarnessPath -Target $backendMarker
     Write-HarnessText -Path $layoutMarker -Content ($script:Layout + [Environment]::NewLine)
     Write-HarnessText -Path $backendMarker -Content ("postgres" + [Environment]::NewLine)
+
+    Initialize-HarnessEnvTemplate
+    Write-AtlassianBinding
 
     $generatedAssets = @(
         "init.sh",

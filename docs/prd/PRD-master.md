@@ -190,3 +190,4 @@ con su fecha.>
 
 -
 - #14 hub_batch_upserts_atomic_install -> done 2026-08-14 · spec: docs/spec-feature-14-hub-batch-upserts-atomic-install.md · impl: docs/impl-14.md
+- #15 atlassian_binding_and_outbox -> done 2026-08-16 · spec: docs/spec-feature-15-atlassian-binding-and-outbox.md · impl: docs/impl-15.md

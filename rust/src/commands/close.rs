@@ -60,6 +60,11 @@ pub fn run(
     {
         echo_to_prd(paths, feature, &stamp);
     }
+    // Feature #15: transicion al estado final (o flag Impediment si quedo
+    // bloqueada) y comentario con la nota de cierre (AC-8).
+    if let Some(feature) = feature_at(&data, idx).as_object() {
+        crate::atlassian::emit::on_close(paths, feature, status, Some(&note_text));
+    }
     if plan.exists() {
         let mut f = std::fs::OpenOptions::new().append(true).open(&plan)?;
         write!(f, "\n---\nCerrado: {stamp} - status={status} - {note_text}\n")?;

@@ -601,3 +601,231 @@ fn close_should_archive_current_state_and_reset_it() {
     assert!(current.starts_with("# Estado Actual\n\nSin feature activa.\n"));
     assert!(dir.path().join("docs/estado-feature-1-demo.md").exists());
 }
+
+// ---------------------------------------------------------------------------
+// Feature #15: binding con Atlassian, outbox y ejecutor con agente MCP.
+// ---------------------------------------------------------------------------
+
+/// Escribe un binding activo en la raiz del sandbox (lo que dejaria el
+/// instalador con --atlassian-site/--jira-project/--confluence-space).
+fn write_binding(root: &Path, project: &str) {
+    std::fs::write(
+        root.join("atlassian.json"),
+        format!(
+            r#"{{"site":"calpil.atlassian.net","enabled":true,"jira":{{"project_key":"{project}"}},"confluence":{{"space_key":"SD"}}}}"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn atlassian_should_stay_invisible_without_binding() {
+    // AC-4: sin binding el flujo se comporta exactamente como hoy y no crea
+    // ni la carpeta de la outbox.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["advance", "--nota", "un avance"])
+        .assert()
+        .success();
+    assert!(
+        !dir.path().join("hp/progress/atlassian").exists(),
+        "sin binding no se escribe nada de Atlassian"
+    );
+    // Y `status` lo dice sin fallar.
+    cmd(&bin)
+        .args(["atlassian", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("no tiene binding"));
+}
+
+#[test]
+fn atlassian_bind_should_refuse_to_guess_the_project() {
+    // AC-5: sin proyecto el comando se niega con exit 2 y dice que preguntar.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["atlassian", "bind", "--site", "calpil.atlassian.net"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lo voy a adivinar"))
+        .stderr(predicate::str::contains("Preguntale al USUARIO"));
+}
+
+#[test]
+fn atlassian_bind_should_write_the_binding_and_status_should_show_it() {
+    // AC-1 + AC-12 por la via del CLI (la del instalador la cubre el smoke).
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args([
+            "atlassian",
+            "bind",
+            "--site",
+            "calpil.atlassian.net",
+            "--jira-project",
+            "ADR",
+            "--confluence-space",
+            "SD",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("binding registrado"));
+    let written = std::fs::read_to_string(dir.path().join("atlassian.json")).unwrap();
+    assert!(written.contains("\"project_key\": \"ADR\""));
+    // Decision OBS-6: Story por default.
+    assert!(written.contains("\"feature\": \"Story\""));
+
+    cmd(&bin)
+        .args(["atlassian", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ADR"))
+        // AC-16: del token solo se informa presencia.
+        .stdout(predicate::str::contains("Token      : ausente"));
+}
+
+#[test]
+fn flow_should_emit_intents_and_drain_should_plan_them_in_order() {
+    // AC-6 + AC-7 + AC-9: add deja epic + historia, start suma las subtasks de
+    // los AC-n del spec, y drain los ordena por dependencia sin mutar nada.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+
+    cmd(&bin)
+        .args(["add", "--name", "Demo", "--acceptance", "algo verificable"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    // El spec nace como plantilla: los AC-n reales los escribe el lider antes
+    // de pedir la aprobacion, y es ahi donde bajan como subtasks (AC-7).
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace(
+            "- AC-1: Given <contexto>, When <accion>, Then <resultado observable>.",
+            "- AC-1: Given un repo, When corro add, Then queda el intent.\n- AC-2: Given el intent, When corro drain, Then aparece en el plan.",
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--yes", "--nota", "aprobado en el test"])
+        .assert()
+        .success();
+
+    let outbox = dir.path().join("hp/progress/atlassian/outbox");
+    assert!(outbox.is_dir(), "la outbox existe con binding activo");
+
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    assert!(out.status.success());
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<&str> = plan["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["call"]["tool"].as_str().unwrap())
+        .collect();
+    assert!(!kinds.is_empty(), "hay llamadas planificadas");
+    // El primero siempre es el epic del PRD (rank 0), y las subtasks de los
+    // AC-n van despues de la historia.
+    let whats: Vec<&str> = plan["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["what"].as_str().unwrap())
+        .collect();
+    assert_eq!(whats[0], "epic del PRD master");
+    let historia = whats.iter().position(|w| w.starts_with("historia")).unwrap();
+    let ac1 = whats.iter().position(|w| w.contains("AC-1")).unwrap();
+    let ac2 = whats.iter().position(|w| w.contains("AC-2")).unwrap();
+    assert!(historia < ac1 && historia < ac2, "las subtasks van despues de su historia: {whats:?}");
+    assert_eq!(plan["project"].as_str().unwrap(), "ADR");
+    // AC-9: drain NO muta (los intents siguen pendientes).
+    let after = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan2: serde_json::Value = serde_json::from_slice(&after.stdout).unwrap();
+    assert_eq!(plan["pending"], plan2["pending"]);
+}
+
+#[test]
+fn ack_should_record_the_key_and_dedupe_the_next_run() {
+    // AC-10 + AC-11: la clave vuelve al state, el intent se archiva y el mismo
+    // comando del flujo no vuelve a emitirlo.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let first = plan["plan"][0]["intent"].as_str().unwrap().to_string();
+
+    cmd(&bin)
+        .args(["atlassian", "ack", "--intent", &first, "--key", "ADR-1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ADR-1"));
+
+    let state: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/progress/atlassian/state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["prds"]["master"].as_str().unwrap(), "ADR-1");
+
+    // El intent ya no aparece en drain y quedo archivado (no borrado).
+    let out2 = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan2: serde_json::Value = serde_json::from_slice(&out2.stdout).unwrap();
+    let ids: Vec<&str> = plan2["plan"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["intent"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&first.as_str()));
+    assert!(dir.path().join("hp/progress/atlassian/applied").is_dir());
+
+    // Un ack repetido es inofensivo (idempotencia del AC-10).
+    cmd(&bin)
+        .args(["atlassian", "ack", "--intent", &first, "--key", "ADR-1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ya no esta pendiente"));
+}
+
+#[test]
+fn apply_should_refuse_without_token_and_point_to_the_agent_route() {
+    // AC-18: sin credenciales, `apply` sale con 2 y nombra la alternativa.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["atlassian", "apply"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("atlassian drain"))
+        .stderr(predicate::str::contains("HARNESS_ATLASSIAN_TOKEN"));
+}
+
+#[test]
+fn close_should_emit_transition_and_comment() {
+    // AC-8: cerrar deja la transicion al estado final y la nota como comentario.
+    let (dir, bin) = sandbox_with_binary();
+    write_binding(dir.path(), "ADR");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "trabada"])
+        .assert()
+        .success();
+
+    let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let text = plan.to_string();
+    // Decision OBS-7: blocked se marca con el flag Impediment, no transiciona.
+    assert!(text.contains("Impediment"), "blocked usa el flag: {text}");
+    assert!(text.contains("trabada"), "la nota viaja como comentario");
+}

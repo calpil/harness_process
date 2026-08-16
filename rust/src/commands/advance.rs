@@ -65,6 +65,10 @@ pub fn run(
     }
     // 3) history.md: una linea append-only.
     log(paths, &format!("advance feature #{feature_id} {nota}"))?;
+    // Feature #15: la misma bitacora viaja como comentario a Jira (AC-8).
+    if let Some(feature) = feature_at(&data, idx).as_object() {
+        crate::atlassian::emit::on_advance(paths, feature, nota);
+    }
     // 4) Memorias: hub (in_progress, con la nota) + graphify (best-effort).
     update_memories(
         "advance",

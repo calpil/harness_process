@@ -14,3 +14,4 @@ __pycache__/
 # "mi raiz es mi padre" y el checkout fuente resolviera a $HOME. El instalador
 # lo escribe en cada instalacion.
 /.harness_layout
+.harness.env
