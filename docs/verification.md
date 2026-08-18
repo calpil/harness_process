@@ -20,6 +20,18 @@ bash tests/setup_smoke.sh
 (cd rust && cargo test --locked)
 ```
 
+Si preferis que cada AC declare su propia prueba, escribila en el spec debajo
+del criterio y corre la verificacion desde aca:
+
+```bash
+sh harness_cli verify --feature <id>            # corre lo declarado, escribe el reporte
+sh harness_cli verify --feature <id> --solo AC-3
+```
+
+Dos trampas al elegir el comando: uno que filtra tests por nombre suele salir
+**0 cuando no encuentra ninguno**, y cualquier cosa que termine en `|| true` no
+puede fallar. Un comando que no puede fallar no verifica: decora.
+
 En Windows PowerShell:
 
 ```powershell

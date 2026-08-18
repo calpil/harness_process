@@ -59,6 +59,15 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
 - `docs/conventions.md` (RAIZ): convenciones del equipo.
 - `docs/verification.md` (RAIZ): comandos de validacion.
+- `docs/lecciones/<clase>.md` (RAIZ): memoria procedural, por CLASE de trabajo y
+  no por id de feature. `sh harness_cli leccion list` ANTES de disenar;
+  `leccion usar <clase>` cuando te sirva; y al aprender algo, PATCHEA la que
+  estuvo en juego antes de crear otra. El metodo y la lista de que NO capturar
+  (fallas de entorno, negativas sobre herramientas, errores transitorios,
+  narrativas de tarea unica, fracasos disfrazados de practica) estan en
+  `docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`. Con la regla `require_leccion`
+  activa, `close --status done` exige `--leccion <clase>` o
+  `--leccion ninguna --leccion-motivo "<por que>"`.
 - `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
   CLI (exclusiones de contexto, `.kimirules`, acotamiento por archivo, `/new`
   entre tareas).

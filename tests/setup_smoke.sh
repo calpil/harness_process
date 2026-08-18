@@ -270,6 +270,52 @@ grep -q -- '--prd <ruta>' "$SUBDIR_ROOT/docs/prd/PRD-master.md"
 grep -q 'prd add --name cobranza' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
 grep -q 'harness_cli prd tree' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
 grep -q 'PRD-cobranza-mora.md' "$SUBDIR_ROOT/docs/prd/COMO-ESCRIBIR-UN-PRD.md"
+# Feature #17 / AC-1: la guia de lecciones se siembra en el docs/ de la RAIZ, y
+# la carpeta nace SIN ninguna leccion (el contenido lo escribe el proyecto).
+test -f "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md" \
+    || { echo "[FALLO] falta docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md en la raiz multi-repo"; exit 1; }
+test ! -d "$SUBDIR_HARNESS/docs/lecciones" \
+    || { echo "[FALLO] las lecciones deben vivir en el docs/ de la RAIZ, no en el del arnes"; exit 1; }
+test -z "$(find "$SUBDIR_ROOT/docs/lecciones" -name '*.md' ! -name 'COMO-ESCRIBIR-UNA-LECCION.md')" \
+    || { echo "[FALLO] la instalacion sembro lecciones; solo debe sembrar la guia"; exit 1; }
+# Feature #17 / AC-14: la guia trae el orden de preferencia y la lista de que NO
+# capturar (las reglas que evitan que la biblioteca se degrade o se envenene).
+grep -q '^## La regla que ordena todo: primero patchear, crear al final' \
+    "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md"
+grep -q '^## El nombre tiene que ser de CLASE' \
+    "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md"
+grep -q '^## Que NO capturar' \
+    "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md"
+for regla in 'Fallas dependientes del entorno' 'Afirmaciones negativas sobre herramientas' \
+             'Errores transitorios' 'Narrativas de una tarea unica' 'Fracasos no resueltos'; do
+    grep -q "$regla" "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md" \
+        || { echo "[FALLO] la guia de lecciones no lista '$regla'"; exit 1; }
+done
+# Feature #19 / AC-1: el perfil se siembra VACIO en el docs/ de la RAIZ.
+test -f "$SUBDIR_ROOT/docs/perfil-usuario.md" \
+    || { echo "[FALLO] falta docs/perfil-usuario.md en la raiz multi-repo"; exit 1; }
+grep -q '^# Perfil de usuario' "$SUBDIR_ROOT/docs/perfil-usuario.md"
+if grep -q '^- ' "$SUBDIR_ROOT/docs/perfil-usuario.md"; then
+    echo "[FALLO] el instalador sembro entradas en el perfil; debe nacer vacio"; exit 1
+fi
+# Feature #19 / AC-12: sin entradas NO se inyecta bloque en ninguna superficie.
+for perfil_surface in CLAUDE.md AGENTS.md GEMINI.md LLM.md; do
+    if grep -q 'harness:perfil:inicio' "$SUBDIR_ROOT/$perfil_surface"; then
+        echo "[FALLO] $perfil_surface tiene bloque de perfil con el perfil vacio"; exit 1
+    fi
+done
+# Feature #17 / AC-15: los tres roles citan las reglas de captura.
+grep -q 'leccion list' "$SUBDIR_HARNESS/roles/leader.md" \
+    || { echo "[FALLO] el rol lider no consulta las lecciones"; exit 1; }
+grep -q 'primero patchear, crear al final' "$SUBDIR_HARNESS/roles/implementer.md" \
+    || { echo "[FALLO] el rol implementer no lleva el orden de preferencia"; exit 1; }
+grep -q 'leccion-motivo' "$SUBDIR_HARNESS/roles/reviewer.md" \
+    || { echo "[FALLO] el rol reviewer no verifica la declaracion del cierre"; exit 1; }
+# Feature #17 / AC-17: la superficie instalada explica el comando y el gate.
+grep -q 'docs/lecciones/' "$SUBDIR_ROOT/AGENTS.md" \
+    || { echo "[FALLO] AGENTS.md instalado no enlaza docs/lecciones/"; exit 1; }
+grep -q 'require_leccion' "$SUBDIR_ROOT/AGENTS.md" \
+    || { echo "[FALLO] AGENTS.md instalado no menciona la regla require_leccion"; exit 1; }
 grep -q '^## 4. Decisiones tecnicas' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'docs/architecture.md' "$SUBDIR_ROOT/docs/prd/SDD-master.md"
 grep -q 'harness_process/init.sh' "$SUBDIR_ROOT/AGENTS.md"
@@ -313,6 +359,18 @@ printf '\n<!-- %s -->\n' "$DOCS_SENTINEL" >> "$SUBDIR_ROOT/docs/conventions.md"
 # Feature #5 / AC-3: el PRD del proyecto es del USUARIO; el reinstall no lo pisa.
 PRD_SENTINEL="SENTINEL-PRD-NO-PISA-$$"
 printf '\n<!-- %s -->\n' "$PRD_SENTINEL" >> "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+# Feature #17 / AC-1: ni la guia de lecciones (HARNESS_DOCS, solo-si-falta) ni
+# una leccion ya escrita se pisan al reinstalar.
+LECCION_GUIA_SENTINEL="SENTINEL-LECCION-GUIA-NO-PISA-$$"
+printf '\n<!-- %s -->\n' "$LECCION_GUIA_SENTINEL" >> "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md"
+# Feature #19 / AC-1 + AC-11: el perfil no se pisa al reinstalar, y con entradas
+# el bloque SI se inyecta (y una sola vez, aunque se reinstale).
+PERFIL_SENTINEL="SENTINEL-PERFIL-NO-PISA-$$"
+printf -- '- Elige la opcion segura ante un fork. %s (#14)\n' "$PERFIL_SENTINEL" \
+    >> "$SUBDIR_ROOT/docs/perfil-usuario.md"
+LECCION_SENTINEL="SENTINEL-LECCION-NO-PISA-$$"
+printf -- '---\nnombre: espejo-de-roles\ntriggers: [roles]\n---\n\n<!-- %s -->\n' \
+    "$LECCION_SENTINEL" > "$SUBDIR_ROOT/docs/lecciones/espejo-de-roles.md"
 CUSTOM_BKP="$TMP_ROOT/custom-backups"
 (
     cd "$SUBDIR_HARNESS"
@@ -339,6 +397,25 @@ grep -q "$CONST_SENTINEL" "$SUBDIR_ROOT/docs/constitution.md"
 grep -q "$DOCS_SENTINEL" "$SUBDIR_ROOT/docs/conventions.md"
 # Feature #5 / AC-3: el PRD ya escrito sobrevive intacto al reinstall.
 grep -q "$PRD_SENTINEL" "$SUBDIR_ROOT/docs/prd/PRD-master.md"
+# Feature #17 / AC-1: la guia de lecciones y las lecciones escritas tampoco se pisan.
+grep -q "$LECCION_GUIA_SENTINEL" "$SUBDIR_ROOT/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md" \
+    || { echo "[FALLO] el reinstall piso la guia de lecciones existente"; exit 1; }
+grep -q "$LECCION_SENTINEL" "$SUBDIR_ROOT/docs/lecciones/espejo-de-roles.md" \
+    || { echo "[FALLO] el reinstall piso una leccion del proyecto"; exit 1; }
+# Feature #19 / AC-1: el perfil escrito sobrevive al reinstall.
+grep -q "$PERFIL_SENTINEL" "$SUBDIR_ROOT/docs/perfil-usuario.md" \
+    || { echo "[FALLO] el reinstall piso el perfil del usuario"; exit 1; }
+# Feature #19 / AC-11: el bloque se inyecto en las CUATRO superficies, UNA vez.
+for perfil_surface in CLAUDE.md AGENTS.md GEMINI.md LLM.md; do
+    perfil_bloques="$(grep -c 'harness:perfil:inicio' "$SUBDIR_ROOT/$perfil_surface" || true)"
+    if [ "$perfil_bloques" != "1" ]; then
+        echo "[FALLO] $perfil_surface tiene $perfil_bloques bloque(s) de perfil; deberia tener 1"; exit 1
+    fi
+    grep -q "$PERFIL_SENTINEL" "$SUBDIR_ROOT/$perfil_surface" \
+        || { echo "[FALLO] $perfil_surface no lleva la entrada del perfil"; exit 1; }
+    grep -q 'harness:perfil:fin' "$SUBDIR_ROOT/$perfil_surface" \
+        || { echo "[FALLO] $perfil_surface no cierra el bloque de perfil"; exit 1; }
+done
 
 # --- Feature #4 / AC-3 + AC-4: migracion de instalaciones previas -----------
 # Fixture con los docs del arnes en la ubicacion VIEJA (<harness>/docs/). El
@@ -614,6 +691,19 @@ test -f "$RESET_TEST/docs/prd/PRD-master.md"
 test -f "$RESET_TEST/docs/prd/SDD-master.md"
 PRD_RESET_SENTINEL="SENTINEL-PRD-RESET-$$"
 printf '\n<!-- %s -->\n' "$PRD_RESET_SENTINEL" >> "$RESET_TEST/docs/prd/PRD-master.md"
+# Feature #17 / AC-1: la guia de lecciones se sembro con el resto de HARNESS_DOCS.
+test -f "$RESET_TEST/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md" \
+    || { echo "[FALLO] falta docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md"; exit 1; }
+# Feature #17 / AC-19: una leccion escrita (conocimiento ganado) tiene que
+# sobrevivir al reset, a diferencia de la guia.
+PERFIL_RESET_SENTINEL="SENTINEL-PERFIL-RESET-$$"
+test -f "$RESET_TEST/docs/perfil-usuario.md" \
+    || { echo "[FALLO] falta docs/perfil-usuario.md (layout root)"; exit 1; }
+printf -- '- Preferencia de prueba. %s (#19)\n' "$PERFIL_RESET_SENTINEL" \
+    >> "$RESET_TEST/docs/perfil-usuario.md"
+LECCION_RESET_SENTINEL="SENTINEL-LECCION-RESET-$$"
+printf -- '---\nnombre: espejo-de-roles\ntriggers: [roles]\n---\n\n<!-- %s -->\n' \
+    "$LECCION_RESET_SENTINEL" > "$RESET_TEST/docs/lecciones/espejo-de-roles.md"
 # Ahora reset (respalda y limpia SOLO las superficies/docs generados)
 (
     cd "$RESET_TEST"
@@ -639,6 +729,16 @@ test ! -f "$RESET_TEST/docs/kimi-cli-uso-eficiente.md" \
 # tambien la limpia (el PRD/SDD del usuario, en la misma carpeta, sobreviven).
 test ! -f "$RESET_TEST/docs/prd/COMO-ESCRIBIR-UN-PRD.md" \
     || { echo "[FALLO] reset no limpio la guia generada COMO-ESCRIBIR-UN-PRD.md"; exit 1; }
+# Feature #17 / AC-19: la GUIA de lecciones es plantilla (se limpia), pero las
+# lecciones son conocimiento GANADO y sobreviven al reset. La leccion se escribio
+# arriba, antes del reset.
+test ! -f "$RESET_TEST/docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md" \
+    || { echo "[FALLO] reset no limpio la guia generada COMO-ESCRIBIR-UNA-LECCION.md"; exit 1; }
+grep -q "$LECCION_RESET_SENTINEL" "$RESET_TEST/docs/lecciones/espejo-de-roles.md" \
+    || { echo "[FALLO] reset borro una leccion (es conocimiento ganado, no plantilla)"; exit 1; }
+# Feature #19 / AC-1: el perfil es documento del USUARIO y sobrevive al reset.
+grep -q "$PERFIL_RESET_SENTINEL" "$RESET_TEST/docs/perfil-usuario.md" \
+    || { echo "[FALLO] reset borro el perfil del usuario"; exit 1; }
 # Feature #11 (companion KIMI_DOTFILES): los dotfiles son documentos del USUARIO
 # y sobreviven al reset (mismo criterio que PRD/SDD).
 test -f "$RESET_TEST/.kimiignore" \

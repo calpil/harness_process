@@ -62,6 +62,64 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   ejemplo `<...>` de la plantilla), `echo_close` (marca el hito y deja
   `## Bitacora`; idempotente, conserva la fecha del primer cierre) y
   `render_tree`.
+- `lecciones.rs`: la memoria procedural (`docs/lecciones/<clase>.md`, feature
+  #17). Expone `validar_nombre_de_clase` (rechaza nombres de sesion: con
+  `feature`/`#`, con prefijo `fix-`/`debug-`/`audit-`/`hotfix-`, con fecha o con
+  numeros de 3+ digitos; **sin escape hatch**), `Leccion::parse` (frontmatter
+  como lineas crudas, asi que preserva orden y claves desconocidas; el cuerpo va
+  verbatim), `registrar_uso` (telemetria `usos`/`ultimo_uso` sin tocar el cuerpo
+  ni `ultima_actualizacion`), `scan` (validas + rotas con su motivo, para el gate
+  de `harness_check.sh`), `parecidas` (sugerencias ante un typo) y `gate` (el
+  gate opcional del cierre). Desde la feature #18 tambien expone el **contrato**:
+  `contrato()` extrae de la guia (`COMO-ESCRIBIR-UNA-LECCION.md`) las dos
+  secciones que lo forman —el orden de preferencia y la lista de que no
+  capturar— y `texto_contrato_de_cierre()` lo arma para stderr, degradando a un
+  puntero si la guia falta o esta incompleta. El texto NO vive duplicado en el
+  binario: la guia es la unica fuente, y un test de integracion la copia desde
+  `templates/` para que renombrar una seccion ponga el build en rojo. Ningun
+  camino de este modulo abre conexion al hub.
+- `perfil.rs`: el perfil del usuario (`docs/perfil-usuario.md`, feature #19).
+  Expone `Perfil` (parseo que preserva el encabezado y las claves del usuario),
+  `usados`/`LIMITE` (1500, contando solo las entradas), `Coincidencia`
+  (`Ninguna`/`Unica`/`Ambigua`: el caso ambiguo es un estado del dominio con su
+  propio remedio, no un `None`), `motivo_inseguro` (escaneo de credenciales y
+  Unicode invisible que BLOQUEA antes de escribir), `bloque` (lo que el
+  instalador inyecta entre marcadores) y `recolectar` (la evidencia de
+  `history.md`, planes y specs para `perfil sugerir`). No abre conexion al hub.
+- `buscar.rs`: la busqueda sobre los artefactos del proceso (feature #20).
+  `Fuente` es un enum cuyo ORDEN es el orden de relevancia (leccion/perfil >
+  spec/plan/adr/prd > impl/review/estado > doc > historia) y cuyo `peso()` tiene
+  saltos grandes a proposito, para que la frescura nunca de vuelta el orden entre
+  fuentes. `score()` es una funcion pura (peso + encabezado + frase contigua +
+  id de feature) y por eso todo el ranking se testea sin tocar el filesystem.
+  `corpus()` excluye `bkp/` y los directorios ocultos. No hay indice, no hay
+  modelo y no se consulta el hub; es de solo lectura.
+- `curador.rs`: el mantenimiento de la biblioteca de lecciones (feature #21).
+  `planificar()` calcula el plan de transiciones **leyendo**, y `aplicar()` lo
+  ejecuta: esa separacion es la que permite que la pasada por defecto solo
+  informe. `respaldar()`/`rollback()` copian el arbol a `bkp/lecciones/<ts>/`
+  (honrando `HARNESS_BKP_DIR`) y el rollback respalda ANTES de restaurar, asi que
+  deshacer tambien se deshace. Ningun camino borra: archivar es mover a
+  `docs/lecciones/archivo/`.
+- `journey.rs`: el mapa de lo aprendido (feature #22). `construir()` **solo lee**
+  las tres fuentes y devuelve `Mapa` (nodos, enlaces, huecos); el render vive en
+  el comando, y esa separacion es lo que hace estructural la promesa de solo
+  lectura. `Clase::prioridad()` resuelve el caso de una leccion **declarada y de
+  origen** a la vez (sale una vez, como declarada), y una entrada de perfil se
+  ancla a la feature mas reciente que cita. El hueco `CierreSinLeccion` solo
+  aplica a features cerradas DESPUES de que el proyecto empezo a declarar
+  lecciones, comparando timestamps completos y no fechas.
+- `verificacion.rs`: AC ejecutables (feature #23). `parsear()` es **pura** —lee
+  el texto del spec y devuelve `Verificacion { ac, comando: Option<String> }`—, y
+  esa pureza es lo que permite probar la compatibilidad contra los 310 AC reales
+  del repo sin ejecutar un solo comando. `ejecutar()` corre UN comando desde la
+  raiz con `wait-timeout` (`rules.verify_timeout_segundos`, default 300) y
+  clasifica en el enum `Estado` (`Verde` / `Rojo` / `Timeout` / `Manual`); un AC
+  sin comando es `Manual` y **nunca** bloquea. `gate()` es lo unico que usa el
+  cierre: LEE `docs/verify-<id>.md` y no llama a `ejecutar()` — la promesa "cerrar
+  no dispara shell" es estructural, no disciplina. El parser saltea los bloques
+  ``` porque un spec que documenta la sintaxis no puede terminar ejecutando su
+  propio ejemplo (bug encontrado en la primera corrida real).
 - `progress.rs`: `current.md` / `history.md` (estado vivo y bitacora).
 - `memories.rs`, `graphify.rs`, `graph/` (`commands`, `derive`, `ids`, `store`,
   `tls`): Memory Hub y su integracion con graphify.
@@ -72,9 +130,29 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
 `add` (con `--prd <ref>` opcional), `next`, `start`, `status`, `advance`,
 `close` (que ademas devuelve el cierre al PRD de origen, best-effort: un PRD
 ausente NUNCA impide cerrar), `autocheck`, `nudge`, `check_plan`, `check_spec`,
-`prd` (`add` / `tree`). Los gates duros viven en `advance`, `close`
-(solo `--status done`), `check_spec` y `harness_check.sh`; `autocheck` y `nudge`
-son best-effort y NUNCA bloquean (tragan errores y re-firman en segundo plano).
+`prd` (`add` / `tree`), `leccion` (`list` / `show` / `nueva` / `usar`),
+`perfil` (`show` / `add` / `replace` / `remove` / `sugerir` / `check`),
+`buscar` (solo lectura, `--json` / `--todos`),
+`lecciones` (`status` / `curar` / `pin` / `unpin` / `archivar` / `restaurar` /
+`rollback`), `journey` (solo lectura, `--json`),
+`verify` (`--solo AC-n` / `--json`; el UNICO que ejecuta shell, y por eso exige
+`Estado: approved` y no lo llama ningun hook). Los gates
+duros viven en `advance`, `close` (solo `--status done`: spec aprobado, leccion
+declarada y `require_verify_green`), `check_spec` y
+`harness_check.sh`; `autocheck` y `nudge` son best-effort y NUNCA bloquean
+(tragan errores y re-firman en segundo plano).
+
+`nudge` corre en CADA tool-use (lo invoca el hook `PostToolUse` con matcher
+`Bash|Edit|Write|apply_patch`), asi que todo lo que hace es barato y silencioso
+salvo cuando tiene algo que decir. Su estado local vive en `progress/`:
+
+- `.last_nudge` — el **nivel** de backoff del aviso "sin feature activa" (su
+  mtime sigue siendo el reloj). Intervalo = `min(600 * 2^nivel, 3600)`: escala
+  mientras nada cambia y vuelve al piso cuando aparece una feature activa. Un
+  archivo vacio (formato previo a la #18) se lee como nivel 0.
+- `.nudge_lecciones` — contador `<id-feature>:<n>` del recordatorio de lecciones.
+  Cambiar de feature reinicia la cuenta, y sin `docs/lecciones/` el archivo ni
+  siquiera se crea.
 
 ### Exit codes (estables para hooks)
 
@@ -206,6 +284,28 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
 El hub usa exclusivamente PostgreSQL; se accede bajo `harness graph <cmd>`
 (`mapa`, `impacto`, `vincular`, ...). La conexion se configura por entorno o
 `$HARNESS_HUB/.env` (parseado linea a linea). El gate SDD nunca consulta el hub.
+
+## Los tres almacenes de memoria (decision usuario 2026-08-16)
+
+El arnes recuerda en tres lugares distintos, y **no se solapan**. El limite es
+explicito porque tres memorias sin frontera terminan diciendo cosas distintas:
+
+| Almacen | Que guarda | Donde vive |
+| --- | --- | --- |
+| **Memory Hub** | **eventos**: que paso, cuando, en que microservicio, y el grafo de dependencias entre ellos | PostgreSQL (`harness graph <cmd>`) |
+| **Lecciones** | **procedimiento**: como se hace esta CLASE de tarea en este proyecto | `docs/lecciones/<clase>.md` (feature #17) |
+| **Perfil** | **preferencias**: como quiere trabajar el usuario | `docs/perfil-usuario.md` (feature #19) |
+
+Consecuencias vinculantes de esa decision:
+
+- Las lecciones y el perfil son **archivos versionados** del repositorio: se leen
+  con `grep`, se revisan en un PR y viajan con el `git clone`.
+- **No agregan tablas ni filas al hub.** El aprendizaje funciona con el hub
+  caido: ningun camino de `lecciones.rs` abre conexion.
+- Los artefactos de feature (`spec-*`, `plan-*`, `impl-*`, `review-*`) no son un
+  cuarto almacen: cuentan **que paso en la feature N**, ordenados por id. Una
+  leccion es lo mismo reordenado por clase, que es el orden en que despues se
+  busca.
 
 ## Layouts
 

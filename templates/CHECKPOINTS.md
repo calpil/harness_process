@@ -23,6 +23,11 @@ Antes de cerrar una tarea:
 - [ ] **Evidencia por AC-n**: `docs/impl-<feature>.md` y `docs/review-<feature>.md`
   mapean cada AC-n del spec a su evidencia/test; el veredicto lista AC-1..AC-n.
 - [ ] Repos afectados limpios o commiteados segun politica.
+- [ ] **Aprendizaje declarado**: el cierre dice que se aprendio
+      (`--leccion <clase>`) o por que no (`--leccion ninguna --leccion-motivo
+      "..."`). Con la regla `require_leccion` activa el comando lo exige; sin
+      ella sigue siendo criterio de cierre. `ninguna` tras una feature con
+      correcciones del usuario o forks de diseno NO es honesto.
 - [ ] Task y memorias en sync: cierre via
       `sh harness_cli close --feature <id> --status <estado>` (registra el hub
       y refresca graphify).

@@ -49,19 +49,82 @@ Implementas UNA unidad concreta del plan del lider.
 1. Lee el plan en `docs/plan-feature-<id>-<slug>.md` (apuntado desde
    `__HREL__progress/current.md`) y, si lo necesitas, tu rol en
    `__HREL__roles/implementer.md`.
+1.5. Antes de reconstruir algo desde cero, buscalo:
+   `sh "__HREL__harness_cli" buscar "<terminos>"`. Si el repo ya resolvio ese
+   problema, la respuesta esta en una leccion, en un spec o en un ADR — y sale
+   primero, porque el orden va de lo curado a lo crudo.
+1.7. Si tocaste una **ruta protegida** (`docs/prd/**`, `docs/constitution.md`,
+   `.env` por defecto) vas a ver un aviso del hook con el comando de reversion.
+   No lo ignores y no sigas: son documentos del USUARIO. Mira que cambiaste
+   (`git diff -- <ruta>`), revertilo si no fue a proposito, y **decile al usuario
+   que paso**. Ojo: `git checkout --` descarta TODO lo no commiteado de ese
+   archivo, no solo tu cambio.
+1.6. Si algo del arnes no responde como esperas (un comando que no existe, un
+   hook que no dispara, la raiz resuelta a otro lado), corre primero
+   `sh "__HREL__harness_cli" doctor`: revisa la INSTALACION y te da el comando
+   exacto de remedio. Es distinto de `harness_check.sh`, que revisa el PROCESO.
 2. Trabaja solo en los microservicios asignados. No cambies contratos
    compartidos sin registrar impacto:
    `sh "__HREL__harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
 3. Haz cambios pequenos y verificables. Ejecuta los tests cercanos al cambio
-   (ver `docs/verification.md`).
-4. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ),
+   (ver `docs/verification.md`). Antes de escribir un test, lee las tres reglas
+   de `docs/conventions.md`: **contratos de comportamiento** y no snapshots,
+   **prohibido leer el codigo fuente** en un test (salvo que el archivo sea dato
+   de ENTRADA del codigo bajo prueba), y prohibido el test
+   **detector-de-cambios** (el que se rompe cada vez que cambia un dato que se
+   espera que cambie). El reviewer rechaza los que las violan, y
+   `harness_check.sh` avisa cuando un test lee el fuente.
+4. Si el spec declara lineas `Comando:`, corre
+   `sh "__HREL__harness_cli" verify --feature <id>` **antes** de pedir revision y
+   deja `docs/verify-<id>.md` verde. Iterar sobre uno solo: `--solo AC-n`. Ojo
+   con el verde facil: si un AC declara `cargo test <nombre>` y ese nombre no
+   existe, el comando sale 0 sin correr nada — comproba que el test que nombra el
+   spec exista de verdad.
+5. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ),
    indicando que AC-n del spec cubre cada cambio (el reviewer exige evidencia
    por AC).
-5. Registra hitos intermedios con
+6. Registra hitos intermedios con
    `sh "__HREL__harness_cli" advance --nota "<que avanzaste>"`: mueve hub,
    graphify, history.md y current.md sin esperar al cierre. (Al cerrar cada turno
    el hook hace un checkpoint automatico si el plan/evidencia cambio; usa
    `advance` para la nota explicita de que hiciste.)
+7. Si una leccion de `docs/lecciones/` te resolvio el problema, dejale el rastro:
+   `sh "__HREL__harness_cli" leccion usar <clase>`. Es lo que despues distingue
+   una leccion viva de una muerta.
+
+## Aprendizaje: primero patchear, crear al final
+
+Cuando la tarea te ensena algo que una sesion futura va a necesitar, el lugar se
+elige en ESTE orden, y te quedas en el primero que sirva:
+
+1. **Patchea la leccion que estuvo en juego** (la que consultaste en esta tarea).
+2. **Patchea el paraguas existente** que cubra la clase: una subseccion, un
+   pitfall, o un `trigger` mas para que se encuentre.
+3. **Agrega** `docs/lecciones/<clase>/referencias/<tema>.md` con el detalle de
+   esta sesion, y dejale un puntero de una linea a la leccion.
+4. **Recien entonces** `leccion nueva <clase>` — y el nombre va a nivel de CLASE
+   (`espejo-de-roles`), nunca `fix-*`, `debug-*`, con id de feature ni con fecha.
+   El comando rechaza esos nombres y **no** hay `--force`.
+
+**Que NO capturar nunca** (una leccion equivocada es una restriccion que el
+proyecto se cita a si mismo durante meses):
+
+- Fallas del entorno (binario que falta, credencial sin configurar,
+  `command not found`): capturá el FIX, no la falla.
+- Afirmaciones negativas sobre herramientas ("X no funciona", "eso esta roto").
+- Errores transitorios que ya se resolvieron: la leccion es el reintento.
+- Narrativas de una tarea unica ("como cerre la feature #14").
+- Fracasos no resueltos escritos como practica recomendada: si probaste cinco
+  caminos y ninguno funciono, NO los escribas como flujo confiable.
+
+Detalle completo en `docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`.
+
+**Cuando el arnes te lo recuerde, no lo ignores.** Cada tantas escrituras vas a
+ver por stderr un `[harness] Van N escrituras en esta feature...`. No es ruido de
+fondo: es el unico momento en que alguien te pregunta si aprendiste algo mientras
+todavia lo tenes fresco. Corre `leccion list`, y si algo de lo que hiciste entra
+en una clase existente, patchea esa. Si de verdad no hay nada, segui trabajando:
+la respuesta honesta tambien vale.
 
 ## Reporte minimo (docs/impl-<feature>.md)
 

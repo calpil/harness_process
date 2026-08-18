@@ -414,6 +414,12 @@ HARNESS_DOCS=(
     "kimi-cli-uso-eficiente.md"
     "atlassian-integracion.md"
     "prd/COMO-ESCRIBIR-UN-PRD.md"
+    # Feature #17: la GUIA de lecciones es plantilla del arnes (se refresca al
+    # reinstalar y entra en los reset targets). Las lecciones en si
+    # (docs/lecciones/*.md) NO se listan en ningun lado a proposito: esa ausencia
+    # es lo que las hace sobrevivir a --reset, porque son conocimiento ganado del
+    # proyecto, como el PRD y la constitution.
+    "lecciones/COMO-ESCRIBIR-UNA-LECCION.md"
 )
 
 # Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
@@ -424,6 +430,14 @@ HARNESS_DOCS=(
 PRD_DOCS=(
     "PRD-master.md"
     "SDD-master.md"
+)
+
+# Documentos del USUARIO que viven directamente en el `docs/` de la RAIZ (no bajo
+# `docs/prd/`). Mismo trato que PRD_DOCS: se siembran SOLO si faltan, un reinstall
+# NO los pisa y NO entran en los reset targets, porque lo que hay escrito ahi es
+# del usuario, no una plantilla refrescable. Feature #19.
+USER_DOCS=(
+    "perfil-usuario.md"
 )
 
 # Dotfiles de contexto para agentes (Kimi y otros): exclusiones de contexto
@@ -1037,6 +1051,56 @@ Archivos principales:
 - `docs/architecture.md` (RAIZ): mapa de arquitectura.
 - `docs/conventions.md` (RAIZ): convenciones del equipo.
 - `docs/verification.md` (RAIZ): comandos de validacion.
+- `docs/lecciones/<clase>.md` (RAIZ): la memoria procedural del proyecto,
+  ordenada por CLASE de trabajo y no por id de feature. Consultala ANTES de
+  disenar (`sh harness_cli leccion list`), dejale rastro cuando te sirva
+  (`leccion usar <clase>`) y, cuando aprendas algo, PATCHEA la que estuvo en
+  juego antes de crear otra (`leccion nueva` rechaza nombres de sesion: con
+  `feature`, con `#`, con prefijo `fix-`/`debug-`, con fecha o con numeros
+  largos, y no hay `--force`). El metodo y la lista de que NO capturar estan en
+  `docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`. Con la regla `require_leccion`
+  activa, `close --status done` exige `--leccion <clase>` o
+  `--leccion ninguna --leccion-motivo "<por que>"`. El arnes te lo va a recordar
+  solo: cada 25 escrituras (`rules.leccion_nudge_interval`, `0` apaga) y al
+  cerrar sin declarar, cuando emite por stderr el CONTRATO completo leido de esa
+  misma guia. Cuando lo veas, no lo ignores: mira el catalogo y patchea.
+- `sh harness_cli doctor`: diagnostica la INSTALACION (binario, hooks,
+  superficies, marker, hub, herramientas, graphify) e imprime el COMANDO EXACTO
+  de remedio por cada problema. Es lo primero que hay que correr cuando algo del
+  arnes no responde como se espera. Sale 2 solo si algo impide trabajar; el hub
+  caido y graphify ausente son avisos y salen 0. NO arregla nada: imprime el
+  comando y lo corre el usuario. Es distinto de `harness_check.sh`, que revisa el
+  PROCESO (spec, plan, PRDs, lecciones, perfil, convenciones) y no se solapan.
+- `sh harness_cli verify --feature <id>`: corre los comandos que los AC del spec
+  declaran debajo (`Comando: <shell>`) y escribe `docs/verify-<id>.md`. Un AC sin
+  comando queda como MANUAL y no cuenta como fallo, asi que los specs viejos
+  siguen valiendo. Es el UNICO comando que ejecuta shell: exige `Estado:
+  approved` (en draft se niega sin ejecutar nada), no lo llama ningun hook e
+  imprime cada comando antes de correrlo. Con `rules.require_verify_green`,
+  cerrar exige el reporte verde y mas nuevo que el spec — pero CERRAR NUNCA
+  EJECUTA: lee el reporte. Al declarar un comando, cuidado con los que no pueden
+  fallar (`cargo test <nombre>` sin coincidencias sale 0; `|| true` tambien).
+- `sh harness_cli journey`: el mapa de lo que el proyecto aprendio (features
+  cerradas, lecciones y perfil, con sus enlaces) y sus HUECOS. Es solo lectura:
+  por cada hueco imprime el comando que lo corrige, y podar pasa por el comando
+  de cada almacen.
+- `sh harness_cli lecciones status`: el estado de la biblioteca (que se usa, que
+  se enfria, que esta por archivarse). La pasada del curador
+  (`lecciones curar`) SOLO INFORMA; mover algo exige `--aplicar` y eso se le
+  avisa al usuario antes. Nada se borra nunca: archivar es mover a
+  `docs/lecciones/archivo/`, con backup y `lecciones rollback`.
+- `sh harness_cli buscar "<terminos>"`: antes de proponer algo o de reconstruir
+  como se hizo antes, PREGUNTALE al repo. Recorre specs, planes, ADRs, lecciones,
+  impl, review y la bitacora, y ordena de lo mas curado a lo mas crudo (lecciones
+  y perfil primero, `history.md` al final). `--json` expone el score; `--todos`
+  saca el tope de 20. Es solo lectura, sin indice, sin LLM y sin hub.
+- `docs/perfil-usuario.md` (RAIZ): como quiere trabajar el USUARIO. Si tiene
+  entradas, el instalador las inyecta en esta misma superficie dentro de un
+  bloque `harness:perfil`: leelo y respetalo en el plan, la implementacion y el
+  veredicto. Para proponer una entrada nueva: `sh harness_cli perfil sugerir`
+  junta lo ya decidido y emite el contrato; despues MOSTRALE la entrada al
+  usuario, PREGUNTALE y solo con su si `perfil add --texto "..." --yes`. Limite
+  duro de 1500 caracteres y sin secretos: el archivo se versiona.
 - `.kimirules` (RAIZ, si existe): reglas fijas del proyecto (dominio, moneda,
   invariantes); respetalas en todo el trabajo. `.kimiignore` lista las
   exclusiones de contexto (espejo de `.gitignore`).
@@ -1117,7 +1181,46 @@ run_post_tool() {
         # Aviso no bloqueante si no hay feature activa.
         HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" nudge || true
     fi
+    # Rutas protegidas (feature #26): capa de DETECCION. PostToolUse corre
+    # DESPUES de la herramienta, asi que no puede impedir la escritura; lo que
+    # puede es avisar en el acto y dar el comando para revertirla. La prevencion
+    # real es PreToolUse, donde el backend lo soporte.
+    rutas_out="$(HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" rutas --violaciones 2>/dev/null)" || {
+        if [ -n "$rutas_out" ]; then
+            echo "[harness] Se toco una RUTA PROTEGIDA (documento del usuario):" >&2
+            printf '%s\n' "$rutas_out" | while IFS="$(printf '\t')" read -r rp_ruta rp_remedio; do
+                [ -z "$rp_ruta" ] && continue
+                [ -z "$rp_remedio" ] && continue
+                echo "    $rp_ruta" >&2
+                echo "        $rp_remedio" >&2
+            done
+            echo "    Si no fue a proposito, revertilo AHORA y decile al usuario que paso." >&2
+        fi
+    }
     HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_status.sh" --brief
+}
+
+# Capa de PREVENCION (feature #26). Claude Code entrega el JSON del tool call
+# por stdin y respeta `permissionDecision: deny`: es el unico punto donde una
+# escritura sobre una ruta protegida se puede impedir ANTES de que ocurra, y por
+# lo tanto tambien antes de cualquier modo permisivo del backend.
+run_pre_tool() {
+    pre_input="$(cat 2>/dev/null || true)"
+    # La ruta del tool call, sin parsear JSON de verdad: se busca el primer
+    # "file_path". Un fallo de extraccion NO puede bloquear el turno, asi que
+    # ante la duda se deja pasar y queda la capa de deteccion.
+    pre_path="$(printf '%s' "$pre_input" \
+        | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | head -n 1)"
+    if [ -z "$pre_path" ]; then
+        printf '{}\n'
+        return 0
+    fi
+    if HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" rutas --check "$pre_path" >/dev/null 2>&1; then
+        printf '{}\n'   # no esta protegida: adelante
+        return 0
+    fi
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s es una ruta PROTEGIDA del arnes: es un documento del USUARIO (PRD, constitution) y ningun agente lo reescribe. Si de verdad hay que cambiarlo, pediselo al usuario. Detalle: docs/rutas-protegidas.md"}}\n' "$pre_path"
 }
 
 run_stop() {
@@ -1134,6 +1237,9 @@ run_event() {
     case "$EVENT" in
         session-start|SessionStart|InstructionsLoaded|BeforeAgent)
             run_session_start
+            ;;
+        pre-tool|PreToolUse|BeforeTool)
+            run_pre_tool
             ;;
         post-tool|PostToolUse|AfterTool|Tool)
             run_post_tool
@@ -2152,6 +2258,17 @@ else
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOOK_BASE/bin/harness-hook\" plain PreToolUse"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
@@ -2450,6 +2567,16 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         fi
     done
 
+    # Feature #19: documentos del USUARIO en el docs/ de la RAIZ (el perfil).
+    # Mismo criterio que PRD_DOCS: solo-si-falta, sin pisar y fuera del reset.
+    for user_doc in "${USER_DOCS[@]}"; do
+        if [ ! -f "$SURFACE_DIR/docs/$user_doc" ]; then
+            install_asset "docs/$user_doc" "$SURFACE_DIR/docs/$user_doc"
+        else
+            COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        fi
+    done
+
     # Dotfiles Kimi (.kimiignore/.kimirules): documentos del USUARIO en la
     # RAIZ. Mismo criterio que PRD/SDD: se siembran SOLO si faltan y ni
     # --force los pisa (lo escrito ahi son las reglas del proyecto, no una
@@ -2465,11 +2592,43 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     write_file_notice "roles/ + .claude/agents + .codex/agents + .gemini/agents + .kimi-code/agents / CHECKPOINTS.md / feature_list.json / docs / progress"
 fi
 
+# Feature #19: inyecta el perfil del usuario en una superficie ya escrita, entre
+# marcadores propios y de forma IDEMPOTENTE (mismo patron que write_kimi_hooks
+# sobre el config.toml global). El bloque lo RENDERIZA el binario
+# (`perfil bloque`), no este script: asi el formato y el parseo del perfil viven
+# en un solo lugar y los dos instaladores no pueden divergir.
+#
+# Sin perfil, sin entradas o sin binario utilizable, `perfil bloque` no imprime
+# nada y la superficie queda byte a byte como siempre.
+inject_perfil_block() {
+    inject_target="$1"
+    [ -f "$inject_target" ] || return 0
+    [ -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ] || return 0
+    inject_bloque="$(HARNESS_REPO_ROOT="$SURFACE_DIR" \
+        "$HARNESS_DIR/$HARNESS_BIN_NAME" perfil bloque 2>/dev/null || true)"
+    [ -n "$inject_bloque" ] || return 0
+    inject_tmp="$inject_target.perfil.$$"
+    # 1) Saca un bloque anterior (con sus marcadores) sin tocar nada mas.
+    awk '
+        $0 ~ /^<!-- harness:perfil:inicio -->$/ { skip = 1; next }
+        $0 ~ /^<!-- harness:perfil:fin -->$/    { skip = 0; next }
+        !skip { print }
+    ' "$inject_target" > "$inject_tmp" || { rm -f "$inject_tmp"; return 0; }
+    # 2) Normaliza el final (evita acumular lineas en blanco al reinstalar).
+    printf '%s\n\n' "$(cat "$inject_tmp")" > "$inject_tmp.trim" 2>/dev/null || {
+        rm -f "$inject_tmp" "$inject_tmp.trim"; return 0; }
+    printf '%s' "$inject_bloque" >> "$inject_tmp.trim"
+    mv "$inject_tmp.trim" "$inject_target" && rm -f "$inject_tmp"
+}
+
 echo "Generando superficies multi-LLM..."
 write_agent_surface "$SURFACE_DIR/CLAUDE.md"
 write_agent_surface "$SURFACE_DIR/AGENTS.md"
 write_agent_surface "$SURFACE_DIR/GEMINI.md"
 write_agent_surface "$SURFACE_DIR/LLM.md"
+for perfil_surface in CLAUDE.md AGENTS.md GEMINI.md LLM.md; do
+    inject_perfil_block "$SURFACE_DIR/$perfil_surface"
+done
 # GROK.md / ANTIGRAVITY.md no se generan: Grok Build lee AGENTS.md/CLAUDE.md y
 # Antigravity lee AGENTS.md/.agents/rules. Ambos toman el AGENTS.md de arriba.
 

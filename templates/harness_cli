@@ -3,12 +3,34 @@
 # Despacha SIEMPRE al binario nativo (harness / harness.exe).
 # Los hooks/scripts/docs usan SIEMPRE `sh harness_cli <cmd>`.
 # Sin binario: error (ya no hay fallback Python).
+#
+# Feature #25: este lanzador cubre la mitad que `harness_cli doctor` NO puede
+# cubrir por definicion — un doctor que vive en el binario no puede diagnosticar
+# un binario ausente, ni uno tan viejo que no conozca el subcomando. Ese caso se
+# traduce aca al mismo remedio en vez de dejar salir el error de clap, que dice
+# que algo no existe pero no que hacer.
+#
+# stdout y stderr pasan SIN bufferear: capturarlos para inspeccionarlos dejaria
+# mudos los comandos que tardan (con el hub sin responder, `close` tarda ~90s y
+# el usuario no veria nada). Por eso se mira el exit code y, solo cuando es el
+# codigo de uso invalido de clap, se le pregunta al binario si conoce el
+# subcomando. Un subcomando conocido nunca dispara el aviso.
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 for exe in "$DIR/harness" "$DIR/harness.exe"; do
     if [ -x "$exe" ]; then
-        exec "$exe" "$@"
+        "$exe" "$@"
+        rc=$?
+        if [ "$rc" -eq 2 ] && [ -n "$1" ] && ! "$exe" help "$1" >/dev/null 2>&1; then
+            echo "" >&2
+            echo "[harness_cli] El binario instalado no conoce el subcomando '$1': es mas viejo" >&2
+            echo "              que los scripts que lo invocan (tipico de 'git pull' sin" >&2
+            echo "              re-correr el instalador)." >&2
+            echo "              Remedio: bash setup_harness.sh" >&2
+        fi
+        exit "$rc"
     fi
 done
 echo "[harness_cli] Binario 'harness' no encontrado en $DIR." >&2
-echo "Ejecuta setup_harness.sh con rust/cargo disponible para compilar el binario." >&2
+echo "              Remedio: bash setup_harness.sh" >&2
+echo "              (requiere rust/cargo disponible para compilar el binario)" >&2
 exit 127

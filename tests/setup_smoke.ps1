@@ -173,9 +173,37 @@ exit 0
 
     # Feature #4 / AC-2: en layout root los tres docs del arnes se siembran en el
     # docs/ de la RAIZ (que aqui es el propio fixture). Feature #11: + la guia.
-    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md", "prd/COMO-ESCRIBIR-UN-PRD.md")) {
+    foreach ($harnessDoc in @("architecture.md", "conventions.md", "verification.md", "kimi-cli-uso-eficiente.md", "prd/COMO-ESCRIBIR-UN-PRD.md", "lecciones/COMO-ESCRIBIR-UNA-LECCION.md")) {
         Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/$harnessDoc")) "Harness doc $harnessDoc was not seeded into the root docs/."
     }
+    # Feature #19 / AC-1: el perfil se siembra VACIO en el docs/ de la RAIZ, y
+    # AC-12: sin entradas no se inyecta bloque en ninguna superficie.
+    $perfilPath = Join-Path $fixture "docs/perfil-usuario.md"
+    Assert-True (Test-Path -LiteralPath $perfilPath) "perfil-usuario.md was not seeded into the root docs/."
+    $perfilText = Get-Content -LiteralPath $perfilPath -Raw
+    Assert-True ($perfilText -match '^# Perfil de usuario') "The seeded profile is missing its header."
+    Assert-True (-not ($perfilText -match '(?m)^- ')) "The installer seeded profile entries; it must start empty."
+    foreach ($perfilSurface in @("CLAUDE.md", "AGENTS.md", "GEMINI.md", "LLM.md")) {
+        $surfaceText = Get-Content -LiteralPath (Join-Path $fixture $perfilSurface) -Raw
+        Assert-True (-not ($surfaceText -match 'harness:perfil:inicio')) "$perfilSurface has a profile block while the profile is empty."
+    }
+
+    # Feature #17 / AC-1 + AC-14: la carpeta nace SOLO con la guia, y la guia trae
+    # el orden de preferencia y la lista de que NO capturar (paridad con el smoke sh).
+    $leccionFiles = @(Get-ChildItem -LiteralPath (Join-Path $fixture "docs/lecciones") -Filter "*.md" -File |
+        Where-Object { $_.Name -ne "COMO-ESCRIBIR-UNA-LECCION.md" })
+    Assert-True ($leccionFiles.Count -eq 0) "The installer seeded lessons; it must seed only the guide."
+    $leccionGuideText = Get-Content -LiteralPath (Join-Path $fixture "docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md") -Raw
+    Assert-True ($leccionGuideText -match 'primero patchear, crear al final') "The lessons guide is missing the preference order."
+    Assert-True ($leccionGuideText -match '## El nombre tiene que ser de CLASE') "The lessons guide is missing the class-name rule."
+    Assert-True ($leccionGuideText -match '## Que NO capturar') "The lessons guide is missing the do-not-capture list."
+    foreach ($regla in @('Fallas dependientes del entorno', 'Afirmaciones negativas sobre herramientas', 'Errores transitorios', 'Narrativas de una tarea unica', 'Fracasos no resueltos')) {
+        Assert-True ($leccionGuideText -match [regex]::Escape($regla)) "The lessons guide does not list '$regla'."
+    }
+    # Feature #17 / AC-17: la superficie instalada explica el comando y el gate.
+    $agentsSurface = Get-Content -LiteralPath (Join-Path $fixture "AGENTS.md") -Raw
+    Assert-True ($agentsSurface -match 'docs/lecciones/') "The installed AGENTS.md does not link docs/lecciones/."
+    Assert-True ($agentsSurface -match 'require_leccion') "The installed AGENTS.md does not mention the require_leccion rule."
     # Feature #11 (companion KimiDotfiles): .kimiignore/.kimirules se siembran en
     # la RAIZ (paridad con KIMI_DOTFILES del smoke sh).
     foreach ($kimiDotfile in @(".kimiignore", ".kimirules")) {

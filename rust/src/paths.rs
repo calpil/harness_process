@@ -21,6 +21,8 @@ pub struct HarnessPaths {
     pub plans: PathBuf,
     pub autocheck_stamp: PathBuf,
     pub nudge_stamp: PathBuf,
+    /// Contador de invocaciones del nudge por feature (`<id>:<n>`), feature #18.
+    pub nudge_lecciones: PathBuf,
 }
 
 impl HarnessPaths {
@@ -46,6 +48,7 @@ impl HarnessPaths {
             history: progress.join("history.md"),
             autocheck_stamp: progress.join(".last_autocheck"),
             nudge_stamp: progress.join(".last_nudge"),
+            nudge_lecciones: progress.join(".nudge_lecciones"),
             plans: repo_root.join("docs"),
             progress,
             repo_root,

@@ -37,6 +37,11 @@ pub fn add(paths: &HarnessPaths, name: &str, parent: Option<&str>) -> anyhow::Re
 
     let rel_child = prd::rel_path(&slug);
     let rel_parent = prd::rel_path(&parent_prd.slug);
+    // Las dos escrituras las hizo el ARNES, no el agente, y las dos caen bajo
+    // `docs/prd/**` (feature #26): se registran para que la red de seguridad no
+    // las reporte como violacion.
+    crate::commands::rutas::registrar_escritura_del_arnes(paths, &rel_child);
+    crate::commands::rutas::registrar_escritura_del_arnes(paths, &rel_parent);
     log(paths, &format!("prd add {slug} (padre: {})", parent_prd.reference()))?;
     // Feature #16 (AC-3): el PRD nuevo nace como epic sin esperar a que se le
     // cargue la primera feature, y el worker detached lo empuja solo.

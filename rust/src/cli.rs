@@ -39,6 +39,12 @@ pub enum Command {
         status: String,
         #[arg(long)]
         note: Option<String>,
+        /// Que se aprendio: la clase de `docs/lecciones/`, o `ninguna` (#17).
+        #[arg(long)]
+        leccion: Option<String>,
+        /// Por que no hubo nada que aprender (obligatorio con `--leccion ninguna`).
+        #[arg(long = "leccion-motivo")]
+        leccion_motivo: Option<String>,
     },
     /// Registra un hito intermedio de la feature activa
     Advance {
@@ -99,6 +105,66 @@ pub enum Command {
     Prd {
         #[command(subcommand)]
         command: PrdCommand,
+    },
+    /// Lecciones: la memoria procedural de docs/lecciones/
+    Leccion {
+        #[command(subcommand)]
+        command: LeccionCommand,
+    },
+    /// Busca en los artefactos del proceso (specs, planes, lecciones, bitacora)
+    Buscar {
+        /// Terminos a buscar (en cualquier orden, sin importar mayusculas)
+        consulta: Vec<String>,
+        #[arg(long)]
+        json: bool,
+        /// No cortar en los primeros 20 resultados
+        #[arg(long)]
+        todos: bool,
+    },
+    /// Rutas protegidas: lista la config, o consulta si una ruta lo esta (exit 2)
+    Rutas {
+        /// Ruta(s) a consultar. Sin ninguna, lista la configuracion vigente.
+        #[arg(long = "check")]
+        check: Vec<String>,
+        /// Rutas protegidas modificadas y sin commitear (exit 2 si hay alguna)
+        #[arg(long)]
+        violaciones: bool,
+        /// Toma el estado actual como linea de base (para adoptar la proteccion
+        /// con trabajo ya en curso). Lo corre una persona, nunca un hook.
+        #[arg(long = "aceptar-estado-actual")]
+        aceptar: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Diagnostica la INSTALACION (binario, hooks, superficies, marker, hub)
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ejecuta los comandos que los AC del spec declaran (exige spec aprobado)
+    Verify {
+        #[arg(long)]
+        feature: String,
+        #[arg(long)]
+        json: bool,
+        /// Correr solo un AC (por ejemplo: --solo AC-7)
+        #[arg(long)]
+        solo: Option<String>,
+    },
+    /// Mapa de lo aprendido: linea de tiempo, enlaces y huecos (solo lectura)
+    Journey {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Curador de la biblioteca de lecciones (ciclo de vida, pin, backup)
+    Lecciones {
+        #[command(subcommand)]
+        command: LeccionesCommand,
+    },
+    /// Perfil: como quiere trabajar el usuario (docs/perfil-usuario.md)
+    Perfil {
+        #[command(subcommand)]
+        command: PerfilCommand,
     },
     /// Integracion con Atlassian: binding, outbox, Jira, sprints y Confluence
     Atlassian {
@@ -222,6 +288,94 @@ pub enum PrdCommand {
     },
 }
 
+#[derive(Subcommand)]
+pub enum LeccionCommand {
+    /// Catalogo de lecciones, ordenado por uso
+    List {
+        #[arg(long)]
+        json: bool,
+        /// Lista las archivadas en vez del catalogo activo
+        #[arg(long)]
+        archivadas: bool,
+    },
+    /// Imprime una leccion entera
+    Show { nombre: String },
+    /// Crea una leccion de CLASE (el ULTIMO recurso: primero patchea una existente)
+    Nueva { nombre: String },
+    /// Deja rastro de que una leccion sirvio (+1 uso)
+    Usar { nombre: String },
+}
+
+#[derive(Subcommand)]
+pub enum LeccionesCommand {
+    /// Que esta vivo, que se enfria y que esta por vencer
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pasada del curador. Sin --aplicar solo INFORMA: no toca ningun archivo
+    Curar {
+        /// Aplica las transiciones (respalda antes y deja reporte)
+        #[arg(long)]
+        aplicar: bool,
+    },
+    /// Congela una leccion: ninguna transicion automatica la toca
+    Pin { nombre: String },
+    /// Devuelve una leccion al ciclo de vida normal
+    Unpin { nombre: String },
+    /// Mueve una leccion a docs/lecciones/archivo/ (no la borra)
+    Archivar { nombre: String },
+    /// Devuelve una leccion archivada al catalogo activo
+    Restaurar { nombre: String },
+    /// Deshace una pasada del curador (tambien es reversible)
+    Rollback {
+        /// Backup puntual; sin esto se usa el mas reciente
+        #[arg(long)]
+        id: Option<String>,
+        /// Lista los backups disponibles en vez de restaurar
+        #[arg(long)]
+        list: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PerfilCommand {
+    /// Imprime el perfil y cuanto ocupa
+    Show,
+    /// Agrega una entrada (exige el SI del usuario)
+    Add {
+        #[arg(long)]
+        texto: String,
+        /// Confirmacion explicita del USUARIO: sin este flag el comando se niega
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Reemplaza una entrada, ubicada por subcadena unica (exige el SI)
+    Replace {
+        /// Fragmento que identifica UNA entrada
+        #[arg(long)]
+        old: String,
+        #[arg(long)]
+        texto: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Quita una entrada, ubicada por subcadena unica (exige el SI)
+    Remove {
+        #[arg(long)]
+        old: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Junta la evidencia ya escrita en el repo y emite el contrato (no escribe)
+    Sugerir,
+    /// Valida el perfil (limite y formato); lo usa harness_check.sh
+    Check,
+    /// Interno: imprime el bloque que el instalador inyecta en las superficies
+    #[command(hide = true)]
+    Bloque,
+}
+
 /// graph_memory.py acepta TODOS los flags en cualquier comando (argparse
 /// global); cada subcomando comparte el mismo set para no romper llamadas.
 #[derive(Args, Clone)]
@@ -278,7 +432,16 @@ pub fn run() -> anyhow::Result<()> {
             feature,
             status,
             note,
-        } => commands::close::run(&HarnessPaths::resolve()?, &feature, &status, note.as_deref()),
+            leccion,
+            leccion_motivo,
+        } => commands::close::run(
+            &HarnessPaths::resolve()?,
+            &feature,
+            &status,
+            note.as_deref(),
+            leccion.as_deref(),
+            leccion_motivo.as_deref(),
+        ),
         Command::Advance {
             feature,
             nota,
@@ -327,6 +490,64 @@ pub fn run() -> anyhow::Result<()> {
                 commands::prd::tree(&HarnessPaths::resolve()?, prd.as_deref())
             }
         },
+        Command::Leccion { command } => {
+            let paths = HarnessPaths::resolve()?;
+            match command {
+                LeccionCommand::List { json, archivadas } => {
+                    commands::leccion::list(&paths, json, archivadas)
+                }
+                LeccionCommand::Show { nombre } => commands::leccion::show(&paths, &nombre),
+                LeccionCommand::Nueva { nombre } => commands::leccion::nueva(&paths, &nombre),
+                LeccionCommand::Usar { nombre } => commands::leccion::usar(&paths, &nombre),
+            }
+        }
+        Command::Buscar { consulta, json, todos } => commands::buscar::run(
+            &HarnessPaths::resolve()?,
+            &consulta.join(" "),
+            json,
+            todos,
+        ),
+        Command::Rutas { check, violaciones, aceptar, json } => {
+            commands::rutas::run(&HarnessPaths::resolve()?, &check, violaciones, aceptar, json)
+        }
+        Command::Doctor { json } => commands::doctor::run(&HarnessPaths::resolve()?, json),
+        Command::Verify { feature, json, solo } => commands::verify::run(
+            &HarnessPaths::resolve()?,
+            &feature,
+            json,
+            solo.as_deref(),
+        ),
+        Command::Journey { json } => commands::journey::run(&HarnessPaths::resolve()?, json),
+        Command::Lecciones { command } => {
+            let paths = HarnessPaths::resolve()?;
+            match command {
+                LeccionesCommand::Status { json } => commands::leccion::status(&paths, json),
+                LeccionesCommand::Curar { aplicar } => commands::leccion::curar(&paths, aplicar),
+                LeccionesCommand::Pin { nombre } => commands::leccion::pin(&paths, &nombre, true),
+                LeccionesCommand::Unpin { nombre } => commands::leccion::pin(&paths, &nombre, false),
+                LeccionesCommand::Archivar { nombre } => commands::leccion::archivar(&paths, &nombre),
+                LeccionesCommand::Restaurar { nombre } => {
+                    commands::leccion::restaurar(&paths, &nombre)
+                }
+                LeccionesCommand::Rollback { id, list } => {
+                    commands::leccion::rollback(&paths, id.as_deref(), list)
+                }
+            }
+        }
+        Command::Perfil { command } => {
+            let paths = HarnessPaths::resolve()?;
+            match command {
+                PerfilCommand::Show => commands::perfil::show(&paths),
+                PerfilCommand::Add { texto, yes } => commands::perfil::add(&paths, &texto, yes),
+                PerfilCommand::Replace { old, texto, yes } => {
+                    commands::perfil::replace(&paths, &old, &texto, yes)
+                }
+                PerfilCommand::Remove { old, yes } => commands::perfil::remove(&paths, &old, yes),
+                PerfilCommand::Sugerir => commands::perfil::sugerir(&paths),
+                PerfilCommand::Check => commands::perfil::check(&paths),
+                PerfilCommand::Bloque => commands::perfil::bloque(&paths),
+            }
+        }
         Command::Atlassian { command } => {
             let paths = HarnessPaths::resolve()?;
             match command {

@@ -189,6 +189,177 @@ Regla de mantenedor: cualquier cambio de comportamiento vive en `rust/src/` con
 sus tests (`cargo test`, `cargo clippy -- -D warnings`) verdes antes de push.
 Detalles en `templates/UPDATING.md`.
 
+## Rutas protegidas: los PRD dejan de depender de la buena fe (feature #26)
+
+El README dice que los PRD son del usuario y que ningun agente los reescribe.
+Hasta esta feature eso era **solo una frase**: no habia un gate, y con un backend
+en modo permisivo tampoco un prompt en el medio.
+
+```json
+{ "rules": { "rutas_protegidas": ["docs/prd/**", "docs/constitution.md", ".env"] } }
+```
+
+Tres capas, y cada una dice lo que **no** puede:
+
+| Capa | Que puede | Que **no** puede |
+| --- | --- | --- |
+| `PreToolUse` | impedir la escritura, incluso en modo permisivo | existir donde el backend no tiene el evento (hoy: solo Claude Code) |
+| `PostToolUse` | avisar en el acto con el comando de reversion | **prevenir**: corre despues, ya se escribio |
+| `harness_check.sh` | bloquear con exit 2 | actuar en el momento del dano |
+
+```bash
+sh harness_cli rutas                     # que esta protegido
+sh harness_cli rutas --check <ruta>      # ¿esta protegida? (exit 2 si si)
+sh harness_cli rutas --violaciones       # tocadas y sin commitear
+```
+
+**El arnes no se bloquea a si mismo.** `close` escribe en el PRD cada vez que
+marca un hito y `prd add` crea PRDs: las dos son rutas protegidas. Cuando el
+binario escribe una, la anota con su mtime, y la exencion caduca en cuanto
+alguien vuelve a tocar el archivo.
+
+**Adoptarla con trabajo en curso**: `sh harness_cli rutas --aceptar-estado-actual`
+toma el estado actual como linea de base, para que el gate no arranque en rojo
+por cambios legitimos que ya estaban.
+
+**El remedio dice lo que destruye.** El aviso trae `git diff` primero y despues
+el comando destructivo, etiquetado:
+
+```
+docs/constitution.md
+    mira que cambio: git diff -- docs/constitution.md | y si no fue tuyo:
+    git checkout -- docs/constitution.md (DESCARTA todo lo no commiteado de ese archivo)
+```
+
+No es cortesia: durante el desarrollo de esta feature el aviso decia solo
+`git checkout -- <ruta>`, se corrio tal cual, y borro los hitos de tres features
+que estaban sin commitear. Detalle completo en `docs/rutas-protegidas.md`.
+
+## doctor: ¿esto esta bien instalado? (feature #25)
+
+`harness_check.sh` contesta "¿el proceso va bien?". `doctor` contesta la otra
+pregunta, la que hasta ahora no contestaba nadie:
+
+```bash
+sh harness_cli doctor          # las siete areas, con remedio por cada problema
+sh harness_cli doctor --json   # area, estado, detalle y remedio, parseable
+```
+
+```
+== Harness Doctor: la instalacion ==
+   arnes: /Users/alan/proyecto/harness_process
+   raiz:  /Users/alan/proyecto
+
+[ok] binario       harness presente, ejecutable y al dia
+[!!] hooks         claude instalado pero falta bin/harness-hook
+                   Remedio: bash setup_harness.sh
+[--] superficies   ningun backend instalado
+[ok] marker        marker 'subdir', raiz resuelta: /Users/alan/proyecto
+[i]  hub           no acepta conexiones; el arnes sigue funcionando sin el
+                   Remedio: verifica la red o ~/.harness-hub/.env
+[ok] herramientas  requeridas y opcionales presentes (git)
+[i]  graphify      no esta en el PATH: el arnes funciona igual
+                   Remedio: bash setup_harness.sh --with-graphify
+```
+
+Cada problema trae **el comando que lo arregla**, copiable tal cual. Y el exit
+code no miente: **2 solo si algo te impide trabajar** (binario roto, hook
+apuntando a la nada, herramienta requerida ausente). El hub caido, graphify
+ausente y las herramientas opcionales son avisos `[i]` y salen **0** — toda una
+sesion de trabajo de este repo transcurrio con el hub caido sin un solo problema.
+
+### Las siete areas diagnostican fallas que ya ocurrieron
+
+Ninguna se invento:
+
+| Area | La falla real que cubre |
+| --- | --- |
+| binario | `git pull` deja los scripts nuevos y el binario viejo. El sintoma era `unrecognized subcommand 'perfil'`, tres pasos despues y con otro nombre |
+| marker | `.harness_layout` perdido y la raiz resuelta al lugar equivocado: costo la feature #10 entera |
+| superficies / hooks | instalacion a medias, o el checkout FUENTE confundido con una instalacion (feature #7) |
+| hub | inalcanzable, que es normal y no deberia parecer una rotura |
+| herramientas | falta `git` (o `cargo` donde hay que compilar) |
+| graphify | ausente, que es perfectamente valido |
+
+### Lo que doctor NO puede hacer, dicho de frente
+
+Un doctor que vive en el binario **no puede diagnosticar un binario ausente**.
+Esa mitad la cubre el lanzador `harness_cli`, que ahora traduce dos casos al
+mismo remedio en vez de dejar salir un error cripitico:
+
+```
+[harness_cli] El binario instalado no conoce el subcomando 'doctor': es mas viejo
+              que los scripts que lo invocan (tipico de 'git pull' sin
+              re-correr el instalador).
+              Remedio: bash setup_harness.sh
+```
+
+Y tampoco valida el handshake de PostgreSQL: comprueba que el hub **acepte
+conexiones TCP**, nada mas. Lo dice asi en la salida porque decir "alcanzable" a
+secas seria un OK falso — durante el desarrollo de esta feature el hub aceptaba
+TCP y aun asi las operaciones morian con `connection reset`.
+
+`doctor` **no arregla nada**: imprime el comando y lo corres vos. Misma decision
+que el curador (#21) y el mapa (#22).
+
+## Convenciones que se pueden usar para rechazar algo (feature #24)
+
+`docs/conventions.md` lleva dos cosas que no son consejos: son criterios que el
+reviewer aplica.
+
+### La escalera de huella
+
+Cada peldano deja mas superficie permanente que el anterior. Se elige el de
+**menor huella que resuelva el problema**:
+
+```
+1. extender lo que ya existe      cero superficie nueva
+2. flag en un comando existente   la diferencia es un parametro, no un flujo
+3. comando nuevo                  hay un verbo propio, con su exit code
+4. superficie nueva               tiene que sobrevivir a la sesion
+5. dependencia nueva              ultimo recurso, exige ADR (Articulo 6)
+```
+
+Si no tomas el mas alto, el plan lo declara con la linea que el reviewer busca:
+
+```
+Peldano elegido: 3 (comando nuevo) porque <por que el peldano de arriba no alcanzaba>
+```
+
+La razon tiene que decir por que el peldano de arriba **no alcanzaba**. "Queda
+mas claro asi" no es una razon. Esta feature se aplico la escalera a si misma:
+salio peldano 1 (documentacion + un bloque en `harness_check.sh`), cero comandos
+y cero dependencias — si hubiera necesitado un comando, habria nacido
+contradiciendo la escalera que introduce.
+
+### Las tres reglas de test
+
+1. **Contratos de comportamiento, no snapshots.** Assertea como se relacionan
+   dos cosas, no el valor de hoy. `assert_eq!(fuentes().len(), 12)` se rompe cada
+   vez que alguien agrega una fuente legitima; `assert!(f.peso() > 0)` no.
+2. **Prohibido leer el codigo fuente en un test.** Un test que lee el texto de un
+   `.rs` prueba la *forma* del codigo: pasa con la implementacion sutilmente rota
+   y falla ante un refactor correcto. **Unica excepcion**: el archivo es *dato de
+   entrada* del codigo bajo prueba (los specs que parsea el verificador, las
+   plantillas que siembra el instalador). El corte: *¿el test seguiria valiendo
+   si la implementacion se reescribiera entera?*
+3. **Prohibido el test detector-de-cambios.** El que falla cada vez que se
+   actualiza un dato que se espera que cambie (catalogos, versiones, conteos).
+   No agrega cobertura: solo rompe CI cuando alguien hace una actualizacion
+   rutinaria.
+
+`harness_check.sh` **avisa** cuando un test lee el fuente, con archivo, linea y
+nombre del test — y **no bloquea**, porque la regla tiene una excepcion legitima
+y un gate duro empujaria a inventar un `--force`, que es peor que el aviso. Las
+otras dos reglas no se chequean solas: saber que dato "se espera que cambie" no
+se grepea, y las verifica el reviewer.
+
+La feature #24 cobro su primera deuda en el acto: el test
+`verify_should_not_be_wired_into_any_hook` de la #23 grepeaba `src/**/*.rs` y
+quedo reescrito como `only_verify_should_execute_declared_commands`, que declara
+`Comando: touch rastro.txt` en un spec, corre el arnes entero y mira el disco.
+Declararlo excepcion habria vaciado la regla en su primera aplicacion.
+
 ## Spec-Driven Development (SDD)
 
 Cada feature arranca con un spec antes de tocar codigo (inspirado en spec-kit,
@@ -219,6 +390,317 @@ adaptado y en layout plano):
 - `docs/constitution.md` (principios del proyecto) lo siembra el instalador
   (`setup_harness.sh` / `setup_harness.ps1`) solo si falta y nunca lo pisa;
   specs y planes deben cumplirlo y el reviewer lo verifica.
+
+## Lecciones: la memoria procedural del proyecto (feature #17)
+
+Los artefactos de una feature (`spec-*`, `plan-*`, `impl-*`, `review-*`) cuentan
+**que paso en la feature N**: quedan ordenados por id, que es el orden en que
+nadie los busca. Una **leccion** es lo mismo reordenado por **clase de trabajo**,
+que es como se busca de verdad seis meses despues.
+
+```bash
+sh harness_cli leccion list             # el catalogo, ordenado por uso
+sh harness_cli leccion show <clase>
+sh harness_cli leccion nueva <clase>    # crear es el ULTIMO recurso
+sh harness_cli leccion usar <clase>     # +1 uso: distingue lo vivo de lo muerto
+```
+
+Cada leccion es `docs/lecciones/<clase>.md` con frontmatter (`nombre`,
+`descripcion`, `triggers`, `relacionadas`, `origen`, `usos`, `ultimo_uso`,
+`ultima_actualizacion`, `estado`) y cuatro secciones: **Cuando aplica**,
+**Procedimiento**, **Pitfalls** y **Verificacion**. El metodo completo —el orden
+de preferencia y, sobre todo, la lista de **que NO capturar**— vive en
+`docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`.
+
+Dos reglas que sostienen todo lo demas:
+
+- **Primero patchear, crear al final.** El orden es: patchear la leccion que
+  estuvo en juego > patchear el paraguas existente > agregar
+  `docs/lecciones/<clase>/referencias/<tema>.md` > recien entonces crear una
+  clase nueva. La forma que se busca es pocas lecciones de clase, ricas, no una
+  lista plana de una-por-feature.
+- **El nombre es de CLASE.** `leccion nueva` rechaza (exit 2, sin escribir nada)
+  el nombre que contenga `feature` o `#`, empiece con `fix-`/`debug-`/`audit-`/
+  `hotfix-`, lleve una fecha o un numero de tres o mas digitos. **No hay
+  `--force`**: si el nombre solo tiene sentido para la tarea de hoy, esta mal.
+
+El gate del cierre es **opt-in**. Con `"require_leccion": true` en `rules` de
+`feature_list.json`, `close --status done` exige declarar que se aprendio:
+
+```bash
+sh harness_cli close --feature 17 --status done --leccion espejo-de-roles
+sh harness_cli close --feature 17 --status done \
+   --leccion ninguna --leccion-motivo "trabajo mecanico, sin tecnica nueva"
+```
+
+Sin la regla (ausente o en `false`, el default) el cierre se comporta exactamente
+como antes. `ninguna` siempre es una salida valida —pero no deberia ser la
+respuesta por default—; sin motivo, el comando se niega.
+
+`harness_check.sh` valida el arbol: frontmatter ilegible o un `nombre:` que no
+coincide con el archivo **bloquean** nombrando el archivo; una leccion sin
+`triggers` solo avisa con `[i]`. Sin `docs/lecciones/` el bloque entero se omite.
+
+Las lecciones son **conocimiento ganado**: `--reset` no las borra (solo refresca
+la guia, que es plantilla del arnes). Y son archivos versionados del repo, asi
+que no llevan secretos.
+
+### El arnes te empuja solo (feature #18)
+
+Una memoria en la que hay que acordarse de escribir no se llena. El arnes empuja
+en los dos momentos donde hay senal, siempre por **stderr** y siempre con exit 0:
+
+- **Cada N escrituras** (`rules.leccion_nudge_interval`, default **25**): el hook
+  `PostToolUse` ya invoca `harness_cli nudge` en cada tool-use, asi que el arnes
+  cuenta y, al llegar al intervalo, recuerda en cuatro lineas mirar el catalogo y
+  patchear antes que crear. Con `0` queda apagado.
+- **Al cerrar sin declarar**: si `close --status done` no trae `--leccion`, el
+  arnes emite el **contrato** completo. Su texto **se lee de
+  `docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`**, no vive duplicado en el
+  binario: editas la guia y cambia el contrato, sin recompilar y sin que puedan
+  divergir. Si la guia falta o esta incompleta, degrada a un puntero de dos
+  lineas — leer la guia nunca puede romper un cierre.
+
+Nada de esto corre en un proyecto **sin** `docs/lecciones/`: ni se emite una
+linea ni se crea un archivo. Y el nudge nunca escribe una leccion: emite el
+contrato, el agente decide y escribe, el gate del cierre verifica.
+
+De paso, el aviso de "sin feature activa" dejo de repetir lo mismo cada diez
+minutos para siempre: ahora **escala** mientras nada cambia (600 s -> 1200 ->
+2400 -> 3600, y ahi se estaciona) y vuelve al piso apenas aparece una feature
+activa.
+
+## Perfil de usuario: lo que ya decidiste, en la superficie (feature #19)
+
+El arnes acumula decisiones tuyas en `progress/history.md`, en los planes y en
+los specs — y ningun agente las lee nunca. El perfil las destila y las **inyecta
+en las superficies** que cada backend lee al arrancar.
+
+```bash
+sh harness_cli perfil sugerir      # junta la evidencia ya escrita; NO escribe nada
+sh harness_cli perfil show         # el perfil y cuanto ocupa
+sh harness_cli perfil add     --texto "<entrada>" --yes
+sh harness_cli perfil replace --old "<fragmento>" --texto "<nuevo>" --yes
+sh harness_cli perfil remove  --old "<fragmento>" --yes
+```
+
+El flujo es explicito sobre quien decide: **el arnes junta** (`sugerir` agrupa
+los registros por feature y emite el contrato de como destilar una entrada), **el
+agente propone**, y **vos decidis**. Los tres comandos de escritura exigen
+`--yes` y se niegan sin el, igual que `approve-spec`.
+
+Cuatro reglas que sostienen el resto:
+
+- **Limite duro de 1500 caracteres** (solo las entradas, no el encabezado). Al
+  pasarse, el comando **falla** mostrando las entradas actuales y pidiendo
+  consolidar en el mismo turno: nunca recorta nada en silencio. Es chico a
+  proposito — cada caracter se paga en todas las sesiones de todos los backends.
+- **Nada entra sin tu si.** `docs/perfil-usuario.md` es documento tuyo: se siembra
+  si falta, un reinstall no lo pisa y `--reset` no lo borra.
+- **Se bloquean los secretos.** Una entrada con pinta de credencial, clave privada
+  o Unicode invisible se rechaza **antes** de escribir: este archivo se versiona
+  (queda en git para siempre) y ademas viaja al prompt de cada agente.
+- **Snapshot congelado.** `perfil add` escribe el archivo, pero el bloque de las
+  superficies se refresca al **reinstalar**: la sesion en curso no cambia bajo los
+  pies del agente.
+
+El bloque se inyecta entre marcadores propios en `CLAUDE.md`, `AGENTS.md`,
+`GEMINI.md` y `LLM.md`, de forma idempotente (reinstalar no lo duplica ni toca
+nada fuera de los marcadores). Sin `docs/perfil-usuario.md` —o con el archivo sin
+entradas— no se inyecta nada y las superficies quedan exactamente como antes.
+
+`harness_check.sh` valida el perfil con `perfil check`: pasarse del limite
+**bloquea**.
+
+## verify: que un AC diga como se prueba (feature #23)
+
+Hasta aca, la relacion entre un criterio de aceptacion y el test que lo cubre
+vivia **en la cabeza de quien lo escribio**. Si el test se borraba, el AC seguia
+diciendo "cubierto" para siempre.
+
+Un AC puede declarar, en la linea de abajo, **como se prueba**:
+
+```
+- AC-5: Given un spec en draft, When corre `verify`, Then se niega con exit 2.
+  Comando: `cd rust && cargo test verify_should_refuse_to_run_commands_from_a_draft_spec`
+```
+
+```bash
+sh harness_cli verify --feature 23              # los corre y escribe el reporte
+sh harness_cli verify --feature 23 --solo AC-5  # iterar sobre uno solo
+sh harness_cli verify --feature 23 --json       # estado por AC, parseable
+```
+
+```
+AC-1  $ cd rust && cargo test verificacion::tests::parse
+       [ok] verde (272 ms)
+AC-5  $ cd rust && cargo test verify_should_refuse_to_run_commands_from_a_draft_spec
+       [ok] verde (80 ms)
+AC-18  $ grep -q "require_verify_green" README.md
+       [!!] rojo (5 ms)
+
+18 verde(s), 1 en rojo, 1 manual(es).
+Reporte: docs/verify-23.md
+```
+
+Un AC **sin** `Comando:` queda como **manual**: lo verifica el reviewer, igual que
+siempre, y **no cuenta como fallo**. Por eso los specs ya escritos siguen valiendo
+sin tocar una linea.
+
+### Las tres barreras
+
+`verify` es el **unico** comando del arnes que ejecuta shell, y eso define su
+diseno:
+
+1. **Exige el spec aprobado.** En `draft` se niega con exit 2 y no ejecuta ni un
+   comando. Aprobar el spec es el acto en el que el USUARIO leyo esos comandos:
+   es lo que impide que corra algo que escribio un agente y nadie miro.
+2. **Se invoca a mano.** Ningun hook ni ningun otro comando lo llama.
+3. **Imprime cada comando antes de correrlo.** Nada a ciegas.
+
+Y **cerrar nunca ejecuta**: el gate LEE `docs/verify-<id>.md`. Por eso el reporte
+se versiona en vez de recalcularse al cerrar.
+
+### El gate del cierre
+
+```json
+{ "rules": { "require_verify_green": true } }
+```
+
+Con la regla activa, `close --status done` exige que el reporte **exista**, sea
+**mas nuevo que el spec** (un verde de antes de cambiar los criterios no prueba
+nada) y **no tenga rojos** —nombrando cuales fallaron—. Sin la regla, o con un
+spec cuyos AC no declaran comandos, cerrar se comporta exactamente como siempre.
+
+`rules.verify_timeout_segundos` (default 300) corta un comando colgado; el AC
+queda en `timeout` y **la corrida sigue** con los demas.
+
+### Lo que un comando declarado NO garantiza
+
+Un comando trivial pasa igual. Dos trampas concretas, las dos encontradas
+corriendo esto sobre su propio spec:
+
+- **`cargo test <nombre>` con cero coincidencias sale 0.** Un nombre de test mal
+  escrito da verde sin ejecutar nada. Verifica que el comando imprima el test que
+  corrio, no solo que salga 0.
+- **`... | grep -c ... || true` nunca falla.** Un comando que no puede fallar no
+  verifica: decora.
+
+El reporte muestra el comando de cada AC precisamente para que el reviewer pueda
+juzgar si prueba algo.
+
+## journey: el mapa de lo aprendido (feature #22)
+
+Los tres almacenes juntos, con sus enlaces y —lo que de verdad importa— **sus
+huecos**:
+
+```bash
+sh harness_cli journey          # linea de tiempo + huecos
+sh harness_cli journey --json   # nodos, enlaces y huecos
+```
+
+```
+2026-08-16
+  #17 lecciones_memoria_procedural
+      `-- [leccion declarada] docs-generados-por-el-instalador
+      `-- [leccion (origen)] hitos-del-prd
+2026-08-17
+  #19 perfil_de_usuario
+      `-- [perfil] Ante un gate, prefiere bloquear a avisar... (#17, #19)
+
+[Ok] Sin huecos: los tres almacenes son coherentes entre si.
+```
+
+Una feature puede **declarar** una leccion al cerrar y ademas haber **parido**
+otra por el camino: el mapa muestra las dos, porque mostrar solo la declarada
+perderia la mitad de lo aprendido.
+
+Los **huecos** son lo que hace util al mapa: enlaces rotos (una leccion o una
+entrada del perfil que cita una feature inexistente), features que cerraron sin
+declarar nada, lecciones huerfanas y archivos ilegibles. Por cada uno imprime
+**el comando que lo corrige**.
+
+`journey` es de **solo lectura**: no tiene `delete` ni `edit`. Podar pasa por los
+comandos de cada almacen (`lecciones archivar`, `perfil remove --yes`), que ya
+tienen sus garantias — una segunda puerta podria saltear el "nunca borra" del
+curador y el gate del `--yes` del perfil.
+
+## El curador: que la biblioteca no se pudra (feature #21)
+
+Una biblioteca sin mantenimiento se llena de casi-duplicados y de cosas que ya no
+son ciertas. El curador da el ciclo de vida, **determinista y sin modelo**:
+
+```bash
+sh harness_cli lecciones status              # que vive, que se enfria, que vence
+sh harness_cli lecciones curar               # que pasaria (SOLO informa)
+sh harness_cli lecciones curar --aplicar     # respalda, aplica y deja reporte
+sh harness_cli lecciones rollback            # deshace la ultima pasada
+sh harness_cli lecciones pin <clase>         # congela: nada automatico la toca
+sh harness_cli lecciones archivar|restaurar <clase>
+```
+
+Las transiciones son aritmetica de fechas: **30 dias** sin uso pasa a `stale`,
+**90 dias** archiva (`rules.leccion_stale_dias` / `leccion_archivo_dias` los
+ajustan; `0` apaga ese tramo). El uso **resucita**: una `stale` que vuelve a
+usarse vuelve a `activa`.
+
+Cuatro garantias, y las cuatro se probaron pudiendo fallar:
+
+- **Nunca borra.** Archivar es *mover* a `docs/lecciones/archivo/`. No existe
+  ningun subcomando que elimine una leccion.
+- **Nada se mueve sin `--aplicar`.** La pasada por defecto solo informa: mover
+  archivos de alguien en un hook, sin que lo pida, no es curar.
+- **Toda pasada mutante respalda antes**, en `bkp/lecciones/<ts>/`, y el
+  `rollback` **tambien es reversible** (respalda el estado actual antes de
+  restaurar).
+- **Archivar no la esconde.** `buscar` sigue encontrando las archivadas, por
+  debajo de cualquier fuente activa. Por eso la carpeta es `archivo/` y no
+  `.archivo/`: `buscar` saltea los directorios ocultos, y el conocimiento
+  archivado desapareceria.
+
+Cada pasada aplicada deja `progress/lecciones/<ts>/REPORT.md` con que transiciono,
+cuantos dias llevaba inactiva cada una, que se salteo por `pin` y donde quedo el
+backup.
+
+## buscar: preguntarle al repo (feature #20)
+
+Una memoria que no se puede consultar no es memoria. `buscar` recorre los
+artefactos del proceso y responde con archivo, linea, feature y fecha.
+
+```bash
+sh harness_cli buscar "ureq adr"        # terminos en cualquier orden
+sh harness_cli buscar "opcion segura" --json
+sh harness_cli buscar "gate" --todos    # sin el tope de 20
+```
+
+Lo que lo separa de un `grep -r` es el **orden**, que va de lo mas curado a lo
+mas crudo:
+
+```
+lecciones y perfil   ->  conocimiento curado, escrito para reusarse
+specs, planes, ADRs  ->  decisiones, lo que se acordo antes de hacer
+impl, review, estado ->  evidencia, lo que efectivamente paso
+history.md           ->  bitacora cruda
+```
+
+Dentro de cada nivel pesan mas los encabezados, las frases contiguas y las
+features recientes. El `score` va en `--json` para que el ranking sea
+**auditable** y no una caja negra.
+
+Tres garantias:
+
+- **Sin indice.** El corpus de un proyecto son ~1 MB de texto: escanearlo entero
+  toma milisegundos (medido: **10 ms** sobre 114 archivos y 28.000 lineas de este
+  repo) y un indice desactualizado miente, que es peor.
+- **Sin LLM y sin hub.** No hay modelo en el camino ni conexion que pueda fallar.
+- **Solo lectura.** No escribe un byte, ni en `docs/` ni en `progress/`.
+
+Si ninguna linea tiene todos los terminos, cae a las que tienen alguno **y lo
+dice**; si hay mas de 20 resultados, muestra los primeros **y dice cuantos
+quedaron fuera**. No encontrar sale con 0: no encontrar no es un error.
+
+Es complementario de `graphify query`, que responde sobre el **grafo del codigo**;
+`buscar` responde sobre los **artefactos del proceso**.
 
 ## harness_check.sh: gates de integridad
 

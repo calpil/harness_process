@@ -3,19 +3,27 @@
 //! implementaciones deben mantenerse en paridad (ver UPDATING.md).
 
 mod atlassian;
+mod buscar;
 mod cli;
 mod commands;
+mod curador;
 mod exit;
+mod doctor;
 mod features;
 mod graph;
 mod graphify;
+mod journey;
+mod lecciones;
 mod memories;
 mod paths;
+mod perfil;
 mod plan;
 mod prd;
+mod rutas;
 mod progress;
 mod pycompat;
 mod spec;
+mod verificacion;
 
 use std::process::ExitCode;
 

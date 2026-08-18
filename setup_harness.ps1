@@ -92,7 +92,13 @@ $script:HarnessDocs = @(
     "verification.md",
     "kimi-cli-uso-eficiente.md",
     "atlassian-integracion.md",
-    "prd/COMO-ESCRIBIR-UN-PRD.md"
+    "prd/COMO-ESCRIBIR-UN-PRD.md",
+    # Feature #17: la GUIA de lecciones es plantilla del arnes (se refresca al
+    # reinstalar y entra en los reset targets). Las lecciones en si
+    # (docs/lecciones/*.md) NO se listan en ningun lado a proposito: esa ausencia
+    # es lo que las hace sobrevivir a -Reset, porque son conocimiento ganado del
+    # proyecto, como el PRD y la constitution.
+    "lecciones/COMO-ESCRIBIR-UNA-LECCION.md"
 )
 
 # Planillas maestras del proyecto (PRD y SDD), en `docs/prd/` de la RAIZ. Son
@@ -103,6 +109,14 @@ $script:HarnessDocs = @(
 $script:PrdDocs = @(
     "PRD-master.md",
     "SDD-master.md"
+)
+
+# Documentos del USUARIO que viven directamente en el `docs/` de la RAIZ (no bajo
+# `docs/prd/`). Mismo trato que PrdDocs: se siembran SOLO si faltan, un reinstall
+# NO los pisa y NO entran en los reset targets. Paridad con USER_DOCS de
+# setup_harness.sh. Feature #19.
+$script:UserDocs = @(
+    "perfil-usuario.md"
 )
 
 # Dotfiles de contexto para agentes (Kimi y otros): .kimiignore (exclusiones
@@ -835,6 +849,64 @@ Before changing code:
 7. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
 8. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
 
+Lessons (`docs/lecciones/<class>.md`) are the project's procedural memory,
+ordered by CLASS of work instead of by feature id. Check them BEFORE designing
+(`... harness_cli.ps1 leccion list`), leave a trace when one helps you
+(`leccion usar <class>`), and when you learn something PATCH the lesson that was
+in play before creating another (`leccion nueva` rejects session names: with
+`feature`, with `#`, with a `fix-`/`debug-` prefix, with a date or with long
+numbers, and there is no `--force`). The method and the list of what NOT to
+capture live in `docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`. With the
+`require_leccion` rule enabled, `close --status done` demands `--leccion <class>`
+or `--leccion ninguna --leccion-motivo "<why>"`. The harness reminds you on its
+own: every 25 writes (`rules.leccion_nudge_interval`, `0` turns it off) and when
+you close without declaring, where it prints the full CONTRACT on stderr, read
+from that same guide. When you see it, don't ignore it: check the catalog and
+patch.
+
+`harness_cli doctor` diagnoses the INSTALLATION (binary, hooks, surfaces,
+marker, hub, tools, graphify) and prints the EXACT remedy command for each
+problem. Run it first whenever the harness does not behave as expected. It exits
+2 only when something prevents work; an unreachable hub or a missing graphify are
+warnings and exit 0. It never fixes anything: it prints the command and you run
+it. Different from `harness_check.sh`, which checks the PROCESS (spec, plan,
+PRDs, lessons, profile, conventions); they do not overlap.
+
+`harness_cli verify --feature <id>` runs the commands your spec's ACs declare
+below them (`Comando: <shell>`) and writes `docs/verify-<id>.md`. An AC with no
+command is MANUAL and never counts as a failure, so existing specs keep working.
+It is the ONLY command that executes shell: it demands `Estado: approved` (on a
+draft it refuses without running anything), no hook calls it, and every command
+is printed before it runs. With `rules.require_verify_green`, closing demands a
+green report newer than the spec -- but CLOSING NEVER EXECUTES: it reads the
+report. When declaring a command, beware of ones that cannot fail
+(`cargo test <name>` with no matches exits 0; so does `|| true`).
+
+`harness_cli journey` maps what the project has learned (closed features,
+lessons and profile, with their links) and points out the GAPS. It is read-only:
+for each gap it prints the command that fixes it, and pruning goes through each
+store's own command.
+
+`harness_cli lecciones status` shows the health of the lesson library. The
+curator pass (`lecciones curar`) only REPORTS; moving anything requires
+`--aplicar`, and you tell the user before doing it. Nothing is ever deleted:
+archiving moves the file to `docs/lecciones/archivo/`, with a backup and
+`lecciones rollback`.
+
+Before proposing something or reconstructing how it was done before, ASK the
+repo: `harness_cli buscar "<terms>"` searches specs, plans, ADRs, lessons, impl,
+review and the log, ranked from most curated to most raw (lessons and profile
+first, `history.md` last). `--json` exposes the score, `--todos` removes the
+20-result cap. Read-only, no index, no LLM, no hub.
+
+The user profile (`docs/perfil-usuario.md`) states how the USER wants to work.
+When it has entries the installer injects them into this surface inside a
+`harness:perfil` block: read it and respect it in the plan, the implementation
+and the verdict. To propose a new entry, `harness_cli perfil sugerir` gathers
+what was already decided and prints the contract; then SHOW the entry to the
+user, ASK, and only with their yes run `perfil add --texto "..." --yes`. Hard
+limit of 1500 characters and no secrets: the file is versioned.
+
 Efficient Kimi Code CLI usage: see `docs/kimi-cli-uso-eficiente.md` (context
 exclusions, fixed project rules in `.kimirules`, file-scoped prompts, `/new`
 between tasks).
@@ -886,6 +958,43 @@ Agent roles:
     }
     $content = $content.Replace("__ROLES__", $rolesSection)
     Write-HarnessText -Path $Target -Content $content.Replace("__HREL__", $script:Hrel)
+}
+
+# Feature #19: inyecta el perfil del usuario en una superficie ya escrita, entre
+# marcadores propios y de forma IDEMPOTENTE. El bloque lo RENDERIZA el binario
+# (`perfil bloque`), no este script: asi el formato y el parseo del perfil viven
+# en un solo lugar y los dos instaladores no pueden divergir. Paridad con
+# inject_perfil_block de setup_harness.sh.
+#
+# Sin perfil, sin entradas o sin binario utilizable no se toca nada.
+function Inject-PerfilBlock {
+    param([string]$Target)
+    if (-not (Test-Path -LiteralPath $Target)) { return }
+    $bin = Join-Path $script:HarnessDir "harness.exe"
+    if (-not (Test-Path -LiteralPath $bin)) { return }
+    $bloque = ""
+    try {
+        $previo = $env:HARNESS_REPO_ROOT
+        $env:HARNESS_REPO_ROOT = $script:SurfaceDir
+        $bloque = (& $bin perfil bloque 2>$null) -join "`n"
+        $env:HARNESS_REPO_ROOT = $previo
+    } catch {
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($bloque)) { return }
+    $lineas = @(Get-Content -LiteralPath $Target)
+    $limpias = New-Object System.Collections.Generic.List[string]
+    $skip = $false
+    foreach ($linea in $lineas) {
+        if ($linea.Trim() -eq "<!-- harness:perfil:inicio -->") { $skip = $true; continue }
+        if ($linea.Trim() -eq "<!-- harness:perfil:fin -->")    { $skip = $false; continue }
+        if (-not $skip) { $limpias.Add($linea) }
+    }
+    while ($limpias.Count -gt 0 -and [string]::IsNullOrWhiteSpace($limpias[$limpias.Count - 1])) {
+        $limpias.RemoveAt($limpias.Count - 1)
+    }
+    $contenido = ($limpias -join "`n") + "`n`n" + $bloque.TrimEnd() + "`n"
+    Write-HarnessText -Path $Target -Content $contenido
 }
 
 function Write-AgentDefinitions {
@@ -1707,6 +1816,16 @@ try {
                 $script:Counters.skipped++
             }
         }
+        # Feature #19: documentos del USUARIO en el docs/ de la RAIZ (el perfil).
+        # Mismo criterio: solo-si-falta, sin pisar y fuera del reset.
+        foreach ($userDoc in $script:UserDocs) {
+            $userDest = Join-Path $script:SurfaceDir "docs/$userDoc"
+            if (-not (Test-Path -LiteralPath $userDest)) {
+                Install-HarnessAsset -Asset "docs/$userDoc" -Destination $userDest
+            } else {
+                $script:Counters.skipped++
+            }
+        }
         # Dotfiles Kimi (.kimiignore/.kimirules): documentos del USUARIO en la
         # RAIZ. Mismo criterio que PRD/SDD: se siembran SOLO si faltan y ni
         # -Force los pisa (lo escrito ahi son las reglas del proyecto, no una
@@ -1761,6 +1880,7 @@ try {
     foreach ($surface in @("CLAUDE.md", "AGENTS.md", "GEMINI.md", "LLM.md")) {
         $target = Join-Path $script:SurfaceDir $surface
         Write-AgentSurface -Target $target
+        Inject-PerfilBlock -Target $target
     }
     Write-PowerShellHookRuntime
     Write-AgentHooks

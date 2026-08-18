@@ -333,6 +333,155 @@ EOF
     fi
 fi
 
+# Integridad de las lecciones (docs/lecciones/ de la RAIZ, feature #17). Una
+# leccion es memoria procedural del proyecto y su identidad es su nombre de
+# clase: el frontmatter tiene que ser legible y su `nombre:` tiene que coincidir
+# con el archivo, porque es lo que hace que se encuentre. Frontmatter roto o
+# nombre que no coincide BLOQUEAN (decision usuario 2026-08-16, OBS-4 de la #17);
+# la falta de `triggers` solo avisa. Sin docs/lecciones/ el bloque se omite.
+lec_root="$REPO_ROOT/docs/lecciones"
+if [ -d "$lec_root" ]; then
+    while IFS= read -r lec_file; do
+        [ -z "$lec_file" ] && continue
+        lec_base="$(basename "$lec_file")"
+        # La guia es plantilla del arnes, no una leccion.
+        [ "$lec_base" = "COMO-ESCRIBIR-UNA-LECCION.md" ] && continue
+        lec_name="${lec_base%.md}"
+        if [ "$(head -n 1 "$lec_file")" != "---" ]; then
+            echo "[!] docs/lecciones/$lec_base no empieza con el frontmatter '---'. Formato en docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md." >&2
+            failures=$((failures + 1))
+            continue
+        fi
+        lec_close="$(awk 'NR > 1 && /^---[[:space:]]*$/ { print NR; exit }' "$lec_file")"
+        if [ -z "$lec_close" ]; then
+            echo "[!] docs/lecciones/$lec_base tiene el frontmatter sin cerrar (falta el '---' de cierre)." >&2
+            failures=$((failures + 1))
+            continue
+        fi
+        lec_head="$(sed -n "2,${lec_close}p" "$lec_file")"
+        lec_decl="$(printf '%s\n' "$lec_head" | sed -n 's/^nombre:[[:space:]]*//p' | head -n 1)"
+        if [ -z "$lec_decl" ]; then
+            echo "[!] docs/lecciones/$lec_base no declara 'nombre:' en su frontmatter." >&2
+            failures=$((failures + 1))
+        elif [ "$lec_decl" != "$lec_name" ]; then
+            echo "[!] docs/lecciones/$lec_base declara 'nombre: $lec_decl' y el archivo se llama '$lec_name.md'. Corregi el frontmatter o renombra el archivo." >&2
+            failures=$((failures + 1))
+        fi
+        lec_trig="$(printf '%s\n' "$lec_head" | sed -n 's/^triggers:[[:space:]]*//p' | head -n 1 | tr -d '[] ')"
+        if [ -z "$lec_trig" ]; then
+            echo "[i] docs/lecciones/$lec_base no declara 'triggers': nadie la va a encontrar por tema." >&2
+        fi
+    done <<EOF
+$(find "$lec_root" -maxdepth 2 -type f -name '*.md' | sort)
+EOF
+fi
+
+# Integridad del perfil de usuario (docs/perfil-usuario.md, feature #19). El
+# limite es duro porque el perfil se INYECTA en el prompt de cada agente: si
+# crece sin control, el costo se paga en todas las sesiones de todos los
+# backends. La validacion vive en el binario (`perfil check`) y no aca: contar
+# caracteres UTF-8 en awk es poco confiable y el limite tiene que ser EXACTAMENTE
+# el mismo que aplica al escribir. Sin el archivo, `perfil check` calla y sale 0.
+#
+# Tolerancia a instalacion parcial: quien hace `git pull` sin re-correr el
+# instalador se queda con este script nuevo y el binario viejo, que no conoce
+# `perfil check`. Eso NO puede reportarse como un problema del perfil: se detecta
+# el "unrecognized subcommand" y se avisa con `[i]` nombrando el remedio.
+if [ -f "$REPO_ROOT/docs/perfil-usuario.md" ]; then
+    perfil_out="$(sh "$HARNESS_DIR/harness_cli" perfil check 2>&1)" && perfil_rc=0 || perfil_rc=$?
+    if [ "$perfil_rc" -ne 0 ]; then
+        case "$perfil_out" in
+            *"unrecognized subcommand"*|*"invalid value"*)
+                echo "[i] El binario instalado no conoce 'perfil check' (es anterior a la feature #19): re-corre el instalador para validar docs/perfil-usuario.md." >&2
+                ;;
+            *)
+                printf '%s\n' "$perfil_out" >&2
+                failures=$((failures + 1))
+                ;;
+        esac
+    elif [ -n "$perfil_out" ]; then
+        printf '%s\n' "$perfil_out" >&2
+    fi
+fi
+
+# Regla de tests: prohibido leer el codigo fuente en un test (feature #24,
+# docs/conventions.md). Un test que lee el texto de un .rs/.sh/.ps1 prueba la
+# FORMA del codigo: pasa con la implementacion rota y falla ante un refactor
+# correcto.
+#
+# AVISA Y NO BLOQUEA (decision usuario 2026-08-17, OBS-2 de la #24): la regla
+# admite la excepcion de "dato de entrada" y un gate duro empujaria a inventar
+# un --force, que es peor que el aviso. Por eso NO toca `failures`.
+#
+# Las otras dos reglas (snapshots, detector-de-cambios) no se chequean solas:
+# saber que dato "se espera que cambie" no se grepea. Las verifica el reviewer.
+#
+# Sin rust/tests/ el bloque se omite entero: un proyecto que no es Rust no ve
+# ninguna diferencia.
+conv_tests="$REPO_ROOT/rust/tests"
+if [ -d "$conv_tests" ]; then
+    conv_hits="$(grep -nE 'read_to_string\([^)]*\.(rs|sh|ps1)"' "$conv_tests"/*.rs 2>/dev/null || true)"
+    if [ -n "$conv_hits" ]; then
+        printf '%s\n' "$conv_hits" | while IFS= read -r conv_line; do
+            [ -z "$conv_line" ] && continue
+            conv_file="${conv_line%%:*}"
+            conv_rest="${conv_line#*:}"
+            conv_num="${conv_rest%%:*}"
+            # El nombre del test es el ultimo `fn ...` antes de esa linea.
+            conv_fn="$(head -n "$conv_num" "$conv_file" \
+                | grep -E '^(pub )?fn [a-z_0-9]+' \
+                | tail -n 1 \
+                | sed -E 's/^(pub )?fn ([a-z_0-9]+).*/\2/')"
+            [ -z "$conv_fn" ] && conv_fn="(fuera de un test)"
+            echo "[i] rust/tests/$(basename "$conv_file"):$conv_num ($conv_fn) lee un archivo fuente. Regla 2 de docs/conventions.md: prohibido leer el codigo fuente en un test. Si es dato de entrada del codigo bajo prueba, dejalo dicho en el test." >&2
+        done
+    fi
+fi
+
+# Rutas protegidas (feature #26, docs/rutas-protegidas.md). Red de seguridad: la
+# ultima de las tres capas. No actua en el momento del dano —para eso estan el
+# PreToolUse y el PostToolUse— pero impide cerrar con una ruta protegida tocada.
+#
+# BLOQUEA (decision usuario 2026-08-17, OBS-4): a diferencia del aviso de
+# convenciones de la #24, aca no hay excepcion legitima. Nadie deberia estar
+# editando un PRD o la constitution desde un agente. La valvula sigue siendo
+# HARNESS_CHECK_MODE=warn.
+#
+# Las escrituras del PROPIO arnes (el hito que marca `close`, el PRD que crea
+# `prd add`) quedan exentas: el binario las registra al hacerlas. Sin eso, el
+# arnes se reportaria a si mismo despues de cada cierre.
+#
+# Tolerancia a instalacion parcial: binario viejo que no conoce `rutas` -> se
+# avisa con [i] y no se cuenta como fallo (mismo patron que `perfil check`).
+# stdout y stderr POR SEPARADO: el binario emite avisos informativos por stderr
+# (la resolucion de raiz, por ejemplo) y mezclarlos hacia que una linea de aviso
+# apareciera como si fuera una ruta violada.
+rutas_err="$(mktemp "${TMPDIR:-/tmp}/harness-rutas.XXXXXX")"
+rutas_out="$(sh "$HARNESS_DIR/harness_cli" rutas --violaciones 2>"$rutas_err")" && rutas_rc=0 || rutas_rc=$?
+rutas_err_text="$(cat "$rutas_err" 2>/dev/null || true)"
+rm -f "$rutas_err"
+if [ "$rutas_rc" -ne 0 ]; then
+    case "$rutas_err_text" in
+        *"unrecognized subcommand"*|*"invalid value"*)
+            echo "[i] El binario instalado no conoce 'rutas' (es anterior a la feature #26): re-corre el instalador para activar las rutas protegidas." >&2
+            ;;
+        *)
+            echo "[!] Rutas PROTEGIDAS modificadas y sin commitear:" >&2
+            printf '%s\n' "$rutas_out" | while IFS="$(printf '\t')" read -r rp_ruta rp_remedio; do
+                # Solo las lineas con tab son hallazgos; cualquier otra cosa que
+                # se cuele no se imprime como si lo fuera.
+                [ -z "$rp_ruta" ] && continue
+                [ -z "$rp_remedio" ] && continue
+                echo "    $rp_ruta" >&2
+                echo "        $rp_remedio" >&2
+            done
+            echo "    Son documentos del USUARIO (docs/rutas-protegidas.md). Si el cambio es tuyo y" >&2
+            echo "    querias hacerlo, commitealo; si no, revertilo con el comando de arriba." >&2
+            failures=$((failures + 1))
+            ;;
+    esac
+fi
+
 if [ "$failures" -gt 0 ]; then
     echo "[Harness] Check fallo con $failures problema(s)." >&2
     [ "$MODE" = "warn" ] && exit 0
