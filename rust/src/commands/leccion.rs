@@ -104,13 +104,23 @@ pub fn list(paths: &HarnessPaths, as_json: bool, archivadas: bool) -> anyhow::Re
         return Ok(());
     }
     println!("Lecciones: {} (por uso)", todas.len());
+    // Ancho por el nombre mas largo en vez del 28 fijo: los nombres de CLASE
+    // son descriptivos y varios ya lo pasaban, desalineando toda la tabla
+    // (hito #27 del PRD, pagado en la #36). Piso en 28 para que un catalogo de
+    // nombres cortos no se vea distinto al de antes.
+    let ancho = todas
+        .iter()
+        .map(|l| l.nombre.chars().count())
+        .max()
+        .unwrap_or(28)
+        .max(28);
     for l in &todas {
         let uso = match l.ultimo_uso().as_str() {
             "" => "nunca".to_string(),
             fecha => fecha.to_string(),
         };
         println!(
-            "  {:<28} {:>4} usos | {:<10} | {}",
+            "  {:<ancho$} {:>4} usos | {:<10} | {}",
             l.nombre,
             l.usos(),
             uso,

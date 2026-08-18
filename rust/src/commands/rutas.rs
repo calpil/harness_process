@@ -62,7 +62,33 @@ pub fn violaciones_actuales(paths: &HarnessPaths, patrones: &[String]) -> Vec<ru
     let porcelain = String::from_utf8_lossy(&salida.stdout);
     let registro = std::fs::read_to_string(registro_path(paths)).unwrap_or_default();
     let exentas = rutas::exentas(&registro, |r| mtime_nanos(&paths.repo_root.join(r)));
+    // Poda en cada consulta (decision del usuario 2026-08-18, OBS-2 de la #36):
+    // este camino ya leyo el archivo y ya corrio `git status`, asi que sacar las
+    // entradas muertas no cuesta nada y el registro no crece nunca. Consultar es
+    // muchisimo mas frecuente que escribir, asi que podar al escribir dejaria
+    // entradas muertas por mucho tiempo.
+    podar_registro_en_disco(paths, &registro, &porcelain);
     rutas::violaciones(&porcelain, &paths.repo_root, patrones, &exentas)
+}
+
+/// Best-effort: si no se puede escribir, la unica consecuencia es que el
+/// registro queda con una linea de mas.
+fn podar_registro_en_disco(paths: &HarnessPaths, registro: &str, porcelain: &str) {
+    if registro.is_empty() {
+        return;
+    }
+    let sucias: Vec<String> = porcelain
+        .lines()
+        .filter(|l| l.len() >= 4)
+        .map(|l| {
+            let ruta = l[3..].trim();
+            ruta.rsplit(" -> ").next().unwrap_or(ruta).trim_matches('"').to_string()
+        })
+        .collect();
+    let podado = rutas::podar_registro(registro, &sucias);
+    if podado != registro {
+        let _ = std::fs::write(registro_path(paths), podado);
+    }
 }
 
 pub fn run(

@@ -5,6 +5,7 @@
 # pueda fallar (leccion `criterios-de-cierre-que-se-pueden-fallar`):
 #
 #   sin-violaciones  AC-8   la suite real no tiene ningun test que lea el fuente
+#   detecta-en-src   #36    la violacion sembrada en rust/src/ tambien se reporta
 #   detecta          AC-10  ante una violacion sembrada, la reporta con archivo,
 #                           linea y nombre del test  <- la PRUEBA DEL ROJO
 #   no-bloquea       AC-11  con la violacion presente, el exit code no cambia
@@ -23,6 +24,9 @@ ok() { echo "[Ok] $1"; }
 # La violacion se siembra en un archivo propio y se borra siempre, tambien si el
 # assert falla: el repo no puede quedar sucio por un test.
 SEMBRADO="$REPO_ROOT/rust/tests/zz_conventions_fixture.rs"
+# La unica violacion historica de la regla 2 estaba en un test UNITARIO, dentro
+# de rust/src/, o sea fuera del alcance original del chequeo (feature #36).
+SEMBRADO_SRC="$REPO_ROOT/rust/src/zz_conventions_fixture.rs"
 sembrar_violacion() {
     cat > "$SEMBRADO" <<'RUST'
 //! Fixture temporal de tests/conventions_check.sh. Se borra al terminar.
@@ -33,7 +37,20 @@ fn fixture_que_lee_el_fuente() {
 }
 RUST
 }
-limpiar() { rm -f "$SEMBRADO"; }
+sembrar_violacion_en_src() {
+    cat > "$SEMBRADO_SRC" <<'RUST'
+//! Fixture temporal de tests/conventions_check.sh. Se borra al terminar.
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fixture_unitario_que_lee_el_fuente() {
+        let texto = std::fs::read_to_string("src/cli.rs").unwrap_or_default();
+        assert!(texto.is_empty() || !texto.is_empty());
+    }
+}
+RUST
+}
+limpiar() { rm -f "$SEMBRADO" "$SEMBRADO_SRC"; }
 trap limpiar EXIT
 
 correr_check() {
@@ -65,6 +82,19 @@ modo_detecta() {
     printf '%s' "$linea" | grep -q "conventions.md" \
         || fail "detecta: no nombra la regla. Reporto: $linea"
     ok "detecta: reporta archivo, linea, nombre del test y la regla"
+}
+
+modo_detecta_en_src() {
+    sembrar_violacion_en_src
+    salida="$(correr_check)"
+    limpiar
+    linea="$(printf '%s\n' "$salida" | grep "lee un archivo fuente" || true)"
+    [ -n "$linea" ] || fail "detecta-en-src: no reporto la violacion sembrada en rust/src/"
+    printf '%s' "$linea" | grep -q "zz_conventions_fixture.rs" \
+        || fail "detecta-en-src: no nombra el archivo. Reporto: $linea"
+    printf '%s' "$linea" | grep -q "fixture_unitario_que_lee_el_fuente" \
+        || fail "detecta-en-src: no nombra el test. Reporto: $linea"
+    ok "detecta-en-src: los tests unitarios de rust/src/ tambien se revisan"
 }
 
 modo_no_bloquea() {
@@ -104,11 +134,13 @@ modo_sin_rust() {
 
 case "$MODO" in
     sin-violaciones) modo_sin_violaciones ;;
+    detecta-en-src)  modo_detecta_en_src ;;
     detecta)         modo_detecta ;;
     no-bloquea)      modo_no_bloquea ;;
     sin-rust)        modo_sin_rust ;;
     todos)
         modo_sin_violaciones
+        modo_detecta_en_src
         modo_detecta
         modo_no_bloquea
         modo_sin_rust

@@ -154,6 +154,8 @@ fn exigir_aprobado(
     }
 }
 
+/// `--solo AC-3` o `--solo AC-3,AC-7`. La normalizacion vive aca y en un solo
+/// lugar, asi que el resto del comando no tiene que saber que ahora hay varios.
 fn filtrar(
     todas: Vec<verificacion::Verificacion>,
     solo: Option<&str>,
@@ -161,20 +163,50 @@ fn filtrar(
     let Some(objetivo) = solo else {
         return Ok(todas);
     };
-    let objetivo = objetivo.trim();
-    let normalizado = if objetivo.to_ascii_uppercase().starts_with("AC-") {
-        objetivo.to_ascii_uppercase()
-    } else {
-        format!("AC-{objetivo}")
-    };
-    let elegidas: Vec<_> = todas.into_iter().filter(|v| v.ac == normalizado).collect();
-    if elegidas.is_empty() {
+    let pedidos: Vec<String> = objetivo
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(normalizar_ac)
+        .collect();
+    if pedidos.is_empty() {
         return Err(Exit {
             code: 2,
-            message: Some(format!("El spec no declara {normalizado}.")),
+            message: Some("--solo no nombra ningun AC.".to_string()),
         });
     }
-    Ok(elegidas)
+    // Se nombra CUAL falta, no "alguno": con varios pedidos, "no existe" a secas
+    // obliga a probar de a uno.
+    let faltantes: Vec<&String> = pedidos
+        .iter()
+        .filter(|p| !todas.iter().any(|v| &v.ac == *p))
+        .collect();
+    if !faltantes.is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "El spec no declara {}.",
+                faltantes
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        });
+    }
+    Ok(todas
+        .into_iter()
+        .filter(|v| pedidos.iter().any(|p| p == &v.ac))
+        .collect())
+}
+
+fn normalizar_ac(pedido: &str) -> String {
+    let arriba = pedido.to_ascii_uppercase();
+    if arriba.starts_with("AC-") {
+        arriba
+    } else {
+        format!("AC-{arriba}")
+    }
 }
 
 fn sin_nada_que_verificar(

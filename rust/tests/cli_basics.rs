@@ -350,16 +350,18 @@ fn spec_gate_should_block_advance_and_close_done_until_user_approves() {
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
     cmd(&bin).args(["start", "--feature", "1"]).assert().success();
     enable_spec_rule(&dir.path().join("hp"));
-    // Spec draft + regla activa: advance y close --status done bloquean
+    // Spec draft + regla activa: advance y close --status done bloquean con
+    // exit 2. Salia 1 hasta la feature #36, que unifico los tres gates de
+    // `close` en el mismo codigo (el de leccion y el de verify ya salian 2).
     cmd(&bin)
         .args(["advance", "--nota", "intento", "--no-graphify"])
         .assert()
-        .code(1)
+        .code(2)
         .stderr(predicate::str::contains("[GATE] Spec sin aprobar"));
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
         .assert()
-        .code(1)
+        .code(2)
         .stderr(predicate::str::contains("[GATE] Spec sin aprobar"));
     cmd(&bin)
         .arg("check-spec")
@@ -3121,4 +3123,147 @@ fn rutas_should_list_the_active_configuration() {
         .success()
         .stdout(predicate::str::contains("docs/prd/**"))
         .stdout(predicate::str::contains("docs/constitution.md"));
+}
+
+// ---------------------------------------------------------------------------
+// Feature #36: las seis deudas que el arnes se anoto en sus propios impl.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn close_gates_should_share_one_exit_code() {
+    // Deuda de impl-23. La nota decia "1 / 1 / 2" y al medirla estaba mal: el
+    // gate de leccion ya salia 2. El unico distinto era el de spec.
+    let (dir, bin) = sandbox_with_binary();
+    let hp = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    // Gate 1: spec sin aprobar.
+    enable_spec_rule(&hp);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Spec sin aprobar"));
+
+    // Gate 2: leccion sin declarar.
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    enable_leccion_rule(&hp);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no declara que se aprendio"));
+}
+
+#[test]
+fn close_should_keep_usage_errors_separate_from_gates() {
+    // El cambio de exit code no puede borrar la diferencia entre "el arnes te
+    // frena" y "escribiste mal el comando": el segundo lo maneja clap.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "inventado"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Spec sin aprobar").not());
+}
+
+#[test]
+fn verify_solo_should_accept_several_acs() {
+    // Deuda de impl-23: iterar sobre dos AC obligaba a dos corridas.
+    let (dir, bin) = sandbox_with_binary();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    cmd(&bin).args(["add", "--name", "demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    escribir_acs(
+        &spec,
+        "- AC-1: uno.\n  Comando: `touch uno.txt`\n\
+         - AC-2: dos.\n  Comando: `touch dos.txt`\n\
+         - AC-3: tres.\n  Comando: `touch tres.txt`",
+    );
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1", "--solo", "AC-1,AC-3"])
+        .assert()
+        .success();
+    assert!(dir.path().join("uno.txt").exists(), "no corrio AC-1");
+    assert!(dir.path().join("tres.txt").exists(), "no corrio AC-3");
+    assert!(!dir.path().join("dos.txt").exists(), "corrio AC-2, que no se pidio");
+}
+
+#[test]
+fn verify_solo_should_name_the_missing_ac() {
+    // Con varios pedidos, "no existe" a secas obliga a probar de a uno.
+    let (dir, bin) = sandbox_with_binary();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    cmd(&bin).args(["add", "--name", "demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    escribir_acs(&spec, "- AC-1: uno.\n  Comando: `true`");
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1", "--solo", "AC-1,AC-9"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("AC-9"))
+        .stderr(predicate::str::contains("AC-1").not());
+}
+
+#[test]
+fn leccion_list_should_size_the_column_to_the_longest_name() {
+    // Hito #27: el ancho fijo de 28 desbordaba con nombres de CLASE largos.
+    let (dir, bin) = sandbox_with_binary();
+    let lecciones = dir.path().join("docs/lecciones");
+    std::fs::create_dir_all(&lecciones).unwrap();
+    let largo = "una-clase-con-un-nombre-deliberadamente-larguisimo";
+    for nombre in [largo, "corta"] {
+        std::fs::write(
+            lecciones.join(format!("{nombre}.md")),
+            format!(
+                "---\nnombre: {nombre}\ndescripcion: d\ntriggers: [x]\nusos: 0\nestado: activa\n---\n\ncuerpo\n"
+            ),
+        )
+        .unwrap();
+    }
+    let salida = cmd(&bin).args(["leccion", "list"]).output().unwrap();
+    let texto = String::from_utf8_lossy(&salida.stdout);
+    // La columna de "usos" empieza en la misma posicion en las dos filas: eso
+    // es lo que significa que la tabla no desborda.
+    let columnas: Vec<usize> = texto
+        .lines()
+        .filter(|l| l.contains(" usos |"))
+        .filter_map(|l| l.find(" usos |"))
+        .collect();
+    assert_eq!(columnas.len(), 2, "esperaba dos filas: {texto}");
+    assert_eq!(columnas[0], columnas[1], "las columnas no alinean: {texto}");
+    assert!(
+        columnas[0] > largo.chars().count(),
+        "el nombre largo desborda la columna: {texto}"
+    );
+}
+
+#[test]
+fn leccion_list_should_not_change_order_fields_or_json() {
+    // Es formato de salida y nada mas: orden, campos, --json y exit codes
+    // quedan como estaban.
+    let (dir, bin) = sandbox_with_binary();
+    let lecciones = dir.path().join("docs/lecciones");
+    std::fs::create_dir_all(&lecciones).unwrap();
+    for (nombre, usos) in [("mas-usada", 5), ("menos-usada", 1)] {
+        std::fs::write(
+            lecciones.join(format!("{nombre}.md")),
+            format!(
+                "---\nnombre: {nombre}\ndescripcion: d\ntriggers: [x]\nusos: {usos}\nestado: activa\n---\n\ncuerpo\n"
+            ),
+        )
+        .unwrap();
+    }
+    let salida = cmd(&bin).args(["leccion", "list"]).output().unwrap();
+    let texto = String::from_utf8_lossy(&salida.stdout);
+    let pos_mas = texto.find("mas-usada").unwrap();
+    let pos_menos = texto.find("menos-usada").unwrap();
+    assert!(pos_mas < pos_menos, "cambio el orden por uso: {texto}");
+    let json_out = cmd(&bin).args(["leccion", "list", "--json"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    assert!(v["lecciones"].is_array(), "cambio la forma del --json: {v}");
+    assert_eq!(v["lecciones"][0]["nombre"], "mas-usada");
 }

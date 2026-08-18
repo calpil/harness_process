@@ -207,6 +207,28 @@ pub fn linea_registro(ruta: &str, mtime_nanos: u128) -> String {
     format!("{ruta}\t{mtime_nanos}")
 }
 
+/// El registro podado: se quedan solo las entradas que todavia eximen algo.
+///
+/// Una entrada muere cuando su ruta ya **no** aparece modificada en git (se
+/// commiteo o se revirtio): ahi la exencion no protege nada y solo hace crecer
+/// el archivo. Funcion **pura**: recibe el registro y las rutas sucias, y
+/// devuelve el registro nuevo (feature #36).
+pub fn podar_registro(registro: &str, rutas_sucias: &[String]) -> String {
+    let vivas: Vec<&str> = registro
+        .lines()
+        .filter(|l| {
+            let Some((ruta, _)) = l.split_once('\t') else {
+                return false; // linea ilegible: se descarta
+            };
+            rutas_sucias.iter().any(|s| s == ruta)
+        })
+        .collect();
+    if vivas.is_empty() {
+        return String::new();
+    }
+    format!("{}\n", vivas.join("\n"))
+}
+
 /// Resuelve que rutas siguen exentas: las que el arnes escribio y **nadie toco
 /// desde entonces**.
 pub fn exentas(registro: &str, mtime_actual: impl Fn(&str) -> Option<u128>) -> Vec<String> {
@@ -413,6 +435,34 @@ mod tests {
         );
         assert!(exentas("", |_| Some(1000)).is_empty());
         assert!(exentas("basura sin tab\n", |_| Some(1000)).is_empty());
+    }
+
+    #[test]
+    fn rutas_registro_should_drop_entries_that_are_no_longer_dirty() {
+        // La exencion de una ruta que ya se commiteo no protege nada: sacarla
+        // es lo que evita que el registro crezca para siempre.
+        let registro = format!(
+            "{}\n{}\n",
+            linea_registro("docs/prd/PRD-master.md", 1000),
+            linea_registro("docs/constitution.md", 2000)
+        );
+        let sucias = vec!["docs/constitution.md".to_string()];
+        let podado = podar_registro(&registro, &sucias);
+        assert!(!podado.contains("PRD-master"), "no podo la commiteada: {podado}");
+        assert!(podado.contains("constitution"), "podo una viva: {podado}");
+    }
+
+    #[test]
+    fn rutas_registro_should_keep_live_exemptions() {
+        // Nunca puede sacar una que todavia exime: seria reportar como violacion
+        // algo que escribio el propio arnes.
+        let registro = format!("{}\n", linea_registro("docs/prd/PRD-master.md", 1000));
+        let sucias = vec!["docs/prd/PRD-master.md".to_string()];
+        assert_eq!(podar_registro(&registro, &sucias), registro);
+        // Y con el registro vacio no inventa nada.
+        assert_eq!(podar_registro("", &sucias), "");
+        // Linea ilegible: se descarta sin romper.
+        assert_eq!(podar_registro("basura sin tab\n", &sucias), "");
     }
 
     #[test]

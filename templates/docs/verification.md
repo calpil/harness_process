@@ -32,9 +32,22 @@ Dos trampas al elegir el comando: uno que filtra tests por nombre suele salir
 **0 cuando no encuentra ninguno**, y cualquier cosa que termine en `|| true` no
 puede fallar. Un comando que no puede fallar no verifica: decora.
 
-En Windows PowerShell:
+Paridad de los dos instaladores, **sin PowerShell**:
+
+```bash
+bash tests/parity_check.sh
+```
+
+Compara lo que `setup_harness.sh` y `setup_harness.ps1` **declaran** (opciones y
+superficies) y falla cuando uno se adelanta al otro. Las asimetrias legitimas
+estan declaradas en el propio script, cada una con su razon.
+
+Lo que **no** hace, dicho de frente: **no ejecuta el instalador de Windows**. Un
+`.ps1` estructuralmente paritario puede fallar igual al correr. Para eso hace
+falta una maquina con PowerShell:
 
 ```powershell
+# si tenes Windows a mano (si no, `parity_check.sh` es lo que hay)
 .\tests\setup_smoke.ps1
 .\harness_cli.ps1 status
 ```

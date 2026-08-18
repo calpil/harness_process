@@ -300,6 +300,26 @@ fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
     if instalados.is_empty() {
         return Hallazgo::no_aplica(Area::Hooks, "ningun backend con hooks instalado");
     }
+    // Que el hook APUNTE al runtime, no solo que el runtime exista: un
+    // `settings.json` que quedo apuntando a otra ruta pasaba desapercibido
+    // (deuda anotada en impl-25, pagada en la #36).
+    let mal_apuntados: Vec<String> = BACKENDS
+        .iter()
+        .filter(|(nombre, huella, _)| {
+            instalados.contains(nombre) && !apunta_al_runtime(&paths.repo_root.join(huella))
+        })
+        .map(|(nombre, huella, _)| format!("{nombre} ({huella})"))
+        .collect();
+    if !mal_apuntados.is_empty() {
+        return Hallazgo::falla(
+            Area::Hooks,
+            format!(
+                "hook(s) que no apuntan a bin/harness-hook: {}",
+                mal_apuntados.join(", ")
+            ),
+            REINSTALAR,
+        );
+    }
     // El runtime al que todos los hooks apuntan.
     let runtime = paths.repo_root.join("bin/harness-hook");
     if !runtime.is_file() {
@@ -324,6 +344,18 @@ fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
         Area::Hooks,
         format!("{} -> bin/harness-hook presente y ejecutable", instalados.join(", ")),
     )
+}
+
+/// Un archivo de configuracion de hooks "apunta bien" si menciona el runtime
+/// del arnes. Se mira el texto y no se parsea JSON/TOML: los cinco backends
+/// usan formatos distintos y lo unico que importa es si el arnes esta cableado.
+fn apunta_al_runtime(config: &Path) -> bool {
+    let Ok(texto) = std::fs::read_to_string(config) else {
+        return false;
+    };
+    texto.contains("harness-hook")
+        || texto.contains("harness_cli")
+        || texto.contains("harness_check.sh")
 }
 
 fn revisar_superficies(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
@@ -622,6 +654,60 @@ mod tests {
         assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
         assert!(h.detalle.contains("claude"), "{}", h.detalle);
         assert!(h.detalle.contains("bin/harness-hook"), "{}", h.detalle);
+    }
+
+    #[test]
+    fn doctor_should_detect_a_hook_pointing_to_another_path() {
+        // Deuda de impl-25: hasta la #36 solo se verificaba que el runtime
+        // existiera, asi que un hook apuntando a otro lado pasaba.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_en(dir.path());
+        std::fs::create_dir_all(paths.repo_root.join(".claude")).unwrap();
+        std::fs::write(
+            paths.repo_root.join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"command":"bash /otro/lado/script.sh"}]}]}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(paths.repo_root.join("bin")).unwrap();
+        std::fs::write(paths.repo_root.join("bin/harness-hook"), "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                paths.repo_root.join("bin/harness-hook"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        let h = revisar_hooks(&paths, false);
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
+        assert!(h.detalle.contains("no apuntan"), "{}", h.detalle);
+        assert!(h.detalle.contains("claude"), "{}", h.detalle);
+    }
+
+    #[test]
+    fn doctor_should_stay_quiet_with_well_wired_hooks() {
+        // El chequeo mas fino no puede volverse ruidoso.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_en(dir.path());
+        std::fs::create_dir_all(paths.repo_root.join(".claude")).unwrap();
+        std::fs::write(
+            paths.repo_root.join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"command":"bash \"$HOOK_BASE/bin/harness-hook\" plain Stop"}]}]}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(paths.repo_root.join("bin")).unwrap();
+        std::fs::write(paths.repo_root.join("bin/harness-hook"), "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                paths.repo_root.join("bin/harness-hook"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        assert_eq!(revisar_hooks(&paths, false).estado, Estado::Ok);
     }
 
     #[test]

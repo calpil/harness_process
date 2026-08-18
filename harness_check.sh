@@ -418,22 +418,35 @@ fi
 #
 # Sin rust/tests/ el bloque se omite entero: un proyecto que no es Rust no ve
 # ninguna diferencia.
+# Se miran los tests de integracion Y los unitarios de rust/src/: la unica
+# violacion historica de esta regla estaba justamente en `src/verificacion.rs`,
+# o sea fuera del alcance del chequeo, y se encontro a mano (feature #36).
 conv_tests="$REPO_ROOT/rust/tests"
-if [ -d "$conv_tests" ]; then
-    conv_hits="$(grep -nE 'read_to_string\([^)]*\.(rs|sh|ps1)"' "$conv_tests"/*.rs 2>/dev/null || true)"
+conv_src="$REPO_ROOT/rust/src"
+if [ -d "$conv_tests" ] || [ -d "$conv_src" ]; then
+    conv_hits="$( { grep -nE 'read_to_string\([^)]*\.(rs|sh|ps1)"' "$conv_tests"/*.rs 2>/dev/null || true
+                    find "$conv_src" -name '*.rs' -type f 2>/dev/null -exec grep -nHE 'read_to_string\([^)]*\.(rs|sh|ps1)"' {} + || true
+                  } )"
     if [ -n "$conv_hits" ]; then
         printf '%s\n' "$conv_hits" | while IFS= read -r conv_line; do
             [ -z "$conv_line" ] && continue
             conv_file="${conv_line%%:*}"
+            [ -f "$conv_file" ] || continue
             conv_rest="${conv_line#*:}"
             conv_num="${conv_rest%%:*}"
-            # El nombre del test es el ultimo `fn ...` antes de esa linea.
-            conv_fn="$(head -n "$conv_num" "$conv_file" \
-                | grep -E '^(pub )?fn [a-z_0-9]+' \
+            # El nombre del test es el ultimo `fn ...` antes de esa linea. El
+            # `|| true` NO es decorativo: con `set -o pipefail`, un grep que
+            # legitimamente no encuentra nada devuelve 1 y mata el script
+            # entero, en silencio. Paso de verdad al ampliar el alcance a
+            # rust/src/ (feature #36): ahi los tests viven indentados dentro de
+            # `mod tests`, el `^fn` no matcheaba, y el chequeo moria antes de
+            # reportar nada.
+            conv_fn="$(head -n "$conv_num" "$conv_file" 2>/dev/null \
+                | grep -E '^[[:space:]]*(pub )?fn [a-z_0-9]+' \
                 | tail -n 1 \
-                | sed -E 's/^(pub )?fn ([a-z_0-9]+).*/\2/')"
-            [ -z "$conv_fn" ] && conv_fn="(fuera de un test)"
-            echo "[i] rust/tests/$(basename "$conv_file"):$conv_num ($conv_fn) lee un archivo fuente. Regla 2 de docs/conventions.md: prohibido leer el codigo fuente en un test. Si es dato de entrada del codigo bajo prueba, dejalo dicho en el test." >&2
+                | sed -E 's/^[[:space:]]*(pub )?fn ([a-z_0-9]+).*/\2/' || true)"
+            [ -n "$conv_fn" ] || conv_fn="(fuera de un test)"
+            echo "[i] $(basename "$conv_file"):$conv_num ($conv_fn) lee un archivo fuente. Regla 2 de docs/conventions.md: prohibido leer el codigo fuente en un test. Si es dato de entrada del codigo bajo prueba, dejalo dicho en el test." >&2
         done
     fi
 fi
@@ -480,6 +493,23 @@ if [ "$rutas_rc" -ne 0 ]; then
             failures=$((failures + 1))
             ;;
     esac
+fi
+
+# Paridad de los instaladores (feature #30). El .ps1 no se puede EJECUTAR sin
+# PowerShell —once features seguidas lo declararon como limite— pero si se puede
+# comparar lo que los dos DECLARAN. Este bloque avisa cuando uno se adelanta al
+# otro, que es lo que venia pasando sin que nadie se enterara.
+#
+# AVISA Y NO BLOQUEA (decision usuario 2026-08-18, OBS-1): una opcion de Windows
+# desincronizada no impide trabajar hoy. El test `tests/parity_check.sh` SI
+# falla, asi que la asimetria queda cubierta por un AC ejecutable y no depende
+# de que alguien lea este aviso. Por eso este bloque NO toca el contador.
+if [ -f "$HARNESS_DIR/setup_harness.ps1" ] && [ -f "$HARNESS_DIR/tests/parity_check.sh" ]; then
+    if ! paridad_out="$(bash "$HARNESS_DIR/tests/parity_check.sh" opciones 2>&1)"; then
+        echo "[i] Paridad de instaladores: setup_harness.sh y setup_harness.ps1 divergen." >&2
+        printf '%s\n' "$paridad_out" | sed 's/^/    /' >&2
+        echo "    Declara la asimetria en tests/parity_check.sh (con su razon) o agrega la opcion que falta." >&2
+    fi
 fi
 
 if [ "$failures" -gt 0 ]; then

@@ -930,6 +930,37 @@ ni sprints. `atlassian status` muestra binding, mapeo, sprint vigente y
 pendientes (del token solo dice si esta, nunca su valor). Guia completa en
 `docs/atlassian-integracion.md`.
 
+## Paridad entre los dos instaladores (feature #30)
+
+El repo mantiene `setup_harness.sh` y `setup_harness.ps1` en paridad. Esa promesa
+**no la verificaba nadie**: once features seguidas cerraron declarando "esta
+maquina no tiene pwsh", y mientras tanto los dos se fueron desincronizando en
+silencio.
+
+```bash
+bash tests/parity_check.sh
+```
+
+Compara lo que los dos **declaran** —opciones (traduciendo `--kebab-case` a
+`-PascalCase`) y superficies escritas— y falla cuando uno se adelanta al otro.
+Corre en cualquier maquina, sin PowerShell.
+
+Las asimetrias legitimas se **declaran con su razon** en el propio script, no se
+silencian:
+
+| Opcion | Solo en | Por que |
+| --- | --- | --- |
+| `--with-subagents`, `--install-graphify`, `--install-antigravity` | `.sh` | afirmativas de un default ya encendido; en ps1 solo existe el `-No*` que lo apaga |
+| `--with-postgres` | `.sh` | no-op historico: PostgreSQL es obligatorio desde la #14 y el flag se mantiene para no romper invocaciones viejas |
+| `-CargoTargetDir` | `.ps1` | en Unix se logra exportando `CARGO_TARGET_DIR`; en PowerShell el flag ahorra tocar el entorno de la sesion |
+
+`harness_check.sh` lo corre y **avisa** sin bloquear: una opcion desincronizada
+no te impide trabajar hoy, pero tiene que verse.
+
+**Lo que esto NO hace**: no ejecuta el instalador de Windows. Un `.ps1`
+estructuralmente paritario puede fallar igual al correr. Verificar eso exige una
+maquina con PowerShell, y esta dicho asi en vez de dejarlo creer.
+
 ## Verificacion
 
 ```bash

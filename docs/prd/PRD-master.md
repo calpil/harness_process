@@ -205,3 +205,5 @@ con su fecha.>
 - #24 conventions_escalera_y_tests -> done 2026-08-17 · spec: docs/spec-feature-24-conventions-escalera-y-tests.md · impl: docs/impl-24.md
 - #25 harness_doctor -> done 2026-08-17 · spec: docs/spec-feature-25-harness-doctor.md · impl: docs/impl-25.md
 - #26 rutas_protegidas_deny -> done 2026-08-18 · spec: docs/spec-feature-26-rutas-protegidas-deny.md · impl: docs/impl-26.md
+- #30 paridad_ps1_verificable -> done 2026-08-18 · spec: docs/spec-feature-30-paridad-ps1-verificable.md · impl: docs/impl-30.md
+- #36 deudas_anotadas_del_arnes -> done 2026-08-18 · spec: docs/spec-feature-36-deudas-anotadas-del-arnes.md · impl: docs/impl-36.md

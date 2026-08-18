@@ -82,7 +82,12 @@ Implementas UNA unidad concreta del plan del lider.
    spec exista de verdad.
 5. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ),
    indicando que AC-n del spec cubre cada cambio (el reviewer exige evidencia
-   por AC).
+   por AC). Si escribis una seccion **"Para el backlog"**, cada item entra al
+   backlog en el MISMO cierre con
+   `sh "__HREL__harness_cli" add --name <slug> --acceptance "<que tiene que ser cierto>"`.
+   Una nota que se queda solo en el impl no es una deuda registrada: `next` nunca
+   la ofrece y `journey` nunca la cuenta como hueco. En este repo seis de ellas
+   estuvieron seis features perdidas en prosa hasta que alguien releyo los impl.
 6. Registra hitos intermedios con
    `sh "__HREL__harness_cli" advance --nota "<que avanzaste>"`: mueve hub,
    graphify, history.md y current.md sin esperar al cierre. (Al cerrar cada turno

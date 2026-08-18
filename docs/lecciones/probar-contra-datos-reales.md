@@ -3,7 +3,7 @@ nombre: probar-contra-datos-reales
 descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
-origen: [22, 25]
+origen: [22, 25, 30, 36]
 usos: 0
 ultimo_uso:
 ultima_actualizacion: 2026-08-17
@@ -64,6 +64,49 @@ Procedimiento:
    vista y **declaralo**: un diagnostico de 10 segundos es un diagnostico que
    nadie corre; uno de 2 que dice lo que no cubre, sirve.
 
+## Y las razones que escribis tambien son datos
+
+Una excepcion documentada con su razon parece rigor. Pero la razon **tambien hay
+que verificarla**, y es facil que no: se escribe de memoria, suena plausible, y
+queda citada como cierta durante meses.
+
+En la #30 se declararon cinco asimetrias entre los dos instaladores, cada una con
+su razon. Al verificarlas contra el codigo, **dos estaban mal**:
+
+| Razon escrita | Lo que decia el codigo |
+| --- | --- |
+| "`--with-postgres` es la afirmativa de un default encendido" | es un **no-op**: `--with-postgres) ;;` |
+| "`-CargoTargetDir` existe porque rustup no actualiza el PATH" | setea `CARGO_TARGET_DIR`, que no es el PATH |
+
+Procedimiento: por cada excepcion, abri el archivo y confirmá la razon **antes**
+de escribirla. Si la razon no se puede señalar con un numero de linea, todavia no
+es una razon: es una corazonada prolija.
+
+## El chequeo que muere antes de hablar
+
+"No reporto nada" tiene dos causas posibles y se ven identicas: **no encontro
+nada** o **no llego a mirar**. Hay que poder distinguirlas.
+
+En la #36, el chequeo de convenciones dejo de reportar al ampliarle el alcance.
+No porque no encontrara: porque moria antes. La causa, en shell:
+
+```bash
+set -Eeuo pipefail
+nombre="$(head -n 5 "$f" | grep -E '^fn ' | sed ...)"   # grep sin match -> 1
+                                                        # pipefail -> la sustitucion falla
+                                                        # set -e -> el script entero muere
+```
+
+Y llevaba dos features asi: en el directorio original los `fn` estaban al tope y
+el `grep` siempre encontraba algo, asi que el bug estaba latente y nadie podia
+verlo. En shell con `pipefail`, **todo `grep`/`find` que legitimamente puede no
+encontrar nada necesita `|| true`**, y el comentario que diga por que, para que
+nadie lo "limpie" despues.
+
+Procedimiento: por cada chequeo que escribas, corrélo una vez en el caso donde
+**no** hay nada que encontrar. Si en vez de decir "nada que reportar" se queda
+callado, no esta pasando: esta muriendo.
+
 ## Pitfalls
 
 - **La fixture no tiene historia.** El caso que rompe suele necesitar un pasado:
@@ -82,6 +125,9 @@ Procedimiento:
 - **Confiar en que "la suite esta verde".** En la #20 el ADR salia en el puesto 10
   con todos los tests pasando; en la #22 habia tres bugs con la suite en verde.
   Verde significa "no rompi lo que ya sabia", no "esta bien calibrado".
+- **Escribir la razon de una excepcion sin abrir el archivo.** Una razon
+  decorativa es peor que ninguna: la excepcion queda con aspecto de decidida y
+  nadie la vuelve a mirar.
 - **Revisar solo el exit code de tu propia herramienta.** En la #25 `doctor`
   salia 0 y las siete areas parecian bien; recien al comparar **cada linea**
   contra el estado real del filesystem aparecio que el `[ok]` del hub era falso.

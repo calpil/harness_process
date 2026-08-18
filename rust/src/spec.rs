@@ -322,11 +322,16 @@ pub fn spec_gate(
     }
     let path = spec_path(paths, feature);
     let rel = relpath(&path, &paths.repo_root).unwrap_or_else(|| path.clone());
-    Err(Exit::msg(format!(
+    // Exit 2, igual que los otros dos gates de `close` (leccion y verify) y que
+    // el resto del binario cuando el arnes te frena. Salia 1 por un `Exit::msg`
+    // heredado; unificado en la feature #36.
+    Err(Exit {
+        code: 2,
+        message: Some(format!(
         "[GATE] Spec sin aprobar: {} (estado: {}).\n    La regla require_spec_approved esta activa. Flujo de aprobacion:\n      1) Mostrale el spec al USUARIO (contenido en el chat + abriselo en su editor).\n      2) Preguntale si lo aprueba.\n      3) Solo con su SI: sh harness_cli approve-spec --yes\n    La decision es del usuario; el agente solo la registra.",
         rel.display(),
         state.label()
-    )))
+    ))})
 }
 
 #[cfg(test)]
@@ -616,14 +621,15 @@ mod tests {
         let paths = paths_in(dir.path());
         let f = feature(1, "demo");
         let data = json!({"rules": {"require_spec_approved": true}});
-        // spec ausente: bloquea (gate cerrado)
+        // spec ausente: bloquea (gate cerrado). Exit 2, igual que los otros dos
+        // gates de `close`, desde la feature #36.
         let err = spec_gate(&paths, &data, &f).unwrap_err();
-        assert_eq!(err.code, 1);
+        assert_eq!(err.code, 2);
         assert!(err.message.unwrap().contains("ausente"));
         // spec draft: advance y close --status done fallan con mensaje accionable
         write_spec(&paths, &f).unwrap();
         let err = spec_gate(&paths, &data, &f).unwrap_err();
-        assert_eq!(err.code, 1);
+        assert_eq!(err.code, 2);
         let msg = err.message.unwrap();
         assert!(msg.contains("spec-feature-1-demo.md"));
         assert!(msg.contains("draft"));
@@ -656,7 +662,7 @@ mod tests {
         std::fs::write(&p, other).unwrap();
         assert_eq!(spec_state(&paths, &f), SpecState::Other);
         let err = spec_gate(&paths, &data, &f).unwrap_err();
-        assert_eq!(err.code, 1);
+        assert_eq!(err.code, 2);
         let msg = err.message.unwrap();
         assert!(msg.contains("spec-feature-1-demo.md"));
         assert!(msg.contains("desconocido"));
