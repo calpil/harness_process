@@ -1,7 +1,7 @@
-# SDD Master - <nombre del proyecto>
+# SDD Master - Harness Process
 
-Estado: draft
-Ultima actualizacion: <YYYY-MM-DD>
+Estado: en uso
+Ultima actualizacion: 2026-08-18
 Producto: docs/prd/PRD-master.md
 Constitution: docs/constitution.md
 

@@ -3,7 +3,7 @@ nombre: probar-contra-datos-reales
 descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
-origen: [22, 25, 30, 36]
+origen: [22, 25, 30, 36, 29]
 usos: 0
 ultimo_uso:
 ultima_actualizacion: 2026-08-17
@@ -106,6 +106,45 @@ nadie lo "limpie" despues.
 Procedimiento: por cada chequeo que escribas, corrélo una vez en el caso donde
 **no** hay nada que encontrar. Si en vez de decir "nada que reportar" se queda
 callado, no esta pasando: esta muriendo.
+
+## La forma que el uso real produce, y tu fixture no
+
+Un test unitario elige la forma del dato. El uso real la produce. Cuando eligiste
+la comoda, el test pasa y la funcion esta rota.
+
+Caso de la #29: la idempotencia de un reemplazo se decidia asi:
+
+```rust
+if !texto.contains(antes) && texto.contains(despues) { /* ya aplicado */ }
+```
+
+El test usaba `antes = "pendiente"`, `despues = "ya escrito"`. Correcto y verde.
+Pero la forma que el uso real produce en el PRIMER intento es
+**"insertar antes de esta linea"**, donde el `despues` CONTIENE al `antes`:
+
+```
+antes:   - `progress.rs`: estado vivo
+despues: - `doctor.rs`: diagnostico
+         - `progress.rs`: estado vivo      <- el antes sigue ahi
+```
+
+Tras aplicar, el `antes` sigue presente, el bloque no se reconoce como aplicado,
+y la segunda corrida **duplica** el texto en un documento del usuario.
+
+Procedimiento: antes de escribir el test, preguntate **que forma va a tener el
+dato la primera vez que alguien lo use de verdad**. Si es una forma degenerada
+—un subconjunto, un vacio, un solapamiento, un duplicado— esa es la que va al
+test, no la limpia.
+
+Formas degeneradas que casi siempre faltan:
+
+| Caso | La forma que rompe |
+| --- | --- |
+| reemplazo de texto | el `despues` contiene al `antes` (insercion) |
+| busqueda | la aguja aparece 0 veces, o 2 |
+| ranking | todos los items empatan |
+| parseo | el ejemplo vive dentro del documento que se parsea (#23) |
+| filtro por nombre | el filtro no matchea nada y sale 0 (#23) |
 
 ## Pitfalls
 

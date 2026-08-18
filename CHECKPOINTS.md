@@ -22,6 +22,13 @@ Antes de cerrar una tarea:
 - [ ] `docs/review-<feature>.md` contiene veredicto del reviewer.
 - [ ] **Evidencia por AC-n**: `docs/impl-<feature>.md` y `docs/review-<feature>.md`
   mapean cada AC-n del spec a su evidencia/test; el veredicto lista AC-1..AC-n.
+- [ ] **Documentos al dia**: el PRD de origen, sus padres, `docs/prd/SDD-master.md`
+      y `docs/architecture.md` reflejan lo implementado. Se siembra la propuesta
+      con `sh harness_cli prd propose --feature <id>`, se contesta cada bloque
+      (`cambio` / `ya-esta <archivo>:<L1>-<L2>` / `no-aplica <razon>`), se le
+      MUESTRA al usuario y solo con su SI: `prd apply --feature <id> --yes`. Con
+      `require_docs_al_dia` activa el cierre lo exige. Son documentos del
+      USUARIO: el arnes propone, nunca escribe por su cuenta.
 - [ ] Repos afectados limpios o commiteados segun politica.
 - [ ] **Aprendizaje declarado**: el cierre dice que se aprendio
       (`--leccion <clase>`) o por que no (`--leccion ninguna --leccion-motivo

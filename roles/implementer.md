@@ -80,6 +80,14 @@ Implementas UNA unidad concreta del plan del lider.
    con el verde facil: si un AC declara `cargo test <nombre>` y ese nombre no
    existe, el comando sale 0 sin correr nada — comproba que el test que nombra el
    spec exista de verdad.
+4.5. Antes de pedir revision, corre
+   `sh "harness_process/harness_cli" prd propose --feature <id>`: el arnes calcula que
+   documentos pudo dejar desactualizados esta feature (el PRD de origen, sus
+   padres, el SDD y `docs/architecture.md`) y siembra una pregunta por cada uno.
+   Contesta CADA bloque —`cambio` con el texto literal, `ya-esta <archivo>:<L1>-<L2>`
+   con la cita (el binario la verifica), o `no-aplica <razon>`—, MOSTRASELA al
+   usuario y solo con su SI: `prd apply --feature <id> --yes`. Son SUS
+   documentos: PROHIBIDO editarlos a mano o correr `--yes` sin su si.
 5. Deja evidencia en `docs/impl-<feature>.md` (en el `docs/` de la RAIZ),
    indicando que AC-n del spec cubre cada cambio (el reviewer exige evidencia
    por AC). Si escribis una seccion **"Para el backlog"**, cada item entra al

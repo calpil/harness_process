@@ -467,6 +467,39 @@ coincide con el archivo **bloquean**; la falta de `triggers` solo avisa. Sin
 `docs/lecciones/` el bloque entero se omite, así que una instalación que no use
 lecciones no ve ninguna diferencia.
 
+## Documentos al dia: `prd propose` / `prd apply` (feature #29)
+
+El PRD, el SDD y `docs/architecture.md` dejan de poder quedar mintiendo. **El
+agente propone, el usuario aprueba, el binario escribe** — el mismo ritual que
+`approve-spec`.
+
+```bash
+sh harness_cli prd propose --feature <id>       # siembra una pregunta por documento
+sh harness_cli prd apply --feature <id>         # muestra que escribiría; NO escribe
+sh harness_cli prd apply --feature <id> --yes   # solo con tu sí
+```
+
+El alcance lo calcula el binario desde el árbol real: el PRD de origen, sus
+padres, `docs/prd/SDD-master.md` y `docs/architecture.md`. Cada bloque se
+contesta con `cambio` (texto literal), `ya-esta <archivo>:<L1>-<L2>` (**el
+binario verifica la cita**) o `no-aplica <razón>`.
+
+Lo que hay que saber al actualizar:
+
+- **Regla nueva, apagada por defecto**: `require_docs_al_dia`. Con ella,
+  `close --status done` exige la propuesta resuelta **y aplicada con tu sí**.
+- **El gate no usa frescura**: `verify` reescribe su reporte en cada corrida y
+  `prd apply` es idempotente, así que compararlos dejaría la propuesta vieja para
+  siempre. Está dicho en un test para que nadie lo "mejore".
+- **Ningún `Comando:` de un AC puede invocar `prd apply --yes`**: `verify` los
+  ejecuta con `sh -c` y aplicaría sin tu sí. Hay un test que lo prohíbe sobre los
+  specs reales.
+- **La propuesta vive en `docs/prd-diff-<id>.md`**, fuera de `docs/prd/**`, para
+  componer con las rutas protegidas de la #26. `prd apply --yes` escribe como el
+  binario y registra sus escrituras, igual que `close`.
+- `CHECKPOINTS.md` y los tres roles declaran el deber: antes no lo mencionaba
+  nadie.
+
 ## Rutas protegidas (feature #26)
 
 Los PRD y la constitution dejan de depender de la buena fe. Lista en

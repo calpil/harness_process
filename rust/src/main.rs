@@ -7,6 +7,7 @@ mod buscar;
 mod cli;
 mod commands;
 mod curador;
+mod documentos;
 mod exit;
 mod doctor;
 mod features;

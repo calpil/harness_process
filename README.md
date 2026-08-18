@@ -189,6 +189,73 @@ Regla de mantenedor: cualquier cambio de comportamiento vive en `rust/src/` con
 sus tests (`cargo test`, `cargo clippy -- -D warnings`) verdes antes de push.
 Detalles en `templates/UPDATING.md`.
 
+## prd propose / prd apply: los documentos dejan de poder mentir (feature #29)
+
+El arnes verificaba que el codigo cumpliera el **spec** (#23) y nada mas. El
+cuerpo del PRD, el SDD y `docs/architecture.md` podian decir cualquier cosa.
+
+No era un descuido: "es del USUARIO" esta escrito en cuatro lugares del repo. El
+problema es que nunca quiso decir "que quede mintiendo". Tres hechos medidos:
+
+- `docs/prd/SDD-master.md` era una plantilla con **27 `<placeholder>`** — y se
+  publica a Confluence como el diseno tecnico del proyecto.
+- `docs/architecture.md` no mencionaba `doctor.rs` (#25) ni `rutas.rs` (#26), dos
+  features cerradas el mismo dia con todo en verde.
+- `grep -rn "architecture.md" roles/ CHECKPOINTS.md` daba **cero**.
+
+```bash
+sh harness_cli prd propose --feature <id>   # el BINARIO pregunta, uno por documento
+# el agente contesta cada bloque
+sh harness_cli prd apply --feature <id>     # muestra que escribiria; NO escribe
+sh harness_cli prd apply --feature <id> --yes   # solo con el SI del usuario
+```
+
+**El alcance lo calcula el binario**, no el agente: el PRD de origen, todos sus
+padres hasta el maestro, el SDD y `architecture.md`. Si lo eligiera el agente,
+"el SDD ya lo refleja" seria una afirmacion sin contraparte.
+
+### Los tres veredictos
+
+| Veredicto | Cuando | Como se verifica |
+| --- | --- | --- |
+| `cambio` + `Antes:` / `Despues:` | hay que escribir | el `Antes:` tiene que aparecer **exactamente una vez** en el documento |
+| `ya-esta <archivo>:<L1>-<L2>` | ya estaba documentado | **el binario abre el archivo y comprueba la cita** |
+| `no-aplica <razon>` | la feature no toca ese documento | la razon no puede estar vacia |
+
+El del medio es el importante: convierte la mentira mas probable del agente —"eso
+ya esta documentado"— en algo refutable sobre bytes, sin heuristica y sin LLM.
+
+Y el agente **no puede agregar, quitar ni renombrar bloques**: si la lista no
+coincide con el alcance recomputado, `prd apply` sale 2. Sin eso podria colapsar
+cuatro preguntas en una respuesta.
+
+### Dos decisiones que parecen detalles y no lo son
+
+- **El anclaje es por texto literal, no por seccion.** `prd::echo_close` corta
+  secciones con `starts_with("## ")` y `docs/architecture.md` tiene tres `###`
+  que ese predicado se tragaria enteros.
+- **La idempotencia sale del contenido, no de una firma.** El spec es 1:1 con su
+  feature y por eso se puede firmar (`last_spec_sig`); un PRD lo comparten N
+  features —`PRD-master.md` lo comparten 28 del backlog— asi que una firma por
+  feature mentiria desde la segunda.
+
+### El gate
+
+```json
+{ "rules": { "require_docs_al_dia": true } }
+```
+
+Con la regla activa, `close --status done` exige la propuesta **resuelta y
+aplicada con el SI del usuario**. Y **no** compara frescura contra
+`docs/verify-<id>.md`: `verify` reescribe su reporte en cada corrida y
+`prd apply` es idempotente, asi que esa regla dejaria la propuesta vieja para
+siempre, sin ningun comando capaz de refrescarla.
+
+**Un aviso si escribis specs**: ningun `Comando:` de ningun AC puede invocar
+`prd apply --yes`. `verify` los ejecuta con `sh -c`, asi que aplicaria la
+propuesta sin el si del usuario, salteandose el ritual entero. Hay un test que lo
+prohibe sobre los specs reales del repo.
+
 ## Rutas protegidas: los PRD dejan de depender de la buena fe (feature #26)
 
 El README dice que los PRD son del usuario y que ningun agente los reescribe.

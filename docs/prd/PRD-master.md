@@ -158,7 +158,8 @@ anidado con `sh harness_cli prd add --name <parte>`.>
 | 2 | Escalera de huella y politica de tests en las convenciones | conventions_escalera_y_tests | <O1> | `docs/conventions.md` (+ espejo) lleva la escalera de menor huella y las tres reglas de test (contratos y no snapshots, prohibido leer el fuente en un test, prohibido el detector-de-cambios); el reviewer las verifica | done (2026-08-17) |
 | 3 | Diagnostico de la instalacion con remedio por linea | harness_doctor | <O1> | `harness_cli doctor [--json]` revisa binario, hooks, espejos, marker, hub, PATH y graphify, e imprime el comando exacto de remedio por cada falla; exit 0/2 sin solaparse con `harness_check.sh` | done (2026-08-17) |
 | 4 | Rutas protegidas: el PRD y la constitution dejan de depender de la buena fe | rutas_protegidas_deny | <O1> | Lista de rutas protegidas (default `docs/prd/**`, `docs/constitution.md`, `.env`) con tres capas: prevenir donde el backend lo soporte, detectar al instante con el comando de reversion, y `harness_check.sh` como red de seguridad que bloquea | done (2026-08-18) |
-| 5 | El catalogo de lecciones se lee bien con nombres largos | leccion_list_alineacion_dinamica | <O1> | `leccion list` calcula el ancho de la columna en vez de usar el 28 fijo; solo formato de salida, sin tocar orden, campos, `--json` ni exit codes | pendiente |
+| 5 | El catalogo de lecciones se lee bien con nombres largos | leccion_list_alineacion_dinamica | <O1> | `leccion list` calcula el ancho de la columna en vez de usar el 28 fijo; solo formato de salida, sin tocar orden, campos, `--json` ni exit codes | done (2026-08-18) |
+| 6 | El PRD, el SDD y architecture.md dejan de poder quedar mintiendo | prd_y_sdd_siempre_al_dia | <O1> | Al cerrar, el arnes calcula el alcance (PRD de origen + padres + SDD + architecture.md), siembra una pregunta por documento en `docs/prd-diff-<id>.md`, y solo con el SI del usuario `prd apply --yes` lo escribe; `require_docs_al_dia` lo exige al cerrar | done (2026-08-18) |
 
 > El programa de **aprendizaje del arnes** (lecciones, nudge, perfil, buscar,
 > curador y mapa) no esta aca: tiene su propio PRD anidado en
@@ -207,3 +208,4 @@ con su fecha.>
 - #26 rutas_protegidas_deny -> done 2026-08-18 · spec: docs/spec-feature-26-rutas-protegidas-deny.md · impl: docs/impl-26.md
 - #30 paridad_ps1_verificable -> done 2026-08-18 · spec: docs/spec-feature-30-paridad-ps1-verificable.md · impl: docs/impl-30.md
 - #36 deudas_anotadas_del_arnes -> done 2026-08-18 · spec: docs/spec-feature-36-deudas-anotadas-del-arnes.md · impl: docs/impl-36.md
+- #29 prd_y_sdd_siempre_al_dia -> done 2026-08-18 · spec: docs/spec-feature-29-prd-y-sdd-siempre-al-dia.md · impl: docs/impl-29.md

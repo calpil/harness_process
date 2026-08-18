@@ -120,6 +120,23 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   no dispara shell" es estructural, no disciplina. El parser saltea los bloques
   ``` porque un spec que documenta la sintaxis no puede terminar ejecutando su
   propio ejemplo (bug encontrado en la primera corrida real).
+- `doctor.rs`: diagnostico de la INSTALACION (feature #25). `diagnosticar()` es
+  **pura** y devuelve un `Hallazgo` por area (`Estado::{Ok,Falla,Aviso,NoAplica}`);
+  solo `Falla` cambia el exit code, asi que un hub caido no puede hacerlo mentir.
+  En el checkout fuente del arnes, superficies y hooks dan `NoAplica`: su ausencia
+  ahi es lo correcto.
+- `rutas.rs`: rutas protegidas (feature #26). `esta_protegida()` es un matcher
+  **puro** de globs (`*` un segmento, `**` cualquier profundidad) sobre
+  `rules.rutas_protegidas`. Las escrituras del propio binario quedan exentas por
+  un registro con mtime que **caduca** en cuanto alguien vuelve a tocar el
+  archivo, y por eso `close` y `prd apply` pueden escribir el PRD sin dispararse
+  la red de seguridad.
+- `documentos.rs`: que el PRD, el SDD y `architecture.md` no queden mintiendo
+  (feature #29). `alcance()` deriva los documentos del **arbol real** de PRDs;
+  `parsear()` y `planificar()` son puras y devuelven el plan de escritura sin
+  tocar disco. El anclaje es por **texto literal** y no por seccion, porque
+  cortar en `## ` se tragaria las subsecciones `###`; y la idempotencia sale del
+  CONTENIDO, no de una firma, porque un PRD lo comparten N features.
 - `progress.rs`: `current.md` / `history.md` (estado vivo y bitacora).
 - `memories.rs`, `graphify.rs`, `graph/` (`commands`, `derive`, `ids`, `store`,
   `tls`): Memory Hub y su integracion con graphify.

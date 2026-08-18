@@ -3267,3 +3267,316 @@ fn leccion_list_should_not_change_order_fields_or_json() {
     assert!(v["lecciones"].is_array(), "cambio la forma del --json: {v}");
     assert_eq!(v["lecciones"][0]["nombre"], "mas-usada");
 }
+
+// ---------------------------------------------------------------------------
+// Feature #29: que el PRD, el SDD y architecture.md no queden mintiendo.
+// ---------------------------------------------------------------------------
+
+/// Sandbox con el arbol de documentos que el alcance espera.
+fn sandbox_con_documentos() -> (tempfile::TempDir, PathBuf) {
+    let (dir, bin) = sandbox_with_binary();
+    let prd = dir.path().join("docs/prd");
+    std::fs::create_dir_all(&prd).unwrap();
+    std::fs::write(prd.join("PRD-master.md"), "# PRD\n\ncuerpo del prd\n").unwrap();
+    std::fs::write(prd.join("SDD-master.md"), "# SDD\n\ncuerpo del sdd\n").unwrap();
+    std::fs::write(
+        dir.path().join("docs/architecture.md"),
+        "# Arquitectura\n\n- `viejo.rs`: lo de siempre\n",
+    )
+    .unwrap();
+    cmd(&bin).args(["add", "--name", "demo"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    (dir, bin)
+}
+
+fn enable_docs_rule(harness_dir: &Path) {
+    let path = harness_dir.join("feature_list.json");
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let obj = data.as_object_mut().unwrap();
+    let rules = obj.entry("rules".to_string()).or_insert_with(|| serde_json::json!({}));
+    rules
+        .as_object_mut()
+        .unwrap()
+        .insert("require_docs_al_dia".to_string(), serde_json::json!(true));
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+}
+
+#[test]
+fn prd_propose_should_seed_one_block_per_document() {
+    // AC-4: un bloque por documento del alcance, todos PENDIENTE, exit 2.
+    let (dir, bin) = sandbox_con_documentos();
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let texto = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
+    for esperado in [
+        "## Documento: docs/prd/PRD-master.md",
+        "## Documento: docs/prd/SDD-master.md",
+        "## Documento: docs/architecture.md",
+    ] {
+        assert!(texto.contains(esperado), "falta {esperado}: {texto}");
+    }
+    assert_eq!(texto.matches("Veredicto: PENDIENTE").count(), 3, "{texto}");
+}
+
+#[test]
+fn prd_propose_should_not_clobber_existing_verdicts() {
+    // AC-5: correr propose de nuevo no puede borrar lo ya contestado.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let contestado = std::fs::read_to_string(&propuesta)
+        .unwrap()
+        .replacen("Veredicto: PENDIENTE", "Veredicto: no-aplica la feature no toca el producto", 1);
+    std::fs::write(&propuesta, &contestado).unwrap();
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let despues = std::fs::read_to_string(&propuesta).unwrap();
+    assert!(despues.contains("no-aplica la feature no toca el producto"), "{despues}");
+    assert_eq!(despues.matches("## Documento:").count(), 3, "duplico bloques: {despues}");
+}
+
+#[test]
+fn prd_propose_should_precompute_presence_signals() {
+    // AC-6: el BINARIO precomputa Presente/Ausente para que el agente no parta
+    // de cero.
+    let (dir, bin) = sandbox_con_documentos();
+    // El PRD menciona la feature; el SDD no.
+    let prd = dir.path().join("docs/prd/PRD-master.md");
+    std::fs::write(&prd, "# PRD\n\nla feature demo ya esta contada aca\n").unwrap();
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let texto = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
+    assert!(texto.contains("Presente en: docs/prd/PRD-master.md:3"), "{texto}");
+    assert!(texto.contains("no menciona 'demo'"), "{texto}");
+}
+
+/// Contesta los tres bloques de una propuesta ya sembrada.
+fn contestar(propuesta: &Path, veredictos: [&str; 3]) {
+    let texto = std::fs::read_to_string(propuesta).unwrap();
+    let mut i = 0;
+    let nuevo: String = texto
+        .lines()
+        .map(|l| {
+            if l.trim() == "Veredicto: PENDIENTE" && i < 3 {
+                let v = veredictos[i];
+                i += 1;
+                v.to_string()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(propuesta, nuevo).unwrap();
+}
+
+#[test]
+fn prd_apply_without_yes_should_show_and_refuse_to_write() {
+    // AC-12: muestra lo que escribiria y NO escribe un byte.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: no-aplica no cambia el producto",
+            "Veredicto: no-aplica no cambia el diseno",
+            "Veredicto: cambio\nAntes:\n- `viejo.rs`: lo de siempre\nDespues:\n- `viejo.rs`: lo de siempre\n- `nuevo.rs`: novedad",
+        ],
+    );
+    let arch = dir.path().join("docs/architecture.md");
+    let antes = std::fs::read_to_string(&arch).unwrap();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("[GATE] prd apply exige la confirmacion explicita"))
+        .stdout(predicate::str::contains("docs/architecture.md"));
+    assert_eq!(std::fs::read_to_string(&arch).unwrap(), antes, "escribio sin --yes");
+}
+
+#[test]
+fn prd_apply_with_yes_should_write_seal_and_log() {
+    // AC-13: escribe, sella y deja bitacora.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: no-aplica x",
+            "Veredicto: no-aplica y",
+            "Veredicto: cambio\nAntes:\n- `viejo.rs`: lo de siempre\nDespues:\n- `viejo.rs`: lo de siempre\n- `nuevo.rs`: novedad",
+        ],
+    );
+    cmd(&bin).args(["prd", "apply", "--feature", "1", "--yes"]).assert().success();
+    let arch = std::fs::read_to_string(dir.path().join("docs/architecture.md")).unwrap();
+    assert!(arch.contains("nuevo.rs"), "{arch}");
+    let sellada = std::fs::read_to_string(&propuesta).unwrap();
+    assert!(sellada.contains("Aplicado:"), "{sellada}");
+    assert!(sellada.contains("por USUARIO (confirmacion explicita)"), "{sellada}");
+    let history = std::fs::read_to_string(dir.path().join("hp/progress/history.md")).unwrap();
+    assert!(history.contains("prd apply feature #1"), "{history}");
+}
+
+#[test]
+fn prd_apply_should_refuse_a_citation_that_does_not_hold() {
+    // AC-9: la mentira mas probable del agente, refutada por maquina.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: ya-esta docs/prd/PRD-master.md:900-999",
+            "Veredicto: no-aplica y",
+            "Veredicto: no-aplica z",
+        ],
+    );
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("no se sostiene"));
+}
+
+#[test]
+fn prd_apply_should_reject_a_tampered_block_list() {
+    // AC-7: el agente no puede colapsar N preguntas en una respuesta.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let texto = std::fs::read_to_string(&propuesta).unwrap();
+    let sin_uno: String = texto
+        .split("## Documento: docs/architecture.md")
+        .next()
+        .unwrap()
+        .to_string();
+    std::fs::write(&propuesta, sin_uno.replace("Veredicto: PENDIENTE", "Veredicto: no-aplica x")).unwrap();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("no coincide con el alcance real"))
+        .stdout(predicate::str::contains("docs/architecture.md"));
+}
+
+#[test]
+fn prd_diff_should_live_outside_the_protected_path() {
+    // AC-15: la propuesta del agente NUNCA se escribe dentro de docs/prd/**.
+    let (dir, bin) = sandbox_con_documentos();
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    assert!(dir.path().join("docs/prd-diff-1.md").is_file());
+    assert!(!dir.path().join("docs/prd/prd-diff-1.md").exists());
+    // Y el binario lo confirma: esa ruta no esta protegida.
+    cmd(&bin)
+        .args(["rutas", "--check", "docs/prd-diff-1.md"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn prd_apply_should_register_its_own_writes() {
+    // AC-16: el binario escribe en docs/prd/** y lo registra, para no
+    // dispararse a si mismo la red de seguridad de la #26.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: cambio\nAntes:\ncuerpo del prd\nDespues:\ncuerpo del prd, ahora al dia",
+            "Veredicto: no-aplica y",
+            "Veredicto: no-aplica z",
+        ],
+    );
+    cmd(&bin).args(["prd", "apply", "--feature", "1", "--yes"]).assert().success();
+    let registro =
+        std::fs::read_to_string(dir.path().join("hp/progress/.rutas_arnes")).unwrap_or_default();
+    assert!(
+        registro.contains("docs/prd/PRD-master.md"),
+        "no registro su escritura sobre una ruta protegida: {registro}"
+    );
+}
+
+#[test]
+fn close_should_demand_the_docs_proposal_when_the_rule_is_on() {
+    // AC-17: sin propuesta no cierra; con la regla apagada, cierra como siempre.
+    let (dir, bin) = sandbox_con_documentos();
+    let hp = dir.path().join("hp");
+    // Regla apagada: cierra.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .success();
+    // Con la regla y sin propuesta: bloquea nombrando el comando.
+    let (dir2, bin2) = sandbox_con_documentos();
+    enable_docs_rule(&dir2.path().join("hp"));
+    cmd(&bin2)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("prd propose --feature 1"));
+    let _ = hp;
+}
+
+#[test]
+fn close_should_demand_the_user_seal_not_just_the_answers() {
+    // AC-17 (OBS-1): contestada no alcanza; hace falta el SI del usuario.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        ["Veredicto: no-aplica x", "Veredicto: no-aplica y", "Veredicto: no-aplica z"],
+    );
+    enable_docs_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("todavia no la aprobo"));
+    cmd(&bin).args(["prd", "apply", "--feature", "1", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn no_spec_command_should_invoke_prd_apply_yes() {
+    // AC-19: la trampa que este repo se puso solo. `verify` ejecuta los
+    // `Comando:` de los AC con `sh -c`, asi que un AC que invocara
+    // `prd apply --yes` aplicaria la propuesta SIN el si del usuario,
+    // salteandose el ritual entero. Se corre sobre los specs REALES.
+    let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs");
+    let Ok(entradas) = std::fs::read_dir(&docs) else {
+        return;
+    };
+    let mut revisados = 0usize;
+    for e in entradas.flatten() {
+        let path = e.path();
+        if !path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("spec-feature-"))
+        {
+            continue;
+        }
+        let Ok(texto) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        revisados += 1;
+        for (n, linea) in texto.lines().enumerate() {
+            let t = linea.trim();
+            if !t.starts_with("Comando:") {
+                continue;
+            }
+            assert!(
+                !(t.contains("prd apply") && t.contains("--yes")),
+                "{}:{} declara un Comando: que aplica la propuesta sin el si del usuario: {t}",
+                path.display(),
+                n + 1
+            );
+        }
+    }
+    assert!(revisados > 5, "esperaba varios specs reales, revise {revisados}");
+}

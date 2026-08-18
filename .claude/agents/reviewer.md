@@ -32,6 +32,12 @@ implementas.
   alguien actualiza un catalogo. `harness_check.sh` avisa de la regla 2; las
   otras dos las mirás vos, porque saber que dato "se espera que cambie" no se
   grepea.
+- **Documentos al dia**: con `require_docs_al_dia` activa, exige
+  `docs/prd-diff-<feature>.md` con TODOS los bloques resueltos y el sello
+  `Aplicado: ... por USUARIO`. Y no te quedes en que este contestado: un bloque
+  `ya-esta` trae una cita que el binario verifica, pero un `no-aplica` es una
+  afirmacion del agente. Si la feature cambio lo que el producto promete y el
+  bloque del PRD dice `no-aplica`, eso es `changes_requested`.
 - **Rutas protegidas**: si el diff toca `docs/prd/**`, `docs/constitution.md` o
   cualquier ruta de `rules.rutas_protegidas`, el veredicto es `blocked` salvo que
   el usuario lo haya pedido explicitamente y quede registrado. Son sus

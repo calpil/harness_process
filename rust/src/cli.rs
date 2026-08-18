@@ -280,6 +280,19 @@ pub enum PrdCommand {
         #[arg(long)]
         parent: Option<String>,
     },
+    /// Siembra la propuesta de documentos al dia (una pregunta por documento)
+    Propose {
+        #[arg(long)]
+        feature: String,
+    },
+    /// Aplica la propuesta a los documentos del USUARIO (exige --yes)
+    Apply {
+        #[arg(long)]
+        feature: String,
+        /// Confirmacion explicita del USUARIO: sin este flag el comando se niega
+        #[arg(long)]
+        yes: bool,
+    },
     /// Dibuja el arbol con hitos y estado de features
     Tree {
         /// Subarbol a dibujar (`master` por defecto)
@@ -485,6 +498,12 @@ pub fn run() -> anyhow::Result<()> {
         Command::Prd { command } => match command {
             PrdCommand::Add { name, parent } => {
                 commands::prd::add(&HarnessPaths::resolve()?, &name, parent.as_deref())
+            }
+            PrdCommand::Propose { feature } => {
+                commands::prd::propose(&HarnessPaths::resolve()?, &feature)
+            }
+            PrdCommand::Apply { feature, yes } => {
+                commands::prd::apply(&HarnessPaths::resolve()?, &feature, yes)
             }
             PrdCommand::Tree { prd } => {
                 commands::prd::tree(&HarnessPaths::resolve()?, prd.as_deref())

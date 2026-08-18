@@ -73,6 +73,10 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
    `Peldano elegido: <n> (<nombre>) porque <razon concreta>`. La razon tiene que
    explicar por que el peldano de arriba NO alcanzaba; "queda mas claro asi" no
    es una razon.
+5.3. El PRD y el SDD son parte del entregable, no decorado. Si la feature cambia
+   lo que el producto promete o como se construye, decilo en el plan: al cerrar,
+   `prd propose` va a preguntar por cada documento y alguien va a tener que
+   contestar. Es mas barato pensarlo ahora que al final.
 6. Persiste el plan en `docs/plan-feature-<id>-<slug>.md` (en el `docs/` de la
    RAIZ del proyecto, junto a los PLAN-*.md del equipo): alcance, microservicios
    afectados, riesgos y delegacion concreta (que archivos y en que orden). Cada

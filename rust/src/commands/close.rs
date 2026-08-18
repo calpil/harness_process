@@ -43,6 +43,13 @@ pub fn run(
         };
         verificacion::gate(paths, &data, status, &spec_path(paths, feature), fid)?;
     }
+    // Gate de documentos (feature #29): si la regla esta activa, el PRD, el SDD
+    // y architecture.md tienen que reflejar lo implementado, con la propuesta
+    // aprobada por el USUARIO. Solo LEE: escribir es `prd apply --yes`.
+    if close_requires_spec(status) {
+        let feature = feature_at(&data, idx).clone();
+        crate::documentos::gate(paths, &data, status, &feature, fid)?;
+    }
     // Gate de aprendizaje (feature #17): cerrar como done declara que se
     // aprendio. Se valida tambien ANTES de mutar, por la misma razon.
     let declaracion = lecciones::gate(paths, &data, status, leccion, leccion_motivo)?;
