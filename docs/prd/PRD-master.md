@@ -154,7 +154,16 @@ anidado con `sh harness_cli prd add --name <parte>`.>
 
 | # | Hito | Slug de feature | Objetivo que cumple | Criterio de aceptacion (resumen) | Estado |
 | --- | --- | --- | --- | --- | --- |
-| 1 | <hito> | <slug_snake_case> | <O1> | <que tiene que ser cierto> | pendiente |
+| 1 | AC-n ejecutables: el spec declara como se verifica cada criterio | ac_ejecutables_verify | <O1> | `harness_cli verify` corre el comando de cada AC-n, escribe `docs/verify-<id>.md` y `require_verify_green` bloquea el cierre si alguno no pasa; los AC sin comando siguen siendo validos | done (2026-08-17) |
+| 2 | Escalera de huella y politica de tests en las convenciones | conventions_escalera_y_tests | <O1> | `docs/conventions.md` (+ espejo) lleva la escalera de menor huella y las tres reglas de test (contratos y no snapshots, prohibido leer el fuente en un test, prohibido el detector-de-cambios); el reviewer las verifica | done (2026-08-17) |
+| 3 | Diagnostico de la instalacion con remedio por linea | harness_doctor | <O1> | `harness_cli doctor [--json]` revisa binario, hooks, espejos, marker, hub, PATH y graphify, e imprime el comando exacto de remedio por cada falla; exit 0/2 sin solaparse con `harness_check.sh` | done (2026-08-17) |
+| 4 | Rutas protegidas: el PRD y la constitution dejan de depender de la buena fe | rutas_protegidas_deny | <O1> | Lista de rutas protegidas (default `docs/prd/**`, `docs/constitution.md`, `.env`) con tres capas: prevenir donde el backend lo soporte, detectar al instante con el comando de reversion, y `harness_check.sh` como red de seguridad que bloquea | done (2026-08-18) |
+| 5 | El catalogo de lecciones se lee bien con nombres largos | leccion_list_alineacion_dinamica | <O1> | `leccion list` calcula el ancho de la columna en vez de usar el 28 fijo; solo formato de salida, sin tocar orden, campos, `--json` ni exit codes | pendiente |
+
+> El programa de **aprendizaje del arnes** (lecciones, nudge, perfil, buscar,
+> curador y mapa) no esta aca: tiene su propio PRD anidado en
+> `docs/prd/aprendizaje/PRD-aprendizaje.md`, porque no entraba en una historia
+> sola.
 
 ## 11. Riesgos
 
@@ -181,7 +190,7 @@ con su fecha.>
 
 | PRD | Archivo | Que cuenta |
 | --- | --- | --- |
-| <parte> | <parte>/PRD-<parte>.md | <en una linea: que cuenta ese PRD> |
+| aprendizaje | aprendizaje/PRD-aprendizaje.md | El arnes que aprende: lecciones, nudge, perfil de usuario, buscar, curador y mapa |
 
 ## Bitacora
 
@@ -191,3 +200,8 @@ con su fecha.>
 -
 - #14 hub_batch_upserts_atomic_install -> done 2026-08-14 · spec: docs/spec-feature-14-hub-batch-upserts-atomic-install.md · impl: docs/impl-14.md
 - #15 atlassian_binding_and_outbox -> done 2026-08-16 · spec: docs/spec-feature-15-atlassian-binding-and-outbox.md · impl: docs/impl-15.md
+- #16 atlassian_auto_push -> done 2026-08-16 · spec: docs/spec-feature-16-atlassian-auto-push.md · impl: docs/impl-16.md
+- #23 ac_ejecutables_verify -> done 2026-08-17 · spec: docs/spec-feature-23-ac-ejecutables-verify.md · impl: docs/impl-23.md
+- #24 conventions_escalera_y_tests -> done 2026-08-17 · spec: docs/spec-feature-24-conventions-escalera-y-tests.md · impl: docs/impl-24.md
+- #25 harness_doctor -> done 2026-08-17 · spec: docs/spec-feature-25-harness-doctor.md · impl: docs/impl-25.md
+- #26 rutas_protegidas_deny -> done 2026-08-18 · spec: docs/spec-feature-26-rutas-protegidas-deny.md · impl: docs/impl-26.md
