@@ -189,6 +189,79 @@ Regla de mantenedor: cualquier cambio de comportamiento vive en `rust/src/` con
 sus tests (`cargo test`, `cargo clippy -- -D warnings`) verdes antes de push.
 Detalles en `templates/UPDATING.md`.
 
+## lecciones consolidar: cuando dos lecciones cuentan lo mismo (feature #28)
+
+La guia manda **patchear el paraguas existente** antes de crear una leccion
+nueva, y cerrar con "pocas lecciones de clase, ricas". El curador (#21) detecta
+las frias, pero **no ve solapamientos**.
+
+Y ya habia pasado: `docs-generados-por-el-instalador` y
+`documentos-del-usuario-vs-plantillas` compartian 4 triggers, el mismo pitfall
+del `.ps1` casi palabra por palabra y el mismo bloque de Verificacion. La mas
+nueva **declaraba el solapamiento en su propia prosa** y aun asi era un archivo
+aparte.
+
+```bash
+sh harness_cli lecciones consolidar          # pregunta e INFORMA; no toca nada
+sh harness_cli lecciones consolidar --aplicar     --en <paraguas> --de a,b --motivo "<por que>"
+```
+
+Apagada por default y de forma **estructural**: sin `rules.consolidar_backend`
+no se resuelve backend, no se spawnea nada y ni siquiera se mira el entorno.
+
+```json
+{ "rules": { "consolidar_backend": "auto" } }
+```
+
+### Que puede y que no puede hacer el modelo
+
+| | |
+| --- | --- |
+| Ve | `nombre`, `descripcion` y `triggers` |
+| **Nunca ve** | **el cuerpo**: los procedimientos y los pitfalls no salen de `docs/` |
+| Puede | proponer grupos con un motivo y una confianza |
+| **Nunca puede** | escribir. `detectar()` no recibe `&HarnessPaths`: no tiene con que |
+
+Y el prompt viaja como **un item de argv**, jamas por `sh -c`: una descripcion
+con backticks o `$(...)` no puede ejecutar nada. Por eso este modulo NO reusa
+`verificacion::ejecutar`, que si corre con shell.
+
+Lo que el modelo devuelve se **valida** antes de mostrarse: un miembro que no
+existe se descarta **y se dice**, y un grupo que toca una leccion `pinneada` se
+descarta.
+
+### La cadena de backend
+
+`HARNESS_CONSOLIDAR_CMD` (override) -> primer CLI de la tabla (`claude -p`,
+`kimi -p`) -> **skip limpio**. El override elige *cual* backend, nunca *enciende*
+la feature.
+
+**El tramo de API key no esta implementado**, y el mensaje de skip lo dice: el
+arnes no habla HTTP. Serian tres formatos de request/respuesta/error escritos sin
+poder verificarlos. Se nombra en vez de disimularse.
+
+### La fusion la pide una persona
+
+`--aplicar` toma la fusion de **argv**, no de lo que dijo el modelo. Y antes de
+archivar nada exige que el paraguas pueda reemplazarlo:
+
+- no puede tener los placeholders de la plantilla;
+- tiene que heredar **todos los triggers** de cada miembro — `buscar` puntua una
+  leccion activa 100 y una archivada 30, asi que sin eso el conocimiento deja de
+  encontrarse;
+- tiene que citar `[[cada-miembro]]` como puntero de recuperacion.
+
+**Nunca borra**: las miembros van a `docs/lecciones/archivo/` con su cuerpo
+intacto byte a byte, hay backup previo y `lecciones rollback` lo deshace.
+
+### La confianza se reporta sin filtrar
+
+El modelo devuelve una confianza por candidato y se imprime tal cual. **No hay
+umbral**: con 9 lecciones y un solo solapamiento real (Jaccard 0.400 sobre
+triggers contra 0.050 del siguiente) no hay nada en la zona gris con que
+calibrarlo, y un umbral no calibrable es un numero inventado con aspecto de
+rigor. El numero ordena; la persona decide.
+
 ## prd propose / prd apply: los documentos dejan de poder mentir (feature #29)
 
 El arnes verificaba que el codigo cumpliera el **spec** (#23) y nada mas. El

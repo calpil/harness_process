@@ -3580,3 +3580,192 @@ fn no_spec_command_should_invoke_prd_apply_yes() {
     }
     assert!(revisados > 5, "esperaba varios specs reales, revise {revisados}");
 }
+
+// ---------------------------------------------------------------------------
+// Feature #28: consolidacion de lecciones. La mitad que MUTA se verifica sin
+// backend y de forma determinista; la del modelo vive en
+// tests/consolidar_check.sh, que habla con un backend real.
+// ---------------------------------------------------------------------------
+
+fn sembrar_leccion(dir: &Path, nombre: &str, triggers: &str, cuerpo: &str) {
+    let lecciones = dir.join("docs/lecciones");
+    std::fs::create_dir_all(&lecciones).unwrap();
+    std::fs::write(
+        lecciones.join(format!("{nombre}.md")),
+        format!(
+            "---\nnombre: {nombre}\ndescripcion: Una oracion sobre {nombre}.\n\
+             triggers: [{triggers}]\nrelacionadas: []\norigen: [1]\nusos: 0\n\
+             ultimo_uso:\nultima_actualizacion: 2026-08-18\nestado: activa\n---\n\n{cuerpo}\n"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn consolidar_aplicar_should_take_the_merge_from_argv() {
+    // La fusion NO sale de lo que dijo el modelo: sale de argv. Por eso este
+    // test corre sin backend y es determinista.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a, b", "cuerpo real del paraguas. Ver [[miembro]].");
+    sembrar_leccion(dir.path(), "miembro", "a, b", "cuerpo de la miembro.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar",
+            "--en", "paraguas", "--de", "miembro",
+            "--motivo", "cuentan lo mismo",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Consolidacion aplicada"));
+    assert!(
+        dir.path().join("docs/lecciones/archivo/miembro.md").is_file(),
+        "no archivo la miembro"
+    );
+    assert!(
+        !dir.path().join("docs/lecciones/miembro.md").exists(),
+        "la miembro sigue en el catalogo activo"
+    );
+    assert!(dir.path().join("docs/lecciones/paraguas.md").is_file(), "borro el paraguas");
+}
+
+#[test]
+fn consolidar_aplicar_should_demand_a_motivo() {
+    // Una fusion sin motivo escrito es la que nadie va a poder revisar despues.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo. [[miembro]]");
+    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
+    cmd(&bin)
+        .args(["lecciones", "consolidar", "--aplicar", "--en", "paraguas", "--de", "miembro"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Falta --motivo"));
+    assert!(!dir.path().join("docs/lecciones/archivo").exists(), "archivo sin motivo");
+}
+
+#[test]
+fn consolidar_should_refuse_a_skeleton_umbrella() {
+    // Archivar contra un esqueleto perderia el conocimiento de forma estructural.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["leccion", "nueva", "paraguas"]).assert().success();
+    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "miembro", "--motivo", "x",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("placeholders"));
+    assert!(!dir.path().join("docs/lecciones/archivo").exists());
+}
+
+#[test]
+fn consolidar_should_demand_the_union_of_triggers() {
+    // Sin heredar los triggers, el conocimiento deja de encontrarse: `buscar`
+    // puntua una leccion activa 100 y una archivada 30.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "comun", "cuerpo real. [[miembro]]");
+    sembrar_leccion(dir.path(), "miembro", "comun, propio", "cuerpo.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "miembro", "--motivo", "x",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("'propio'"))
+        .stderr(predicate::str::contains("100"));
+}
+
+#[test]
+fn consolidar_should_demand_a_pointer_to_each_member() {
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo sin citar a nadie.");
+    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "miembro", "--motivo", "x",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("[[miembro]]"));
+}
+
+#[test]
+fn consolidar_should_allow_an_existing_member_as_the_umbrella() {
+    // Es lo que manda la guia ("patchea el paraguas existente") y es la forma
+    // del unico solapamiento real de este repo: el paraguas va tambien en --de.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a, b", "cuerpo real. [[miembro]]");
+    sembrar_leccion(dir.path(), "miembro", "a, b", "cuerpo.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "paraguas,miembro", "--motivo", "el paraguas es una de las dos",
+        ])
+        .assert()
+        .success();
+    assert!(dir.path().join("docs/lecciones/paraguas.md").is_file(), "archivo el paraguas");
+    assert!(dir.path().join("docs/lecciones/archivo/miembro.md").is_file());
+}
+
+#[test]
+fn consolidar_should_archive_byte_for_byte_with_backup() {
+    // Nunca borra, y se puede comprobar byte a byte.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo real. [[miembro]]");
+    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo con un PITFALL que no se puede perder.");
+    let antes = std::fs::read_to_string(dir.path().join("docs/lecciones/miembro.md")).unwrap();
+    let cuerpo_antes = antes.split("---\n").nth(2).unwrap().to_string();
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "miembro", "--motivo", "x",
+        ])
+        .assert()
+        .success();
+    let archivada =
+        std::fs::read_to_string(dir.path().join("docs/lecciones/archivo/miembro.md")).unwrap();
+    let cuerpo_despues = archivada.split("---\n").nth(2).unwrap().to_string();
+    assert_eq!(cuerpo_antes, cuerpo_despues, "el cuerpo archivado cambio");
+    assert!(archivada.contains("PITFALL que no se puede perder"));
+}
+
+#[test]
+fn consolidar_report_should_list_each_merge_with_its_reason() {
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo real. [[miembro]]");
+    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "miembro", "--motivo", "este es el motivo exacto",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("este es el motivo exacto"))
+        .stdout(predicate::str::contains("Backup:"));
+    let history = std::fs::read_to_string(dir.path().join("hp/progress/history.md")).unwrap();
+    assert!(history.contains("lecciones consolidar"), "{history}");
+}
+
+#[test]
+fn consolidar_should_be_undoable_with_rollback() {
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo real. [[miembro]]");
+    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
+    cmd(&bin)
+        .args([
+            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
+            "--de", "miembro", "--motivo", "x",
+        ])
+        .assert()
+        .success();
+    assert!(!dir.path().join("docs/lecciones/miembro.md").exists());
+    cmd(&bin).args(["lecciones", "rollback"]).assert().success();
+    assert!(
+        dir.path().join("docs/lecciones/miembro.md").is_file(),
+        "rollback no devolvio la leccion al catalogo activo"
+    );
+}

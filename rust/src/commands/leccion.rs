@@ -464,3 +464,230 @@ pub fn rollback(paths: &HarnessPaths, id: Option<&str>, list: bool) -> anyhow::R
     println!("  El estado previo quedo respaldado: este rollback tambien se puede deshacer.");
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Feature #28: consolidacion asistida por LLM.
+//
+// Misma simetria que `curar`: sin `--aplicar` INFORMA y no toca nada. La
+// diferencia es que la deteccion depende de un backend externo, y por eso la
+// mitad que muta toma la fusion de ARGV y no de lo que dijo el modelo: asi se
+// verifica sin backend y de forma determinista.
+// ---------------------------------------------------------------------------
+
+use crate::consolidacion::{self, Backend};
+
+/// `lecciones consolidar [--aplicar --en <p> --de a,b --motivo "..."]`
+pub fn consolidar(
+    paths: &HarnessPaths,
+    aplicar: bool,
+    en: Option<&str>,
+    de: Option<&str>,
+    motivo: Option<&str>,
+) -> anyhow::Result<()> {
+    if exigir_biblioteca(paths).is_none() {
+        return Ok(());
+    }
+    if aplicar {
+        return aplicar_fusion(paths, en, de, motivo);
+    }
+    detectar(paths)
+}
+
+/// La mitad que necesita modelo. **No escribe nada.**
+fn detectar(paths: &HarnessPaths) -> anyhow::Result<()> {
+    let data = crate::features::load_features(paths)?;
+    let override_cmd = std::env::var("HARNESS_CONSOLIDAR_CMD").ok();
+    let backend = consolidacion::resolver_backend(&data, override_cmd.as_deref(), |n| {
+        which::which(n).is_ok()
+    });
+    if let Some(motivo) = backend.motivo_del_skip() {
+        println!("{motivo}");
+        return Ok(());
+    }
+    let Some(argv) = backend.argv() else {
+        return Ok(());
+    };
+
+    let (activas, _) = lecciones::scan(paths);
+    if activas.len() < 2 {
+        println!("Hay {} leccion(es): nada que consolidar.", activas.len());
+        return Ok(());
+    }
+    let resumenes: Vec<consolidacion::Resumen> = activas
+        .iter()
+        .map(|l| consolidacion::Resumen {
+            nombre: l.nombre.clone(),
+            descripcion: l.descripcion(),
+            triggers: l.fm.list("triggers"),
+        })
+        .collect();
+
+    let quien = match &backend {
+        Backend::Override(a) => a.join(" "),
+        Backend::Cli { nombre, .. } => nombre.clone(),
+        _ => String::new(),
+    };
+    println!("Consultando a `{quien}` por {} lecciones (nombre, descripcion y triggers; NUNCA el cuerpo)...", resumenes.len());
+
+    let timeout = std::time::Duration::from_secs(consolidacion::timeout_segundos(&data));
+    let salida = match consolidacion::preguntar(
+        argv,
+        &consolidacion::prompt(&resumenes),
+        &paths.repo_root,
+        timeout,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            // Un backend que falla no rompe el flujo: se informa y se sale 0.
+            println!("[i] El backend no respondio: {e}");
+            return Ok(());
+        }
+    };
+
+    let Some(json) = consolidacion::extraer_json(&salida) else {
+        println!("[i] El backend no devolvio JSON usable. Nada que reportar.");
+        return Ok(());
+    };
+    let existentes: Vec<String> = activas.iter().map(|l| l.nombre.clone()).collect();
+    let pinneadas: Vec<String> = activas
+        .iter()
+        .filter(|l| l.pinneada())
+        .map(|l| l.nombre.clone())
+        .collect();
+    let (ok, descartados) =
+        consolidacion::validar(consolidacion::leer_candidatos(&json), &existentes, &pinneadas);
+
+    for d in &descartados {
+        println!("[i] Candidato descartado: {}", d.mensaje());
+    }
+    if ok.is_empty() {
+        println!("\nNingun solapamiento: el catalogo esta limpio.");
+        return Ok(());
+    }
+    println!("\n{} candidato(s) a consolidar:", ok.len());
+    for c in &ok {
+        // La confianza se reporta SIN filtrar (decision del usuario, OBS-3): con
+        // 9 lecciones y un solo par real no hay zona gris con que calibrar un
+        // umbral, y un umbral no calibrable es un numero inventado.
+        println!("\n  {} (confianza {:.2})", c.miembros.join(" + "), c.confianza);
+        println!("      {}", c.motivo);
+    }
+    println!("\nEsto SOLO informa: no se toco ningun archivo.");
+    println!("Para fusionar, escribi primero el paraguas y despues:");
+    println!(
+        "  sh harness_cli lecciones consolidar --aplicar --en <paraguas> --de {} --motivo \"<por que>\"",
+        ok[0].miembros.join(",")
+    );
+    Ok(())
+}
+
+/// La mitad que muta. **No necesita modelo**: la fusion viene de argv.
+fn aplicar_fusion(
+    paths: &HarnessPaths,
+    en: Option<&str>,
+    de: Option<&str>,
+    motivo: Option<&str>,
+) -> anyhow::Result<()> {
+    let uso = "Uso: lecciones consolidar --aplicar --en <paraguas> --de <a,b> --motivo \"<por que>\"";
+    let (Some(en), Some(de)) = (en, de) else {
+        return Err(Exit { code: 2, message: Some(format!("Faltan --en y/o --de.\n    {uso}")) }.into());
+    };
+    let motivo = motivo.unwrap_or_default().trim().to_string();
+    if motivo.is_empty() {
+        // Una fusion sin motivo escrito es la que nadie va a poder revisar.
+        return Err(Exit {
+            code: 2,
+            message: Some(format!("Falta --motivo: una fusion sin motivo no se puede revisar despues.\n    {uso}")),
+        }
+        .into());
+    }
+    let miembros: Vec<String> = de
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if miembros.is_empty() {
+        return Err(Exit { code: 2, message: Some(format!("--de no nombra ninguna leccion.\n    {uso}")) }.into());
+    }
+
+    let (activas, _) = lecciones::scan(paths);
+    let buscar = |n: &str| activas.iter().find(|l| l.nombre == n);
+    let Some(paraguas) = buscar(en) else {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!("El paraguas '{en}' no existe. Escribilo primero: sh harness_cli leccion nueva {en}")),
+        }
+        .into());
+    };
+    // El paraguas PUEDE ser una de las miembros: es lo que manda la guia
+    // ("patchea el paraguas existente") y es la forma del unico solapamiento
+    // real de este repo.
+    let a_archivar: Vec<&lecciones::Leccion> = miembros
+        .iter()
+        .filter(|m| m.as_str() != en)
+        .filter_map(|m| buscar(m))
+        .collect();
+    let faltantes: Vec<&String> = miembros
+        .iter()
+        .filter(|m| m.as_str() != en && buscar(m).is_none())
+        .collect();
+    if !faltantes.is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "No existe(n): {}",
+                faltantes.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            )),
+        }
+        .into());
+    }
+    if a_archivar.is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!("--de no nombra ninguna leccion distinta del paraguas '{en}'.")),
+        }
+        .into());
+    }
+
+    // El paraguas tiene que poder REEMPLAZAR a lo que archiva.
+    let texto_paraguas = std::fs::read_to_string(&paraguas.file).unwrap_or_default();
+    let triggers_paraguas = paraguas.fm.list("triggers");
+    let miembros_tri: Vec<(String, Vec<String>)> = a_archivar
+        .iter()
+        .map(|l| (l.nombre.clone(), l.fm.list("triggers")))
+        .collect();
+    let faltas = consolidacion::revisar_paraguas(&texto_paraguas, &triggers_paraguas, &miembros_tri);
+    if !faltas.is_empty() {
+        let mut msg = format!("El paraguas '{en}' todavia no puede reemplazar a lo que archivaria:\n");
+        for f in &faltas {
+            msg.push_str(&format!("    - {}\n", f.mensaje()));
+        }
+        msg.push_str("    Escribilo primero: archivar contra un paraguas incompleto pierde el conocimiento.");
+        return Err(Exit { code: 2, message: Some(msg) }.into());
+    }
+
+    let backup = curador::respaldar(paths, "consolidar", &motivo)?;
+    let mut archivadas = Vec::new();
+    let nombres: Vec<String> = a_archivar.iter().map(|l| l.nombre.clone()).collect();
+    for n in &nombres {
+        // Se reusa `archivar`, que ya mueve sin borrar y deja su linea en la
+        // bitacora. Consolidar no inventa una segunda forma de archivar.
+        archivar(paths, n)?;
+        archivadas.push(n.clone());
+    }
+    log(
+        paths,
+        &format!(
+            "lecciones consolidar --en {en} --de {} motivo={motivo}",
+            archivadas.join(",")
+        ),
+    )?;
+    println!("Consolidacion aplicada.");
+    println!("  Paraguas:  {en}");
+    println!("  Archivadas: {}", archivadas.join(", "));
+    println!("  Motivo:    {motivo}");
+    println!("  Backup:    {}", backup.display());
+    println!("\nNada se borro. Para deshacer: sh harness_cli lecciones rollback");
+    Ok(())
+}

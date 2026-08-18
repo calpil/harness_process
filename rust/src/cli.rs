@@ -332,6 +332,21 @@ pub enum LeccionesCommand {
         #[arg(long)]
         aplicar: bool,
     },
+    /// Detecta lecciones solapadas con un LLM. Sin --aplicar solo INFORMA
+    Consolidar {
+        /// Aplica la fusion (respalda antes y archiva las miembros)
+        #[arg(long)]
+        aplicar: bool,
+        /// Leccion paraguas que queda (puede ser una de las miembros)
+        #[arg(long)]
+        en: Option<String>,
+        /// Lecciones a fusionar, separadas por coma
+        #[arg(long)]
+        de: Option<String>,
+        /// Por que se fusionan (obligatorio con --aplicar)
+        #[arg(long)]
+        motivo: Option<String>,
+    },
     /// Congela una leccion: ninguna transicion automatica la toca
     Pin { nombre: String },
     /// Devuelve una leccion al ciclo de vida normal
@@ -542,6 +557,15 @@ pub fn run() -> anyhow::Result<()> {
             match command {
                 LeccionesCommand::Status { json } => commands::leccion::status(&paths, json),
                 LeccionesCommand::Curar { aplicar } => commands::leccion::curar(&paths, aplicar),
+                LeccionesCommand::Consolidar { aplicar, en, de, motivo } => {
+                    commands::leccion::consolidar(
+                        &paths,
+                        aplicar,
+                        en.as_deref(),
+                        de.as_deref(),
+                        motivo.as_deref(),
+                    )
+                }
                 LeccionesCommand::Pin { nombre } => commands::leccion::pin(&paths, &nombre, true),
                 LeccionesCommand::Unpin { nombre } => commands::leccion::pin(&paths, &nombre, false),
                 LeccionesCommand::Archivar { nombre } => commands::leccion::archivar(&paths, &nombre),

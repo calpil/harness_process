@@ -467,6 +467,35 @@ coincide con el archivo **bloquean**; la falta de `triggers` solo avisa. Sin
 `docs/lecciones/` el bloque entero se omite, así que una instalación que no use
 lecciones no ve ninguna diferencia.
 
+## Consolidacion de lecciones con LLM (feature #28)
+
+Aparece `sh harness_cli lecciones consolidar`, la **unica** parte del arnes que
+usa un modelo. Detecta lecciones que cuentan lo mismo e informa; con `--aplicar`
+fusiona bajo un paraguas y archiva las miembros.
+
+**Apagada por default, estructuralmente**: sin `rules.consolidar_backend` no se
+resuelve backend ni se mira el entorno. Encendela con
+`{ "rules": { "consolidar_backend": "auto" } }`.
+
+Lo que hay que saber:
+
+- **El modelo nunca ve el cuerpo de una leccion**: solo nombre, descripción y
+  triggers. Los procedimientos y los pitfalls no salen de `docs/`.
+- **El modelo nunca escribe**: `detectar()` no recibe `&HarnessPaths`. Y el
+  prompt viaja como item de argv, nunca por `sh -c`.
+- **La fusión la pide una persona**: `--aplicar` toma `--en/--de/--motivo` de
+  argv, no de lo que dijo el modelo. Sin `--motivo`, exit 2.
+- **El paraguas tiene que poder reemplazar lo que archiva**: sin placeholders,
+  con **todos** los triggers de cada miembro y citando `[[cada-una]]`. Si no,
+  exit 2 — archivar contra un esqueleto pierde el conocimiento.
+- **Nunca borra**: `docs/lecciones/archivo/` con el cuerpo intacto, backup previo
+  y `lecciones rollback`.
+- **Cadena de backend**: `HARNESS_CONSOLIDAR_CMD` → primer CLI (`claude -p`,
+  `kimi -p`) → skip limpio. El tramo de API key **no está implementado** y el
+  skip lo dice: el arnés no habla HTTP.
+- **La confianza se reporta sin filtrar**: no hay umbral, porque con este corpus
+  no se puede calibrar ninguno.
+
 ## Documentos al dia: `prd propose` / `prd apply` (feature #29)
 
 El PRD, el SDD y `docs/architecture.md` dejan de poder quedar mintiendo. **El

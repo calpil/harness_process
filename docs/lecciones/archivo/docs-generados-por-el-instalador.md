@@ -7,7 +7,7 @@ origen: [17]
 usos: 1
 ultimo_uso: 2026-08-17
 ultima_actualizacion: 2026-08-16
-estado: activa
+estado: archivada
 ---
 
 ## Cuando aplica

@@ -137,6 +137,15 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   tocar disco. El anclaje es por **texto literal** y no por seccion, porque
   cortar en `## ` se tragaria las subsecciones `###`; y la idempotencia sale del
   CONTENIDO, no de una firma, porque un PRD lo comparten N features.
+- `consolidacion.rs`: deteccion de lecciones solapadas con un LLM (feature #28),
+  la UNICA parte del arnes que usa un modelo. `resolver_backend()` implementa
+  override -> CLI -> skip limpio y es pura (el override llega por parametro, no
+  del entorno). `detectar` no recibe `&HarnessPaths`: **no puede escribir aunque
+  quiera**. Al modelo se le manda solo nombre, descripcion y triggers —nunca el
+  cuerpo— y el prompt viaja como item de argv, jamas por `sh -c`, asi que una
+  descripcion con backticks no puede inyectar nada. `revisar_paraguas()` exige
+  que el paraguas herede todos los triggers de lo que archiva, porque `buscar`
+  puntua una leccion activa 100 y una archivada 30.
 - `progress.rs`: `current.md` / `history.md` (estado vivo y bitacora).
 - `memories.rs`, `graphify.rs`, `graph/` (`commands`, `derive`, `ids`, `store`,
   `tls`): Memory Hub y su integracion con graphify.

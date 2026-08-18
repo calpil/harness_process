@@ -207,6 +207,7 @@ y al arrancarla (`start`) su spec nace citando este PRD. Al cerrarla
 | 4 | Buscar en el propio historial | buscar_en_el_historial | O3 | `buscar` responde con archivo:linea, feature y fecha sobre specs, planes, impl, review, lecciones, history y hub; sin LLM, sin dependencias nuevas, degradando limpio sin hub | done (2026-08-17) |
 | 5 | Curador de lecciones | curador_de_lecciones | O4 | Transiciones deterministas 30d/90d que nunca borran, con pin, backup previo, rollback reversible y reporte por corrida; consolidacion con LLM opt-in y backend-agnostica | done (2026-08-17) |
 | 6 | Mapa de aprendizaje | mapa_de_aprendizaje | O4 | `journey` dibuja la linea de tiempo sobre datos ya existentes y permite podar con `list/delete/edit` | done (2026-08-17) |
+| 7 | Consolidacion de lecciones asistida por LLM | consolidacion_de_lecciones_con_llm | O4 | `lecciones consolidar` detecta solapamientos viendo solo nombre, descripcion y triggers (NUNCA el cuerpo) e informa; con `--aplicar` fusiona bajo un paraguas tomando la fusion de argv y archiva las miembros con backup y rollback. Apagada por default; cadena override -> CLI -> skip limpio | done (2026-08-18) |
 
 ## 11. Riesgos
 
@@ -255,3 +256,4 @@ y al arrancarla (`start`) su spec nace citando este PRD. Al cerrarla
 - #20 buscar_en_el_historial -> done 2026-08-17 · spec: docs/spec-feature-20-buscar-en-el-historial.md · impl: docs/impl-20.md
 - #21 curador_de_lecciones -> done 2026-08-17 · spec: docs/spec-feature-21-curador-de-lecciones.md · impl: docs/impl-21.md
 - #22 mapa_de_aprendizaje -> done 2026-08-17 · spec: docs/spec-feature-22-mapa-de-aprendizaje.md · impl: docs/impl-22.md
+- #28 consolidacion_de_lecciones_con_llm -> done 2026-08-18 · spec: docs/spec-feature-28-consolidacion-de-lecciones-con-llm.md · impl: docs/impl-28.md

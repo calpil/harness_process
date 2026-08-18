@@ -48,6 +48,21 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**Como habla el arnes con un LLM** (feature #28, la unica parte que usa modelo).
+La cadena es `HARNESS_CONSOLIDAR_CMD` -> primer CLI de una tabla corta
+(`claude -p`, `kimi -p`) -> **skip limpio**. Apagada por default y de forma
+estructural: sin `rules.consolidar_backend` no se resuelve backend ni se mira el
+entorno. Tres decisiones que valen para cualquier feature futura con modelo:
+
+- **Al modelo se le manda lo minimo.** Ve nombre, descripcion y triggers; nunca
+  el cuerpo de una leccion. Lo peor que puede hacer es equivocarse, no filtrar.
+- **El prompt viaja como item de argv, jamas por `sh -c`.** Por eso NO se reusa
+  `verificacion::ejecutar`, que si corre con shell.
+- **El modelo propone; lo que muta sale de argv.** La mitad que escribe se
+  verifica sin backend y de forma determinista.
+
+El tramo HTTP con API key **no esta implementado** y el mensaje de skip lo dice.
+
 <Una fila por decision estructural. Si una decision es grande o polemica, mueve
 el detalle a su propio ADR y enlazalo aqui.>
 

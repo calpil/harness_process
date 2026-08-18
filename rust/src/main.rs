@@ -6,6 +6,7 @@ mod atlassian;
 mod buscar;
 mod cli;
 mod commands;
+mod consolidacion;
 mod curador;
 mod documentos;
 mod exit;
