@@ -114,8 +114,15 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   esa pureza es lo que permite probar la compatibilidad contra los 310 AC reales
   del repo sin ejecutar un solo comando. `ejecutar()` corre UN comando desde la
   raiz con `wait-timeout` (`rules.verify_timeout_segundos`, default 300) y
-  clasifica en el enum `Estado` (`Verde` / `Rojo` / `Timeout` / `Manual`); un AC
-  sin comando es `Manual` y **nunca** bloquea. `gate()` es lo unico que usa el
+  clasifica en el enum `Estado` (`Verde` / `Rojo` / `Timeout` / `Manual` /
+  `Vacio`); un AC sin comando es `Manual` y **nunca** bloquea. `Vacio` (feature
+  #44) es el AC que salio 0 **sin ejecutar ningun caso**: lo decide
+  `casos_corridos()`, otra funcion pura, que suma los `N passed` de las lineas
+  `test result:` y devuelve `None` —"no opino"— cuando la salida no tiene esa
+  forma. Ese `None` es lo que evita que el detector opine sobre un `grep` o un
+  `bash`. `rojos_del_reporte()` deriva del enum via `Estado::desde_etiqueta()` en
+  vez de comparar contra cadenas sueltas, para que un estado nuevo no se filtre
+  por el cierre — que es como la #37 se llevo puesto el emisor de Jira. `gate()` es lo unico que usa el
   cierre: LEE `docs/verify-<id>.md` y no llama a `ejecutar()` — la promesa "cerrar
   no dispara shell" es estructural, no disciplina. El parser saltea los bloques
   ``` porque un spec que documenta la sintaxis no puede terminar ejecutando su

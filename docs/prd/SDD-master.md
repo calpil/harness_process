@@ -96,9 +96,26 @@ denominador de `prd tree`, porque no es trabajo hecho ni pendiente.
 <Como se prueba el sistema, mas alla de los tests de cada feature. Los comandos
 concretos viven en `docs/verification.md`.>
 
-- Tests automaticos: <unitarios, integracion, e2e; que cubre cada nivel>
-- Entornos: <local, staging, produccion>
-- Criterio de "listo para produccion": <...>
+- **Tests automaticos**: unitarios en `rust/src/**` (modulos `mod tests`, sobre
+  todo para las funciones PURAS: parsear, planificar, diagnosticar, decidir),
+  integracion en `rust/tests/cli_basics.rs` (el binario de verdad contra un
+  sandbox `tempfile`), y chequeos de shell en `tests/*.sh` para lo que vive
+  fuera de Rust (los dos instaladores, los espejos, el corpus real del repo).
+- **Los AC se ejecutan**: cada AC-n de un spec puede declarar `Comando:`, y
+  `harness_cli verify --feature <id>` los corre y escribe `docs/verify-<id>.md`.
+  Con `require_verify_green`, `close --status done` LEE ese reporte —nunca
+  ejecuta— y no deja cerrar con alguno bloqueando.
+- **Un AC que no midio nada no cuenta como verificado**: `cargo test <nombre>`
+  con un filtro que no matchea sale 0, y eso ya produjo un falso verde real. Por
+  eso `verify` mira la salida ademas del exit code y marca `vacio` al AC que
+  reconocidamente no ejecuto ningun caso. Sobre salidas que no son de libtest no
+  opina: el estado no cambia.
+- **Entornos**: solo local. El arnes no se despliega; se instala en el repo del
+  proyecto con `setup_harness.sh` / `.ps1`, y `tests/parity_check.sh` verifica
+  que los dos hagan lo mismo.
+- **Criterio de "listo"**: los AC del spec en verde en su reporte, la suite
+  completa y `cargo clippy -D warnings` limpios, los chequeos de `tests/` en
+  verde, y `harness_check.sh` sin problemas.
 
 ## 8. Riesgos tecnicos
 

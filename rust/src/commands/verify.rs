@@ -101,26 +101,42 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     }
     std::fs::write(&destino, &reporte)?;
 
-    let rojos: Vec<&Resultado> = resultados.iter().filter(|r| r.estado.bloquea()).collect();
+    let bloqueantes: Vec<&Resultado> = resultados.iter().filter(|r| r.estado.bloquea()).collect();
     if as_json {
         emitir_json(fid, &rel_spec.display().to_string(), &stamp, &resultados);
     } else {
-        let verdes = resultados.iter().filter(|r| r.estado == Estado::Verde).count();
-        let manuales = resultados.iter().filter(|r| r.estado == Estado::Manual).count();
-        println!("\n{verdes} verde(s), {} en rojo, {manuales} manual(es).", rojos.len());
+        let cuenta = |e: Estado| resultados.iter().filter(|r| r.estado == e).count();
+        let vacios = cuenta(Estado::Vacio);
+        let verdes = cuenta(Estado::Verde);
+        let manuales = cuenta(Estado::Manual);
+        let sin_casos = if vacios > 0 {
+            format!(", {vacios} sin casos")
+        } else {
+            String::new()
+        };
+        println!(
+            "\n{verdes} verde(s), {} en rojo, {manuales} manual(es){sin_casos}.",
+            bloqueantes.len() - vacios
+        );
         println!("Reporte: {}", reporte_rel(fid));
         if manuales > 0 {
             println!("Los AC sin comando los verifica el reviewer: no cuentan como fallo.");
         }
+        if vacios > 0 {
+            println!(
+                "Un AC `sin casos` corrio y salio 0, pero no ejecuto ningun test:\n\
+                 revisa que el nombre del filtro exista de verdad."
+            );
+        }
     }
-    if rojos.is_empty() {
+    if bloqueantes.is_empty() {
         return Ok(());
     }
     // Exit 1 con la lista: el que corre esto quiere saber QUE fallo sin abrir
     // el reporte.
     Err(Exit::msg(format!(
         "AC en rojo: {}",
-        rojos
+        bloqueantes
             .iter()
             .map(|r| r.ac.as_str())
             .collect::<Vec<_>>()

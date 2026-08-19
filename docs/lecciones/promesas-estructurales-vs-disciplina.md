@@ -1,12 +1,12 @@
 ---
 nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
-triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar]
-relacionadas: [criterios-de-cierre-que-se-pueden-fallar]
-origen: [21]
+triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug]
+relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
+origen: [21, 44]
 usos: 1
 ultimo_uso: 2026-08-17
-ultima_actualizacion: 2026-08-17
+ultima_actualizacion: 2026-08-19
 estado: activa
 ---
 
@@ -48,6 +48,39 @@ Ejemplos de este repo:
 Fijate el patron: casi todas se sostienen por **lo que el modulo NO importa**.
 Un `use` que no esta es una garantia mucho mas fuerte que un comentario.
 
+## El mismo principio, aplicado a ARREGLAR un bug (feature #44)
+
+No es solo para invariantes. Cuando encontras una trampa —una forma de que la
+herramienta mienta— tenes dos maneras de cerrarla:
+
+| Que haces | Que consegus |
+| --- | --- |
+| arreglas las instancias que ves y escribis una advertencia | documentaste |
+| escribis un chequeo que la detecta sola | la cerraste |
+
+El caso medido: la feature #23 descubrio que `cargo test <nombre-inexistente>`
+imprime `running 0 tests`, dice `ok` y **sale 0**, asi que un AC quedaba verde
+sin ejecutar nada. Lo arreglo **renombrando los tests a mano** y dejo escrita la
+advertencia en `UPDATING.md`.
+
+Cinco features despues volvio a pasar: el AC-12 de la #28 declaraba un test que
+no existia, y el invariante mas citado de ese comando quedo registrado como
+verificado con nada detras. Nadie lo vio hasta que un pase de refutacion lo
+busco a proposito, **un dia** despues de cerrar.
+
+La advertencia estaba escrita. La lei y la escribi yo. No sirvio, porque una
+advertencia solo actua cuando alguien se acuerda de ella en el momento exacto en
+que esta por caer.
+
+La #44 la cerro estructuralmente: `verify` mira la salida ademas del exit code y
+marca `vacio` al AC que no ejecuto ningun caso. Ahora la trampa no depende de
+que nadie se distraiga.
+
+**La pregunta que hay que hacerse al arreglar cualquier bug**: ¿esto arregla el
+caso o la clase? Si la respuesta es "el caso, mas una nota para acordarse", vas a
+volver a verlo. Anotalo en el backlog aunque no lo hagas ahora: la nota en el
+backlog al menos tiene fecha de vencimiento; la advertencia en un documento, no.
+
 ## Pitfalls
 
 - **Confundir el test con la garantia.** Un test que compara mtimes antes y
@@ -60,6 +93,10 @@ Un `use` que no esta es una garantia mucho mas fuerte que un comentario.
   se puede hacer estructural (por ejemplo "el mensaje es claro"), no lo escribas
   como promesa: escribilo como criterio de cierre verificable
   ([[criterios-de-cierre-que-se-pueden-fallar]]).
+- **Creer que documentar una trampa la desactiva.** Es el pitfall que costo la
+  #44: la advertencia de la #23 estaba escrita, era correcta y era clara, y aun
+  asi el mismo error volvio cinco features despues. Lo unico que corta la clase
+  es algo que corre solo.
 - **Olvidar que la barrera final a veces es social.** `--aplicar` protege del
   accidente, no de la decision apurada. Cuando el comando mueve cosas del usuario,
   el rol tiene que decir explicitamente que no se corre sin avisarle.

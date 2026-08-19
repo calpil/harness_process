@@ -41,7 +41,21 @@ pub enum Estado {
     Timeout,
     /// Sin comando declarado: lo verifica el reviewer, como siempre.
     Manual,
+    /// El comando salio 0 pero no ejecuto ningun caso: `cargo test` con un
+    /// filtro que no matchea imprime `running 0 tests`, dice `ok` y sale 0.
+    /// Un AC asi no esta verificado, esta sin medir. Feature #44.
+    Vacio,
 }
+
+/// Todas las variantes, para los recorridos que tienen que cubrirlas sin
+/// depender de que alguien se acuerde de agregar la nueva a mano.
+pub const ESTADOS: [Estado; 5] = [
+    Estado::Verde,
+    Estado::Rojo,
+    Estado::Timeout,
+    Estado::Manual,
+    Estado::Vacio,
+];
 
 impl Estado {
     pub fn etiqueta(self) -> &'static str {
@@ -50,7 +64,17 @@ impl Estado {
             Estado::Rojo => "rojo",
             Estado::Timeout => "timeout",
             Estado::Manual => "manual",
+            Estado::Vacio => "vacio",
         }
+    }
+
+    /// La vuelta de `etiqueta`. Existe para que el lector del reporte
+    /// (`rojos_del_reporte`, que es lo unico que `close` usa) salga del enum en
+    /// vez de comparar contra cadenas sueltas: asi agregar un estado sexto se
+    /// cubre en un solo lugar y no se filtra por el cierre. Feature #44, que es
+    /// la misma forma del defecto que la #37 encontro en el emisor de Jira.
+    pub fn desde_etiqueta(texto: &str) -> Option<Estado> {
+        ESTADOS.into_iter().find(|e| e.etiqueta() == texto)
     }
 
     pub fn simbolo(self) -> &'static str {
@@ -59,13 +83,50 @@ impl Estado {
             Estado::Rojo => "[!!]",
             Estado::Timeout => "[..]",
             Estado::Manual => "[--]",
+            Estado::Vacio => "[??]",
         }
     }
 
-    /// Solo rojo y timeout bloquean: un AC manual sigue siendo valido.
+    /// Bloquean rojo, timeout y vacio: un AC manual sigue siendo valido, pero
+    /// uno que no midio nada no es evidencia de nada.
     pub fn bloquea(self) -> bool {
-        matches!(self, Estado::Rojo | Estado::Timeout)
+        matches!(self, Estado::Rojo | Estado::Timeout | Estado::Vacio)
     }
+}
+
+/// Cuantos casos ejecuto realmente un comando, leido de su salida.
+///
+/// `None` = "no opino": la salida no tiene la forma de una corrida de libtest,
+/// asi que puede ser un `grep`, un `bash`, un compilador o cualquier otra cosa
+/// y no hay nada que contar. Ese contrato es lo que evita que el detector
+/// ponga en rojo trabajo sano.
+///
+/// Se mira la SALIDA y no el texto del comando a proposito: un `cargo test`
+/// adentro de un script de shell tambien queda cubierto, y un comando que se
+/// llama "test" pero no lo es, no.
+pub fn casos_corridos(salida: &str) -> Option<usize> {
+    let mut total = 0usize;
+    let mut hubo_linea = false;
+    for linea in salida.lines() {
+        let Some(resto) = linea.trim_start().strip_prefix("test result:") else {
+            continue;
+        };
+        hubo_linea = true;
+        // `ok. 12 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out`.
+        // El primer tramo trae el veredicto adelante (`ok. 12 passed`), asi que
+        // se busca la palabra `passed` y se lee el numero que la precede en vez
+        // de asumir una posicion fija.
+        let palabras: Vec<&str> = resto.split_whitespace().collect();
+        for (i, palabra) in palabras.iter().enumerate() {
+            if palabra.trim_end_matches(';') != "passed" || i == 0 {
+                continue;
+            }
+            if let Ok(n) = palabras[i - 1].parse::<usize>() {
+                total += n;
+            }
+        }
+    }
+    hubo_linea.then_some(total)
 }
 
 #[derive(Debug, Clone)]
@@ -194,10 +255,23 @@ pub fn ejecutar(comando: &str, cwd: &Path, timeout: Duration) -> (Estado, Option
         }
     };
     let duracion = arranque.elapsed().as_millis();
-    let salida = leer_salida(&mut hijo);
+    // Se MIDE sobre la salida completa y se RECORTA solo para el reporte. Al
+    // reves —que es como nacio la #44— el resumen de libtest se cae de las
+    // ultimas LINEAS_SALIDA en cuanto el comando imprime algo despues, y el
+    // detector se apaga solo justo cuando mas hace falta: `cargo test` manda los
+    // diagnosticos de compilacion por stderr, y stderr va al final.
+    let completa = leer_salida(&mut hijo);
+    let casos = casos_corridos(&completa);
+    let salida = recortar_salida(&completa);
     match estado_salida {
         None => (Estado::Timeout, None, duracion, salida),
-        Some(s) if s.success() => (Estado::Verde, s.code(), duracion, String::new()),
+        // Feature #44: el camino feliz ya no descarta la salida. Un exit 0 dice
+        // que el comando anduvo, no que haya medido algo, y esa diferencia solo
+        // esta en lo que imprimio.
+        Some(s) if s.success() => match casos {
+            Some(0) => (Estado::Vacio, s.code(), duracion, salida),
+            _ => (Estado::Verde, s.code(), duracion, String::new()),
+        },
         Some(s) => (Estado::Rojo, s.code(), duracion, salida),
     }
 }
@@ -213,7 +287,7 @@ fn leer_salida(hijo: &mut std::process::Child) -> String {
         let _ = err.read_to_string(&mut e);
         texto.push_str(&e);
     }
-    recortar_salida(&texto)
+    texto
 }
 
 /// Ultimas `LINEAS_SALIDA` lineas: lo suficiente para diagnosticar sin volcar
@@ -241,13 +315,22 @@ pub fn reporte_rel(fid: &str) -> String {
 
 /// Cuerpo del reporte. Se separa del comando para poder testear el formato.
 pub fn render_reporte(fid: &str, stamp: &str, resultados: &[Resultado]) -> String {
-    let rojos = resultados.iter().filter(|r| r.estado.bloquea()).count();
-    let verdes = resultados.iter().filter(|r| r.estado == Estado::Verde).count();
-    let manuales = resultados.iter().filter(|r| r.estado == Estado::Manual).count();
+    let cuenta = |e: Estado| resultados.iter().filter(|r| r.estado == e).count();
+    let vacios = cuenta(Estado::Vacio);
+    // Los vacios bloquean, pero contarlos dentro de "en rojo" volveria a
+    // esconder justo lo que esta feature vino a mostrar.
+    let rojos = resultados.iter().filter(|r| r.estado.bloquea()).count() - vacios;
+    let verdes = cuenta(Estado::Verde);
+    let manuales = cuenta(Estado::Manual);
+    let sin_casos = if vacios > 0 {
+        format!(", {vacios} sin casos")
+    } else {
+        String::new()
+    };
     let mut out = format!(
         "# Verificacion de AC - Feature #{fid}\n\n\
          Corrida: {stamp}\n\
-         Resultado: {verdes} verde(s), {rojos} en rojo, {manuales} manual(es).\n\n\
+         Resultado: {verdes} verde(s), {rojos} en rojo, {manuales} manual(es){sin_casos}.\n\n\
          | AC | Estado | Comando | Exit | ms |\n| --- | --- | --- | --- | --- |\n"
     );
     for r in resultados {
@@ -295,8 +378,13 @@ pub fn rojos_del_reporte(texto: &str) -> Vec<String> {
         .filter_map(|l| {
             let celdas: Vec<&str> = l.split('|').map(str::trim).collect();
             let ac = celdas.get(1)?;
-            let estado = celdas.get(2)?;
-            (*estado == "rojo" || *estado == "timeout").then(|| (*ac).to_string())
+            // Falla CERRADO: una etiqueta que no se reconoce bloquea. Antes se
+            // descartaba en silencio, asi que un estado nuevo que alguien se
+            // olvidara de agregar a `ESTADOS` se filtraba por el cierre sin que
+            // nada fallara — la misma forma del defecto que la #37 encontro en
+            // el emisor de Jira, y la que este mismo AC prometia cerrar.
+            let bloquea = Estado::desde_etiqueta(celdas.get(2)?).is_none_or(Estado::bloquea);
+            bloquea.then(|| (*ac).to_string())
         })
         .collect()
 }
@@ -656,5 +744,220 @@ mod tests {
             }
         }
         n
+    }
+}
+
+/// Feature #44: el instrumento que dice "verde" sin haber medido nada.
+///
+/// La salida de los tests es dato REAL capturado del repo, no inventada: es
+/// lo que imprimio `cargo test consolidar_without_aplicar_should_not_touch_anything`
+/// el 2026-08-18, que es el falso verde que dio origen a esta feature.
+#[cfg(test)]
+mod tests_vacio {
+    use super::*;
+
+    /// Los dos binarios de test de este repo, con el filtro que no matchea nada.
+    const FILTRO_VACIO_REAL: &str = "\
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 322 filtered out; finished in 0.00s
+
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 161 filtered out; finished in 0.00s";
+
+    #[test]
+    fn casos_corridos_should_not_opine_about_non_libtest_output() {
+        // Un grep, un script de shell, un compilador, nada. Ninguno es una
+        // corrida de tests, y opinar sobre ellos es lo unico que podria poner
+        // en rojo trabajo sano.
+        for salida in [
+            "",
+            "docs/architecture.md:12:superseded",
+            "[Ok] paridad: los ocho modos verdes",
+            "    Finished `release` profile [optimized] target(s) in 7.57s",
+            "warning: el resultado del test no importa aca",
+        ] {
+            assert_eq!(
+                casos_corridos(salida),
+                None,
+                "no deberia opinar sobre: {salida:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn casos_corridos_should_count_zero_on_the_real_empty_filter() {
+        assert_eq!(casos_corridos(FILTRO_VACIO_REAL), Some(0));
+    }
+
+    #[test]
+    fn casos_corridos_should_sum_across_test_binaries() {
+        // El caso normal de `cargo test <nombre>`: matchea en un binario y no
+        // en los otros. Eso SI es evidencia.
+        let salida = "\
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 322 filtered out; finished in 0.00s
+
+running 3 tests
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 158 filtered out; finished in 0.70s";
+        assert_eq!(casos_corridos(salida), Some(3));
+    }
+
+    #[test]
+    fn casos_corridos_should_count_ignored_tests_as_no_evidence() {
+        let salida = "test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; \
+                      finished in 0.00s";
+        assert_eq!(casos_corridos(salida), Some(0));
+    }
+
+    #[test]
+    fn vacio_should_block_without_pretending_to_be_red() {
+        assert!(Estado::Vacio.bloquea());
+        assert_ne!(Estado::Vacio.etiqueta(), Estado::Rojo.etiqueta());
+        assert_ne!(Estado::Vacio.simbolo(), Estado::Rojo.simbolo());
+        assert_ne!(Estado::Vacio, Estado::Verde);
+    }
+
+    #[test]
+    fn etiqueta_should_round_trip_for_every_estado() {
+        // El invariante que reemplaza a las cadenas sueltas de
+        // `rojos_del_reporte`: lo que el reporte escribe, el reporte lo lee.
+        // Si manana aparece un estado sexto, este test lo obliga a cerrar el
+        // circuito en vez de filtrarse por el cierre.
+        for estado in ESTADOS {
+            assert_eq!(
+                Estado::desde_etiqueta(estado.etiqueta()),
+                Some(estado),
+                "no vuelve del reporte: {estado:?}"
+            );
+        }
+        assert_eq!(Estado::desde_etiqueta("inventado"), None);
+    }
+
+    #[test]
+    fn ejecutar_should_mark_an_empty_test_run_as_vacio() {
+        let dir = std::env::temp_dir();
+        // Reproduce la salida real de libtest con exit 0, que es exactamente lo
+        // que hace `cargo test <nombre-inexistente>`.
+        // Las comillas simples de sh conservan los saltos de linea tal cual, asi
+        // que la salida real entra entera sin escapes que la desfiguren.
+        let comando = format!("printf '%s' '{FILTRO_VACIO_REAL}'");
+        let (estado, exit, _, salida) =
+            ejecutar(&comando, &dir, std::time::Duration::from_secs(30));
+        assert_eq!(estado, Estado::Vacio);
+        assert_eq!(exit, Some(0));
+        assert!(
+            salida.contains("0 passed"),
+            "la salida tiene que quedar como evidencia, y quedo: {salida:?}"
+        );
+    }
+
+    #[test]
+    fn ejecutar_should_measure_before_trimming_the_output() {
+        // El detector tiene que medir sobre la salida COMPLETA. Si mide sobre la
+        // recortada (ultimas LINEAS_SALIDA), cualquier comando que imprima algo
+        // despues del resumen de libtest lo empuja fuera de la ventana y el AC
+        // vuelve a salir verde sin haber medido nada.
+        //
+        // No es hipotetico: `cargo test` manda los diagnosticos de compilacion
+        // por stderr, y `leer_salida` pega stderr DESPUES de stdout, asi que el
+        // ruido queda siempre en la cola.
+        let dir = std::env::temp_dir();
+        let relleno: String = (0..LINEAS_SALIDA + 5)
+            .map(|i| format!("warning: ruido numero {i}\n"))
+            .collect();
+        let comando = format!("printf '%s' '{FILTRO_VACIO_REAL}'; printf '%s' '{relleno}'");
+        let (estado, _, _, _) = ejecutar(&comando, &dir, std::time::Duration::from_secs(30));
+        assert_eq!(
+            estado,
+            Estado::Vacio,
+            "el resumen de libtest quedo fuera de las ultimas {LINEAS_SALIDA} lineas y el \
+             detector se apago solo"
+        );
+    }
+
+    #[test]
+    fn ejecutar_should_keep_a_real_test_run_green() {
+        let dir = std::env::temp_dir();
+        let comando = "printf 'running 1 test\\ntest result: ok. 1 passed; 0 failed; 0 ignored; \
+                       0 measured; 0 filtered out; finished in 0.01s\\n'";
+        let (estado, _, _, _) = ejecutar(comando, &dir, std::time::Duration::from_secs(30));
+        assert_eq!(estado, Estado::Verde);
+    }
+
+    #[test]
+    fn ejecutar_should_not_mark_a_non_test_command_as_vacio() {
+        let dir = std::env::temp_dir();
+        for comando in ["true", "echo hola", "printf ''"] {
+            let (estado, _, _, _) = ejecutar(comando, &dir, std::time::Duration::from_secs(30));
+            assert_eq!(estado, Estado::Verde, "no es un test: {comando}");
+        }
+    }
+
+    #[test]
+    fn render_should_count_empty_runs_apart_from_red() {
+        let r = |ac: &str, estado: Estado| Resultado {
+            ac: ac.to_string(),
+            comando: Some("cargo test lo_que_sea".to_string()),
+            estado,
+            exit: Some(0),
+            duracion_ms: 1,
+            salida: if estado == Estado::Verde {
+                String::new()
+            } else {
+                "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out"
+                    .to_string()
+            },
+        };
+        let texto = render_reporte(
+            "44",
+            "ts",
+            &[
+                r("AC-1", Estado::Verde),
+                r("AC-2", Estado::Vacio),
+                r("AC-3", Estado::Rojo),
+            ],
+        );
+        assert!(
+            texto.contains("1 verde(s), 1 en rojo, 0 manual(es), 1 sin casos."),
+            "el resumen esconde los vacios dentro de los rojos:\n{texto}"
+        );
+        assert!(texto.contains("| AC-2 | vacio |"));
+        // Y su salida tiene que estar, que es lo que deja ver POR QUE no midio.
+        assert!(texto.contains("### AC-2 (vacio)"));
+        assert!(texto.contains("0 passed"));
+    }
+
+    #[test]
+    fn rojos_del_reporte_should_fail_closed_on_an_unknown_estado() {
+        // La garantia que el AC-11 promete no la puede dar `ESTADOS`, que es un
+        // array escrito a mano: una variante nueva que nadie agregue ahi
+        // compila y pasa la suite. Lo que la da es que el LECTOR no deje pasar
+        // lo que no entiende.
+        let texto = "\
+# Verificacion de AC - Feature #1
+
+| AC | Estado | Comando | Exit | ms |
+| --- | --- | --- | --- | --- |
+| AC-1 | verde | `true` | 0 | 1 |
+| AC-2 | sospechoso | `algo` | 0 | 1 |
+";
+        assert_eq!(rojos_del_reporte(texto), vec!["AC-2".to_string()]);
+    }
+
+    #[test]
+    fn rojos_del_reporte_should_include_empty_runs() {
+        let texto = render_reporte(
+            "44",
+            "ts",
+            &[Resultado {
+                ac: "AC-7".to_string(),
+                comando: Some("cargo test no_existe".to_string()),
+                estado: Estado::Vacio,
+                exit: Some(0),
+                duracion_ms: 1,
+                salida: "test result: ok. 0 passed".to_string(),
+            }],
+        );
+        assert_eq!(rojos_del_reporte(&texto), vec!["AC-7".to_string()]);
     }
 }

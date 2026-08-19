@@ -681,6 +681,28 @@ cero coincidencias **sale 0** (un nombre mal escrito da verde sin ejecutar nada)
 y `... | grep -c ... || true` **nunca falla**. Un comando que no puede fallar no
 verifica: decora.
 
+### `vacio`: la primera de esas dos trampas ya no depende de que te acuerdes (feature #44)
+
+La #23 encontró que `cargo test <nombre-inexistente>` sale 0, lo arregló a mano
+renombrando los tests y dejó escrita la advertencia de arriba. Cinco features
+después volvió a pasar: el **AC-12 de la #28** declaraba
+`consolidar_without_aplicar_should_not_touch_anything`, esa función no existía, y
+el invariante más citado de ese comando quedó registrado verde sin nada detrás.
+
+Desde la #44 `verify` mira la **salida** además del exit code. Si reconoce el
+formato de libtest y la suma de `passed` es **cero**, el AC queda en `vacio`:
+
+```
+26 verde(s), 0 en rojo, 0 manual(es), 1 sin casos.
+```
+
+`vacio` **bloquea el cierre** igual que un rojo y se cuenta aparte para no
+esconderse entre ellos. El detector mira la forma de la SALIDA, no el texto del
+comando (así cubre un `cargo test` adentro de un script), y **no opina** cuando
+la salida no tiene líneas `test result:` — un `grep`, un `bash` o un compilador
+siguen exactamente como antes. No hay flag para apagarlo: si un AC de verdad se
+verifica a mano, el camino honesto es no declarar `Comando:` y dejarlo `manual`.
+
 ## journey: el mapa de lo aprendido (feature #22)
 
 Último hito del PRD de aprendizaje. `sh harness_cli journey` cruza los tres

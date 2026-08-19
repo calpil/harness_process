@@ -3917,3 +3917,189 @@ fn blocked_features_should_stay_blocked() {
         .stdout(predicate::str::contains("[blocked]"))
         .stdout(predicate::str::contains("superseded").not());
 }
+
+// ---------------------------------------------------------------------------
+// Feature #44: un AC que salio 0 sin ejecutar ningun caso no es evidencia.
+// ---------------------------------------------------------------------------
+
+/// La salida real de libtest cuando el filtro no matchea nada, tal como la
+/// imprimio `cargo test consolidar_without_aplicar_should_not_touch_anything`.
+/// Sale 0, dice `ok`, y no corrio nada: ese es el falso verde.
+/// En UNA linea con `\n` escapados, porque un `Comando:` del spec es una sola
+/// linea: lo multilinea lo arma `printf` al ejecutarse, no el spec.
+const COMANDO_FILTRO_VACIO: &str = "printf 'running 0 tests\\ntest result: ok. 0 passed; \
+     0 failed; 0 ignored; 0 measured; 322 filtered out; finished in 0.00s\\n'";
+
+#[test]
+fn verify_should_mark_an_ac_that_ran_nothing_as_vacio() {
+    let (dir, bin, _spec) = feature_con_spec(&format!(
+        "- AC-1: el que no midio nada.\n  Comando: `{COMANDO_FILTRO_VACIO}`\n\
+         - AC-2: el que si.\n  Comando: `true`"
+    ));
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    // Exit 1: `vacio` bloquea, igual que un rojo.
+    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    assert!(reporte.contains("| AC-1 | vacio |"), "{reporte}");
+    assert!(reporte.contains("| AC-2 | verde |"), "{reporte}");
+    // El resumen lo muestra aparte en vez de esconderlo entre los rojos.
+    assert!(reporte.contains("1 sin casos"), "{reporte}");
+}
+
+#[test]
+fn close_should_block_on_an_empty_verification() {
+    // AC-10: el cierre lee el reporte y trata `vacio` como bloqueante, sin
+    // ejecutar nada. Nombra el AC para que se sepa cual arreglar.
+    let (dir, bin, _spec) = feature_con_spec(&format!(
+        "- AC-1: el que no midio nada.\n  Comando: `{COMANDO_FILTRO_VACIO}`"
+    ));
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    enable_verify_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("AC-1"));
+}
+
+// ---------------------------------------------------------------------------
+// Feature #44, la deuda que destapa: el AC-12 de la #28 declaraba ESTE nombre
+// y la funcion no existia. `cargo test` con un filtro que no matchea sale 0, y
+// asi el invariante mas citado de la #28 quedo "verde" sin nada detras.
+// ---------------------------------------------------------------------------
+
+/// Un backend de mentira que SIEMPRE devuelve un candidato valido. Es la parte
+/// que importa: con un backend que no propone nada, el test seria tautologico
+/// (no se escribe nada porque no hay nada que escribir). Aca hay algo para
+/// fusionar y aun asi no se toca el arbol.
+fn backend_falso(dir: &Path, candidato: &str) -> PathBuf {
+    let script = dir.join("backend-falso.sh");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\nprintf '%s' '{candidato}'\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script
+}
+
+fn escribir_leccion(dir: &Path, nombre: &str, trigger: &str) {
+    let lecciones = dir.join("docs/lecciones");
+    std::fs::create_dir_all(&lecciones).unwrap();
+    std::fs::write(
+        lecciones.join(format!("{nombre}.md")),
+        format!(
+            "---\nnombre: {nombre}\ndescripcion: Sobre {nombre}.\ntriggers: [{trigger}]\n\
+             relacionadas: []\norigen: [1]\nusos: 0\nultimo_uso:\n\
+             ultima_actualizacion: 2026-08-19\nestado: activa\n---\n\n\
+             ## Cuando aplica\n\nCuando {trigger}.\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// Huella del arbol: rutas y contenido. Compara lo que un backup o una
+/// reescritura cambiarian.
+fn huella(dir: &Path) -> Vec<(String, String)> {
+    fn recorrer(base: &Path, dir: &Path, out: &mut Vec<(String, String)>) {
+        let Ok(entradas) = std::fs::read_dir(dir) else { return };
+        for e in entradas.flatten() {
+            let ruta = e.path();
+            if ruta.is_dir() {
+                recorrer(base, &ruta, out);
+            } else if let Ok(texto) = std::fs::read_to_string(&ruta) {
+                let rel = ruta.strip_prefix(base).unwrap_or(&ruta);
+                out.push((rel.display().to_string(), texto));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    recorrer(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
+#[test]
+fn consolidar_without_aplicar_should_not_touch_anything() {
+    // AC-12 de la feature #28, que hasta la #44 no tuvo test: sin `--aplicar`,
+    // cero escrituras, cero backups, el arbol byte a byte igual.
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path();
+    // `una-cosa` nace ya en forma de paraguas (union de triggers y puntero a la
+    // otra) para que el CONTROL de mas abajo pueda aplicar de verdad: lo que se
+    // mide aca es si se escribe o no, no el chequeo de paraguas de la #28.
+    escribir_leccion(raiz, "una-cosa", "alfa, beta");
+    escribir_leccion(raiz, "otra-cosa", "beta");
+    let paraguas = raiz.join("docs/lecciones/una-cosa.md");
+    let texto = std::fs::read_to_string(&paraguas).unwrap();
+    std::fs::write(&paraguas, format!("{texto}\nAbsorbe a [[otra-cosa]].\n")).unwrap();
+    // La regla tiene que estar encendida: si no, `consolidar` se salta todo y
+    // el test volveria a ser tautologico.
+    let lista = raiz.join("hp/feature_list.json");
+    std::fs::write(
+        &lista,
+        r#"{"features": [], "rules": {"consolidar_backend": "auto"}}"#,
+    )
+    .unwrap();
+    let falso = backend_falso(
+        raiz,
+        r#"{"candidatos":[{"miembros":["una-cosa","otra-cosa"],"motivo":"ensenan lo mismo","confianza":0.9}]}"#,
+    );
+
+    // La huella cubre docs/ Y el directorio del arnes: los backups del curador
+    // van a `<raiz>/hp/bkp` (usan `paths.root`, no la raiz del repo), asi que
+    // mirar solo `<raiz>/bkp` era mirar una ruta que nunca existe.
+    let instantanea = |raiz: &Path| {
+        let mut v = huella(&raiz.join("docs"));
+        v.extend(huella(&raiz.join("hp/bkp")));
+        v
+    };
+    let antes = instantanea(raiz);
+    cmd(&bin)
+        .args(["lecciones", "consolidar"])
+        .env("HARNESS_CONSOLIDAR_CMD", &falso)
+        .assert()
+        .success()
+        // Que haya propuesto algo y que ese algo haya sido ACEPTADO. `una-cosa`
+        // a secas no alcanzaba: el mensaje de descarte tambien nombra la
+        // leccion, asi que el test pasaba igual si `validar` rechazaba todo.
+        // "1 candidato(s) a consolidar" solo se imprime con candidatos vivos.
+        .stdout(predicate::str::contains("1 candidato(s) a consolidar"))
+        .stdout(predicate::str::contains("una-cosa + otra-cosa"));
+
+    assert_eq!(antes, instantanea(raiz), "la deteccion toco el arbol");
+    assert!(
+        !raiz.join("hp/bkp").exists(),
+        "la deteccion creo un backup (van a <raiz>/hp/bkp, no a <raiz>/bkp)"
+    );
+
+    // CONTROL: el mismo caso CON --aplicar si tiene que mover el arbol. Sin
+    // esto el test no discrimina — pasaria igual si `consolidar` estuviera
+    // roto y no hiciera nada nunca, que es exactamente como el AC-12 de la #28
+    // llego a estar verde sin existir.
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "una-cosa",
+            "--de",
+            "una-cosa,otra-cosa",
+            "--motivo",
+            "control del test: aca SI tiene que escribir",
+        ])
+        .env("HARNESS_CONSOLIDAR_CMD", &falso)
+        .assert()
+        .success();
+    assert_ne!(
+        antes,
+        instantanea(raiz),
+        "con --aplicar el arbol tenia que cambiar: el test no esta midiendo nada"
+    );
+}

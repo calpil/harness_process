@@ -717,6 +717,37 @@ Un AC **sin** `Comando:` queda como **manual**: lo verifica el reviewer, igual q
 siempre, y **no cuenta como fallo**. Por eso los specs ya escritos siguen valiendo
 sin tocar una linea.
 
+### `vacio`: el AC que salio 0 sin medir nada (feature #44)
+
+`cargo test un_nombre_que_no_existe` imprime `running 0 tests`, dice
+`test result: ok` y **sale 0**. Un AC asi no esta verificado: esta **sin medir**,
+y hasta la #44 quedaba registrado como verde. Le paso al AC-12 de la feature
+#28, que declaraba el invariante mas citado de ese comando —sin `--aplicar` no
+toca nada— contra un test que no existia.
+
+Por eso `verify` mira la **salida** ademas del exit code:
+
+```
+AC-1  $ cd rust && cargo test consolidar_without_aplicar_should_not_touch_anything
+       [??] vacio (312 ms)
+
+26 verde(s), 0 en rojo, 0 manual(es), 1 sin casos.
+Un AC `sin casos` corrio y salio 0, pero no ejecuto ningun test:
+revisa que el nombre del filtro exista de verdad.
+```
+
+`vacio` **bloquea el cierre** igual que un rojo, y se cuenta aparte en el resumen
+para no esconderlo entre ellos. Tres cosas que el detector NO hace:
+
+- **No mira el texto del comando.** Mira la forma de la salida, asi que un
+  `cargo test` adentro de un script tambien queda cubierto, y un comando que se
+  llama "test" sin serlo, no.
+- **No opina de lo que no entiende.** Si la salida no tiene lineas
+  `test result:` —un `grep`, un `bash`, un compilador— el estado no cambia.
+- **No se apaga con un flag.** Un AC que no midio nada no es una preferencia; si
+  de verdad se verifica a mano, el camino honesto es no declarar `Comando:` y
+  dejarlo en `manual`.
+
 ### Las tres barreras
 
 `verify` es el **unico** comando del arnes que ejecuta shell, y eso define su
