@@ -682,6 +682,14 @@ fn feature_counts(data: &Value, slug: &str) -> (usize, usize) {
         if feature_prd_slug(f) != slug {
             continue;
         }
+        // Una feature `superseded` no cuenta NI arriba NI abajo (feature #37,
+        // decision del usuario OBS-1): no es trabajo hecho —nunca tuvo spec ni
+        // evidencia propia— ni pendiente, es una entrada que se plego en otra.
+        // Contarla solo en el denominador hacia que el PRD pareciera menos
+        // completo de lo que esta.
+        if f.get("status").and_then(Value::as_str) == Some("superseded") {
+            continue;
+        }
         total += 1;
         if f.get("status").and_then(Value::as_str) == Some("done") {
             done += 1;
@@ -1113,5 +1121,37 @@ mod tests {
         let master = resolve(&paths, MASTER).unwrap();
         let out = render_tree(&paths, &json!({"features": []}), &master);
         assert!(out.contains("[!] declara Padre: ventas (su lugar dice master)"), "{out}");
+    }
+}
+
+#[cfg(test)]
+mod tests_superseded {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn prd_tree_should_ignore_superseded_features() {
+        // Decision del usuario (OBS-1 de la #37): una feature absorbida no
+        // cuenta ni arriba ni abajo. Contarla solo en el denominador hacia que
+        // el PRD pareciera menos completo de lo que esta.
+        let data = json!({"features": [
+            {"id": 1, "name": "hecha", "status": "done"},
+            {"id": 2, "name": "pendiente", "status": "pending"},
+            {"id": 3, "name": "absorbida", "status": "superseded", "superseded_by": "1"},
+            {"id": 4, "name": "trabada", "status": "blocked"}
+        ]});
+        // Sin la superseded: 1 done sobre 3 (done + pending + blocked).
+        assert_eq!(feature_counts(&data, ""), (1, 3));
+    }
+
+    #[test]
+    fn prd_tree_should_still_count_blocked_features() {
+        // Regresion: `blocked` sigue contando en el total, como siempre.
+        let data = json!({"features": [
+            {"id": 1, "status": "done"},
+            {"id": 2, "status": "blocked"}
+        ]});
+        assert_eq!(feature_counts(&data, ""), (1, 2));
     }
 }

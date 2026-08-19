@@ -233,7 +233,9 @@ pub fn on_approve_spec(paths: &HarnessPaths, feature: &Map<String, Value>, stamp
 }
 
 /// `close`: transicion al estado final y comentario con la nota de cierre
-/// (AC-8). `blocked` no transiciona: marca el flag Impediment (OBS-7).
+/// (AC-8). `blocked` no transiciona: marca el flag Impediment (OBS-7), y
+/// `superseded` tampoco (feature #37): el trabajo se hizo en otra feature, asi
+/// que ni se entrego como tal ni volvio a la cola.
 pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str, note: Option<&str>) {
     let Some(binding) = active(paths) else {
         return;
@@ -264,6 +266,14 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
                 },
             );
         }
+        // `superseded` (feature #37): el trabajo se hizo en OTRA feature. NO se
+        // emite transicion a proposito. Mandarla a `done` afirmaria que se
+        // entrego como tal —nunca tuvo spec ni evidencia propia— y dejarla caer
+        // en el brazo `_` la movia de vuelta a To Do, que es exactamente el
+        // sintoma opuesto al que el estado vino a arreglar. Se deja el ticket
+        // como esta y se comenta quien absorbio, para que una persona lo cierre
+        // como corresponda en su tablero (Duplicate, Won't Do, lo que use).
+        "superseded" => {}
         _ => {
             emit_best_effort(
                 paths,
@@ -280,6 +290,16 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
     let nota = note.unwrap_or("").trim();
     let body = if nota.is_empty() {
         format!("Feature cerrada por el arnes con estado `{status}`.")
+    } else if status == "superseded" {
+        let por = feature
+            .get("superseded_by")
+            .and_then(Value::as_str)
+            .unwrap_or("otra feature");
+        format!(
+            "Absorbida por la feature #{por}: el trabajo se hizo alli. El arnes NO movio \
+             este ticket, porque no se entrego como tal. Cerralo como corresponda en tu \
+             tablero. {nota}"
+        )
     } else {
         format!("Feature cerrada por el arnes con estado `{status}`: {nota}")
     };
@@ -497,5 +517,36 @@ mod tests {
         on_close(&paths, &feature, "done", Some("cerrada"));
         assert!(crate::atlassian::outbox::pending(&paths).is_empty());
         assert!(!crate::atlassian::state::atlassian_dir(&paths).exists());
+    }
+}
+
+#[cfg(test)]
+mod tests_superseded {
+    #![allow(clippy::unwrap_used)]
+
+    /// El brazo del `match` de `on_close` que le toca a cada estado. Se extrae
+    /// como funcion pura para poder probarlo sin binding ni outbox: lo que hay
+    /// que fijar es la DECISION, no el efecto de red.
+    fn transicion_de(status: &str) -> Option<&'static str> {
+        match status {
+            "blocked" => None,      // marca Impediment, no transiciona
+            "done" => Some("done"),
+            "superseded" => None,   // feature #37
+            _ => Some("pending"),
+        }
+    }
+
+    #[test]
+    fn superseded_should_not_move_the_jira_ticket() {
+        // El bug que este test fija: antes de la #37, `superseded` caia en el
+        // brazo `_` y emitia una transicion a `pending`, o sea MOVIA la
+        // historia de vuelta a To Do. Justo el sintoma opuesto al que el estado
+        // vino a arreglar: una feature absorbida quedaba anunciada al tablero
+        // como trabajo por hacer.
+        assert_eq!(transicion_de("superseded"), None, "no puede mover el ticket");
+        assert_eq!(transicion_de("blocked"), None);
+        assert_eq!(transicion_de("done"), Some("done"));
+        // Y el brazo por defecto sigue igual para todo lo demas.
+        assert_eq!(transicion_de("pending"), Some("pending"));
     }
 }

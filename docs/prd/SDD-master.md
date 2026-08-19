@@ -72,6 +72,14 @@ el detalle a su propio ADR y enlazalo aqui.>
 
 ## 5. Datos
 
+**Los estados de una feature** (`feature_list.json`). Son cinco y significan
+cosas distintas: `pending` (sin empezar, `next` la ofrece), `in_progress` (una
+sola a la vez), `done` (hecha, con spec aprobado y su evidencia), `blocked`
+(trabada por algo externo) y `superseded` (el trabajo se hizo en OTRA feature,
+que se nombra en `superseded_by` y se valida al cerrar). Solo `done` pasa por los
+cuatro gates de cierre; `superseded` no cuenta ni en el numerador ni en el
+denominador de `prd tree`, porque no es trabajo hecho ni pendiente.
+
 - Entidades principales y su dueno: <...>
 - Migraciones: <como se aplican y como se revierten>
 - Retencion y datos sensibles: <que se guarda, cuanto tiempo, con que proteccion>

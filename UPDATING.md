@@ -467,6 +467,22 @@ coincide con el archivo **bloquean**; la falta de `triggers` solo avisa. Sin
 `docs/lecciones/` el bloque entero se omite, así que una instalación que no use
 lecciones no ve ninguna diferencia.
 
+## Estado `superseded` (feature #37)
+
+`close --status superseded --absorbida-por <id>` para una entrada cuyo trabajo se
+hizo en OTRA feature. No es `done` (nunca tuvo spec propio) ni `blocked` (no está
+trabada).
+
+- **Exige la referencia** y la valida: no se puede citar una feature inexistente
+  ni absorberse a sí misma. Queda como campo `superseded_by`.
+- **No pasa por los gates de `done`**: spec, lección, verify y documentos viven
+  en la feature que absorbió.
+- `status` la muestra como `[superseded por #N]`; `next` no la ofrece;
+  **`prd tree` no la cuenta ni arriba ni abajo**; `journey` no la reporta como
+  cierre sin lección.
+- La migración de `blocked` a `superseded` es **explícita**: el arnés no puede
+  adivinar cuáles estaban absorbidas.
+
 ## Consolidacion de lecciones con LLM (feature #28)
 
 Aparece `sh harness_cli lecciones consolidar`, la **unica** parte del arnes que

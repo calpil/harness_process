@@ -3769,3 +3769,151 @@ fn consolidar_should_be_undoable_with_rollback() {
         "rollback no devolvio la leccion al catalogo activo"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #37: el estado `superseded`, para lo que se hizo en OTRA feature.
+//
+// Varios de estos son tests de REGRESION: fijan que agregar un valor al campo
+// `status` no rompe a los cuatro consumidores que ya lo miran. Sin ellos, "no
+// rompe nada" seria una afirmacion; con ellos, es un contrato.
+// ---------------------------------------------------------------------------
+
+fn dos_features(bin: &Path) {
+    cmd(bin).args(["add", "--name", "absorbida"]).assert().success();
+    cmd(bin).args(["add", "--name", "absorbente"]).assert().success();
+}
+
+#[test]
+fn close_should_accept_the_superseded_status() {
+    let (dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .assert()
+        .success();
+    let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    assert_eq!(v["features"][0]["status"], "superseded");
+}
+
+#[test]
+fn superseded_should_demand_the_absorbing_feature() {
+    // La trazabilidad es el punto entero del estado: sin ella es `blocked`.
+    let (_dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--absorbida-por"));
+}
+
+#[test]
+fn superseded_should_refuse_an_unknown_absorber() {
+    // Una referencia rota es peor que ninguna.
+    let (_dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "99"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no existe"));
+    // Y tampoco puede absorberse a si misma.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "1"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("a si misma"));
+}
+
+#[test]
+fn superseded_should_record_the_absorbing_feature() {
+    let (dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        v["features"][0]["superseded_by"], "2",
+        "la trazabilidad tiene que ser un campo, no prosa en `note`"
+    );
+}
+
+#[test]
+fn superseded_should_not_trigger_the_done_gates() {
+    // REGRESION: con las cuatro reglas de `done` encendidas, cerrar como
+    // superseded pasa igual. El trabajo y su evidencia viven en la que
+    // absorbio; exigirle spec propio seria justo el problema que el estado
+    // vino a resolver.
+    let (dir, bin) = sandbox_with_binary();
+    let hp = dir.path().join("hp");
+    dos_features(&bin);
+    enable_spec_rule(&hp);
+    enable_leccion_rule(&hp);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn next_should_not_offer_a_superseded_feature() {
+    // REGRESION: `next` solo ofrece `pending`, asi que esto ya era cierto antes
+    // de la #37. El test lo fija.
+    //
+    // Y DISCRIMINA: no alcanza con que la superseded no aparezca (eso pasaria
+    // igual con `--status kfjhds`, y seria el detector-de-cambios que la regla
+    // 3 de docs/conventions.md prohibe). Se comprueba ADEMAS que la pending SI
+    // se ofrezca, en el mismo catalogo: asi el test distingue "next filtra
+    // bien" de "next no ofrece nada".
+    let (_dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .arg("next")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("absorbente"))
+        .stdout(predicate::str::contains("absorbida\"").not());
+}
+
+#[test]
+fn status_should_show_who_absorbed_a_superseded_feature() {
+    let (_dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[superseded por #2]"));
+}
+
+#[test]
+fn blocked_features_should_stay_blocked() {
+    // REGRESION: la migracion es explicita, no automatica. Una feature trabada
+    // de verdad no se toca.
+    let (_dir, bin) = sandbox_with_binary();
+    dos_features(&bin);
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "esperando a alguien"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[blocked]"))
+        .stdout(predicate::str::contains("superseded").not());
+}

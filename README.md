@@ -189,6 +189,36 @@ Regla de mantenedor: cualquier cambio de comportamiento vive en `rust/src/` con
 sus tests (`cargo test`, `cargo clippy -- -D warnings`) verdes antes de push.
 Detalles en `templates/UPDATING.md`.
 
+## superseded: lo que se hizo, pero en otra feature (feature #37)
+
+El arnes tenia cuatro estados y le faltaba una palabra. Cuando la #36 agrupo seis
+entradas del backlog en una sola feature, esas seis no eran `done` —nunca
+tuvieron spec ni evidencia propia— ni `blocked` —no estaban trabadas—. Quedaron
+en `blocked`, que sugeria un problema donde no lo habia, y ademas inflaban el
+denominador de `prd tree`.
+
+```bash
+sh harness_cli close --feature 31 --status superseded --absorbida-por 36
+```
+
+**Exige decir cual feature absorbio el trabajo**, y esa referencia se valida: no
+se puede citar una feature inexistente, ni absorberse a si misma. Queda como
+campo `superseded_by`, no como prosa en `note`.
+
+| Como se lee | |
+| --- | --- |
+| `status` | `#31 [superseded por #36] close_exit_codes_unificados` |
+| `next` | no la ofrece: no es trabajo pendiente |
+| `prd tree` | **no la cuenta ni arriba ni abajo**: no es trabajo hecho ni pendiente |
+| `journey` | no la reporta como cierre sin leccion: su aprendizaje se declaro en la que absorbio |
+
+Y **no pasa por los gates de `done`** —spec, leccion, verify, documentos— a
+proposito: el trabajo y su evidencia viven en la feature que la absorbio.
+Exigirle spec propio seria exactamente el problema que el estado vino a resolver.
+
+La migracion es **explicita**: el arnes no puede saber cuales de tus `blocked`
+estaban absorbidas y cuales trabadas de verdad.
+
 ## lecciones consolidar: cuando dos lecciones cuentan lo mismo (feature #28)
 
 La guia manda **patchear el paraguas existente** antes de crear una leccion

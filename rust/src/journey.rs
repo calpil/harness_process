@@ -688,3 +688,37 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod tests_superseded {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn journey_should_not_flag_a_superseded_feature() {
+        // Regresion: `journey` solo mira `done` (journey.rs:260), asi que una
+        // feature absorbida no puede aparecer como "cierre sin leccion". Su
+        // aprendizaje se declaro en la que la absorbio.
+        let dir = tempfile::tempdir().unwrap();
+        let harness = dir.path().join("hp");
+        std::fs::create_dir_all(&harness).unwrap();
+        std::fs::write(harness.join(".harness_layout"), "subdir").unwrap();
+        std::fs::write(
+            harness.join("feature_list.json"),
+            serde_json::to_string_pretty(&json!({"features": [
+                {"id": 31, "name": "absorbida", "status": "superseded",
+                 "superseded_by": "36", "closed_at": "2026-08-18T00:00:00Z"}
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let paths = crate::paths::HarnessPaths::from_root(harness);
+        let mapa = construir(&paths);
+        assert!(
+            !mapa.huecos.iter().any(|h| h.detalle.contains("absorbida")),
+            "reporto una feature absorbida como hueco: {:?}",
+            mapa.huecos
+        );
+    }
+}

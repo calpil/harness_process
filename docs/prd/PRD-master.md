@@ -209,3 +209,4 @@ con su fecha.>
 - #30 paridad_ps1_verificable -> done 2026-08-18 · spec: docs/spec-feature-30-paridad-ps1-verificable.md · impl: docs/impl-30.md
 - #36 deudas_anotadas_del_arnes -> done 2026-08-18 · spec: docs/spec-feature-36-deudas-anotadas-del-arnes.md · impl: docs/impl-36.md
 - #29 prd_y_sdd_siempre_al_dia -> done 2026-08-18 · spec: docs/spec-feature-29-prd-y-sdd-siempre-al-dia.md · impl: docs/impl-29.md
+- #37 estado_superseded -> done 2026-08-18 · spec: docs/spec-feature-37-estado-superseded.md · impl: docs/impl-37.md

@@ -25,17 +25,20 @@ else:
     print("ausente")
 PY
 )"
-        # `blocked` es el estado correcto: el trabajo esta hecho pero en OTRA
-        # feature. `done` lo rechaza el gate de spec, y con razon — estas
-        # entradas nunca tuvieron spec propio.
+        # `superseded` es el estado correcto desde la feature #37: el trabajo
+        # esta hecho pero en OTRA feature, y el estado lo dice nombrandola.
+        # Antes de la #37 no existia esa palabra y hubo que usar `blocked`, que
+        # se sigue aceptando para instalaciones que no migraron. `done` lo
+        # rechaza el gate de spec, y con razon: estas entradas nunca tuvieron
+        # spec propio.
         case "$estado" in
-            done|blocked|ausente) ;;
+            done|superseded|blocked|ausente) ;;
             *) abiertas="$abiertas #$id($estado)" ;;
         esac
     done
     [ -z "$abiertas" ] \
         || fail "backlog-cerrado: quedan entradas abiertas que esta feature ya pago:$abiertas"
-    ok "backlog-cerrado: las seis entradas quedaron cerradas (absorbidas por la #36), sin duplicar el trabajo"
+    ok "backlog-cerrado: las seis entradas quedaron cerradas (superseded por la #36), sin duplicar el trabajo"
 }
 
 case "$MODO" in

@@ -38,6 +38,10 @@ implementas.
   `ya-esta` trae una cita que el binario verifica, pero un `no-aplica` es una
   afirmacion del agente. Si la feature cambio lo que el producto promete y el
   bloque del PRD dice `no-aplica`, eso es `changes_requested`.
+- **Entradas absorbidas**: si el trabajo de una entrada del backlog se hizo
+  dentro de OTRA feature, se cierra con
+  `close --status superseded --absorbida-por <id>`, nunca con `blocked` (que
+  significa trabada) ni con `done` (que exige spec y evidencia propios).
 - **Rutas protegidas**: si el diff toca `docs/prd/**`, `docs/constitution.md` o
   cualquier ruta de `rules.rutas_protegidas`, el veredicto es `blocked` salvo que
   el usuario lo haya pedido explicitamente y quede registrado. Son sus

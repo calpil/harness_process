@@ -41,10 +41,17 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
         } else {
             services
         };
+        // `superseded` se lee con quien la absorbio: sin eso, el estado no
+        // dice nada mas que `blocked` (feature #37).
+        let estado = match f.get("superseded_by").and_then(Value::as_str) {
+            Some(por) if py_str(f.get("status")) == "superseded" => {
+                format!("superseded por #{por}")
+            }
+            _ => py_str(f.get("status")),
+        };
         println!(
-            "  #{} [{}] {} ({services})",
+            "  #{} [{estado}] {} ({services})",
             py_str(f.get("id")),
-            py_str(f.get("status")),
             py_str(f.get("name"))
         );
     }

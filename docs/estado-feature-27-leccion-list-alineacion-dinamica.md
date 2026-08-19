@@ -1,5 +1,5 @@
 # Estado archivado - Feature #27: leccion_list_alineacion_dinamica
-Cerrada: 2026-08-18T03:08:42Z - status=blocked - Absorbida por la feature #36
+Cerrada: 2026-08-18T22:58:45Z - status=superseded - El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.
 
 ---
 

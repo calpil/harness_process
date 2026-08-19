@@ -180,6 +180,15 @@ salvo cuando tiene algo que decir. Su estado local vive en `progress/`:
   Cambiar de feature reinicia la cuenta, y sin `docs/lecciones/` el archivo ni
   siquiera se crea.
 
+### Estados de una feature
+
+`pending` / `in_progress` / `done` / `blocked` / `superseded`. El campo es un
+`&str` y **no** un enum: catorce lugares lo comparan por igualdad contra un valor
+concreto, lo que hace barato agregar uno nuevo (la #37 agrego `superseded` con un
+cambio real de una linea) y a la vez significa que un valor invalido escrito a
+mano solo lo detecta clap. `superseded` exige `superseded_by`, que se valida
+contra el backlog al cerrar.
+
 ### Exit codes (estables para hooks)
 
 - `0`: ok (o gate apagado / spec aprobado y fresco).

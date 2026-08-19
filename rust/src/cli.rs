@@ -35,8 +35,11 @@ pub enum Command {
     Close {
         #[arg(long)]
         feature: String,
-        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["done", "blocked", "pending"]))]
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["done", "blocked", "pending", "superseded"]))]
         status: String,
+        /// Feature que absorbio este trabajo (obligatorio con --status superseded)
+        #[arg(long = "absorbida-por")]
+        absorbida_por: Option<String>,
         #[arg(long)]
         note: Option<String>,
         /// Que se aprendio: la clase de `docs/lecciones/`, o `ninguna` (#17).
@@ -460,6 +463,7 @@ pub fn run() -> anyhow::Result<()> {
             feature,
             status,
             note,
+            absorbida_por,
             leccion,
             leccion_motivo,
         } => commands::close::run(
@@ -467,6 +471,7 @@ pub fn run() -> anyhow::Result<()> {
             &feature,
             &status,
             note.as_deref(),
+            absorbida_por.as_deref(),
             leccion.as_deref(),
             leccion_motivo.as_deref(),
         ),

@@ -4,6 +4,7 @@ use std::io::Write;
 
 use serde_json::{Value, json};
 
+use crate::exit::Exit;
 use crate::features::{feature_at, feature_mut, find_feature_index, load_features, save_features};
 use crate::lecciones;
 use crate::memories::update_memories;
@@ -13,6 +14,10 @@ use crate::prd;
 use crate::progress::{log, now_stamp};
 use crate::pycompat::{py_str, relpath};
 use crate::spec::{close_requires_spec, spec_gate, spec_path};
+
+/// Estado de una entrada cuyo trabajo se hizo en OTRA feature (#37). No es
+/// `done` (nunca tuvo spec ni evidencia propia) ni `blocked` (no esta trabada).
+pub const SUPERSEDED: &str = "superseded";
 use crate::verificacion;
 
 pub fn run(
@@ -20,11 +25,49 @@ pub fn run(
     fid: &str,
     status: &str,
     note: Option<&str>,
+    absorbida_por: Option<&str>,
     leccion: Option<&str>,
     leccion_motivo: Option<&str>,
 ) -> anyhow::Result<()> {
     let mut data = load_features(paths)?;
     let idx = find_feature_index(&data, fid)?;
+    // Estado `superseded` (feature #37): el trabajo se hizo en OTRA feature.
+    // Exige decir cual, y esa referencia se valida: una entrada que dice
+    // "absorbida" sin decir por quien es una nota en prosa, no trazabilidad.
+    // No pasa por los gates de `done` a proposito — el spec, la leccion, el
+    // reporte de verify y la propuesta de documentos viven en la que absorbio.
+    let absorbida = if status == SUPERSEDED {
+        let Some(por) = absorbida_por.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!(
+                    "--status superseded exige --absorbida-por <id>: hay que decir QUE feature\n    \
+                     absorbio este trabajo, o el estado no significa nada.\n    \
+                     Ejemplo: sh harness_cli close --feature {fid} --status superseded --absorbida-por 36"
+                )),
+            }
+            .into());
+        };
+        if find_feature_index(&data, por).is_err() {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!(
+                    "--absorbida-por {por}: esa feature no existe. Una referencia rota es peor que ninguna."
+                )),
+            }
+            .into());
+        }
+        if por == fid {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!("--absorbida-por {por}: una feature no se absorbe a si misma.")),
+            }
+            .into());
+        }
+        Some(por.to_string())
+    } else {
+        None
+    };
     // Gate SDD: cerrar como done exige spec aprobado por el usuario; se valida
     // ANTES de mutar la feature. blocked/pending no gatean (valvula de escape
     // para abortar/aparcar).
@@ -61,6 +104,9 @@ pub fn run(
         feature.insert("closed_at".to_string(), json!(stamp.clone()));
         if !note_text.is_empty() {
             feature.insert("note".to_string(), json!(note_text.clone()));
+        }
+        if let Some(por) = &absorbida {
+            feature.insert("superseded_by".to_string(), json!(por));
         }
         // Campos OPCIONALES (feature #17): sin declaracion la entrada queda como
         // siempre, asi que las features ya cerradas no se migran ni se tocan.
