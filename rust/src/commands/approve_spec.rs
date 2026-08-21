@@ -12,7 +12,7 @@
 
 use crate::exit::Exit;
 use crate::features::{
-    active_feature_index, feature_at, feature_mut, load_features, save_features,
+    active_feature_index_con_foco, feature_at, feature_mut, load_features, save_features,
 };
 use crate::memories::hub_register;
 use crate::paths::HarnessPaths;
@@ -29,7 +29,13 @@ pub fn run(
     nota: Option<&str>,
 ) -> anyhow::Result<()> {
     let mut data = load_features(paths)?;
-    let idx = active_feature_index(&data, fid)?;
+    let idx = active_feature_index_con_foco(paths, &data, fid)?;
+    // Feature #47: los docs (spec, plan, evidencia) viven en el worktree de la
+    // feature, no en el directorio desde el que se corre el comando.
+    let paths = &match feature_at(&data, idx).as_object() {
+        Some(f) => paths.para_feature(f),
+        None => paths.para_feature(&serde_json::Map::new()),
+    };
     let (feature_id, path, state) = {
         let Some(feature) = feature_at(&data, idx).as_object() else {
             anyhow::bail!("feature_list.json: feature invalida");

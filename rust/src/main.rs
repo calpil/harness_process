@@ -12,6 +12,7 @@ mod documentos;
 mod exit;
 mod doctor;
 mod features;
+mod git;
 mod graph;
 mod graphify;
 mod journey;

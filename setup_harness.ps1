@@ -936,6 +936,16 @@ off with `HARNESS_ATLASSIAN_AUTO=0` or `"auto": false` in `atlassian.json`. If t
 missing and the user wants Jira/Confluence, ASK which project and space this
 repo belongs to: the harness never guesses. See `docs/atlassian-integracion.md`.
 
+Parallel features (#47): `start` gives each feature its own GitFlow branch
+(`feature/<id>-<slug>`, or `bugfix/` when loaded with `add --kind bug`) and its
+own worktree next to the repo (`../<repo>-wt/<id>-<slug>`), so two
+implementations never share files. Work INSIDE that worktree: commands infer the
+feature from the folder and the spec, plan and evidence live on its branch. The
+backlog and `__HREL__progress/` stay single (main checkout). Closing as `done`
+requires the target branch — `close --feature <id> --status done --to <branch>`;
+the harness never picks it: without `--to` it refuses and you must ASK THE USER.
+`start --sin-worktree` keeps the classic single-folder mode.
+
 The Unix entry points remain available through `setup_harness.sh` and
 `sh "__HREL__harness_cli"`. On Windows, install with `setup_harness.ps1`;
 Git for Windows Bash remains required by the existing POSIX project hooks.

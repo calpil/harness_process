@@ -8,7 +8,7 @@ use crate::graphify;
 use crate::memories::hub_register;
 use crate::paths::HarnessPaths;
 use crate::plan::update_plan_sig;
-use crate::progress::{log, touch_autocheck_stamp};
+use crate::progress::log;
 use crate::pycompat::{mtime_f64, py_str};
 use crate::spec::update_spec_sig;
 
@@ -22,21 +22,30 @@ pub fn run(paths: &HarnessPaths, no_graphify: bool) -> anyhow::Result<()> {
 
 fn inner(paths: &HarnessPaths, no_graphify: bool) -> anyhow::Result<()> {
     let mut data = load_features(paths)?;
+    // Feature #47: con varias features activas, el autocheck trabaja sobre la
+    // que corresponde al worktree actual; si no hay forma de saberlo, se queda
+    // quieto (mejor no hacer nada que tocar la feature equivocada).
     let active = active_indices(&data);
-    if active.len() != 1 {
-        return Ok(());
-    }
-    let idx = active[0];
+    let idx = match active.as_slice() {
+        [] => return Ok(()),
+        [single] => *single,
+        _ => match crate::features::feature_por_worktree(paths, &data) {
+            Some(idx) => idx,
+            None => return Ok(()),
+        },
+    };
     let feature_id = {
         let feature = feature_mut(&mut data, idx)?;
         py_str(feature.get("id"))
     };
-    let last = mtime_f64(&paths.autocheck_stamp).unwrap_or(0.0);
+    let stamp = paths.autocheck_stamp_de(&feature_id);
+    let last = mtime_f64(&stamp).unwrap_or(0.0);
     // Vigila lo que el agente REALMENTE mantiene: el estado vivo (current.md)
     // y CUALQUIER doc del proyecto (docs/*.md).
     let mut watched: Vec<std::path::PathBuf> = Vec::new();
-    if paths.current.exists() {
-        watched.push(paths.current.clone());
+    let vivo = paths.current_de(&feature_id);
+    if vivo.exists() {
+        watched.push(vivo);
     }
     if paths.plans.is_dir() {
         for entry in std::fs::read_dir(&paths.plans)? {
@@ -79,7 +88,7 @@ fn inner(paths: &HarnessPaths, no_graphify: bool) -> anyhow::Result<()> {
     if !no_graphify {
         graphify::refresh_bg(&paths.repo_root);
     }
-    touch_autocheck_stamp(paths);
+    crate::progress::touch_autocheck_stamp_de(paths, &feature_id);
     println!("[autocheck] avance auto en feature #{feature_id}: {nota}");
     Ok(())
 }

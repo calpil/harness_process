@@ -20,17 +20,36 @@ use crate::spec::{close_requires_spec, spec_gate, spec_path};
 pub const SUPERSEDED: &str = "superseded";
 use crate::verificacion;
 
-pub fn run(
-    paths: &HarnessPaths,
-    fid: &str,
-    status: &str,
-    note: Option<&str>,
-    absorbida_por: Option<&str>,
-    leccion: Option<&str>,
-    leccion_motivo: Option<&str>,
-) -> anyhow::Result<()> {
+/// Todo lo que decide un cierre, junto: el estado, su justificacion y — desde
+/// la feature #47 — la rama a la que se integra.
+pub struct CierreOpts<'a> {
+    pub status: &'a str,
+    pub note: Option<&'a str>,
+    pub absorbida_por: Option<&'a str>,
+    pub leccion: Option<&'a str>,
+    pub leccion_motivo: Option<&'a str>,
+    /// Rama destino del `done` (GitFlow). Sin ella el arnes se niega: la
+    /// decide el USUARIO.
+    pub to: Option<&'a str>,
+}
+
+pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Result<()> {
+    let CierreOpts {
+        status,
+        note,
+        absorbida_por,
+        leccion,
+        leccion_motivo,
+        to,
+    } = opts;
     let mut data = load_features(paths)?;
     let idx = find_feature_index(&data, fid)?;
+    // Feature #47: los docs (spec, plan, evidencia) viven en el worktree de la
+    // feature, no en el directorio desde el que se corre el comando.
+    let paths = &match feature_at(&data, idx).as_object() {
+        Some(f) => paths.para_feature(f),
+        None => paths.para_feature(&serde_json::Map::new()),
+    };
     // Estado `superseded` (feature #37): el trabajo se hizo en OTRA feature.
     // Exige decir cual, y esa referencia se valida: una entrada que dice
     // "absorbida" sin decir por quien es una nota en prosa, no trazabilidad.
@@ -151,8 +170,12 @@ pub fn run(
     // No-destructivo: si current.md tiene estado real escrito a mano, archivalo
     // en docs/ ANTES de resetear.
     let mut archived_rel: Option<String> = None;
-    if paths.current.exists() {
-        let content = std::fs::read_to_string(&paths.current)?;
+    // Feature #47 (AC-11): se archiva el estado vivo DE ESTA feature. El de las
+    // otras activas no se toca — antes habia un unico current.md y cerrar una
+    // pisaba el de la otra (era el bug de la feature #45).
+    let vivo = paths.current_de(&feature_id);
+    if vivo.exists() {
+        let content = std::fs::read_to_string(&vivo)?;
         if !content.trim().is_empty() && !content.contains("Sin feature activa") {
             std::fs::create_dir_all(&paths.plans)?;
             let archived = paths
@@ -174,13 +197,10 @@ pub fn run(
             );
         }
     }
-    let mut current = String::from("# Estado Actual\n\nSin feature activa.\n\n## Evidencia\n\n-\n");
-    if let Some(rel) = &archived_rel {
-        current.push_str(&format!(
-            "\n_Estado de la feature #{feature_id} archivado en `{rel}`._\n"
-        ));
-    }
-    std::fs::write(&paths.current, current)?;
+    // El estado vivo de la feature cerrada desaparece (ya quedo archivado en
+    // docs/) y current.md se reescribe como indice de lo que sigue abierto.
+    let _ = std::fs::remove_file(&vivo);
+    crate::progress::escribir_indice(paths, &data)?;
     let leccion_log = match &declaracion {
         Some(decl) => format!(" leccion={}", decl.resumen()),
         None => String::new(),
@@ -197,12 +217,14 @@ pub fn run(
         true,
         &paths.repo_root,
     );
-    let _ = std::fs::remove_file(&paths.autocheck_stamp); // cierra el ciclo de checkpoints
+    // Cierra el ciclo de checkpoints DE ESTA feature (AC-10/AC-11).
+    let _ = std::fs::remove_file(paths.autocheck_stamp_de(&feature_id));
     let mut msg = format!("Feature #{feature_id} cerrada como {status}.");
     if let Some(rel) = &archived_rel {
         msg.push_str(&format!(" Estado archivado en {rel}."));
     }
     println!("{msg}");
+    integrar(paths, &data, idx, status, to, &feature_id)?;
     if let Some(decl) = &declaracion {
         match &decl.motivo {
             Some(motivo) => println!("  Leccion declarada: ninguna ({motivo})."),
@@ -219,6 +241,98 @@ pub fn run(
     // el resultado de un cierre (AC-10).
     if status == "done" && declaracion.is_none() && lecciones::dir(paths).is_dir() {
         let _ = std::io::stderr().write_all(lecciones::texto_contrato_de_cierre(paths).as_bytes());
+    }
+    Ok(())
+}
+
+/// Integracion GitFlow del cierre (feature #47 / AC-14..AC-21).
+///
+/// Solo `done` integra: `blocked`, `pending` y `superseded` conservan la rama y
+/// el worktree para poder retomar. El arnes NO elige la rama destino — se niega
+/// sin `--to` y le ordena al agente preguntarle al USUARIO (decision OBS-1).
+fn integrar(
+    paths: &HarnessPaths,
+    data: &Value,
+    idx: usize,
+    status: &str,
+    to: Option<&str>,
+    feature_id: &str,
+) -> anyhow::Result<()> {
+    let (rama, worktree) = {
+        let Some(feature) = feature_at(data, idx).as_object() else {
+            return Ok(());
+        };
+        (
+            feature.get("branch").and_then(Value::as_str).map(str::to_string),
+            feature
+                .get("worktree")
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from),
+        )
+    };
+    // Sin rama propia no hay nada que integrar (modo clasico o repo sin git).
+    let Some(rama) = rama else {
+        return Ok(());
+    };
+    if status != "done" {
+        println!(
+            "  Rama {rama} conservada (el cierre `{status}` no integra); su worktree tambien."
+        );
+        return Ok(());
+    }
+    let Some(principal) = crate::git::repo_principal(&paths.repo_root) else {
+        return Ok(());
+    };
+
+    // AC-14: la rama destino la decide el USUARIO, no el arnes.
+    let Some(destino) = to else {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                concat!(
+                    "[GitFlow] La feature #{} quedo cerrada, pero falta decir A QUE RAMA se integra.\n",
+                    "    PREGUNTALE AL USUARIO a cual va (develop, release/..., main) y despues:\n",
+                    "      sh harness_cli close --feature {} --status done --to <rama>\n",
+                    "    Ramas disponibles: {}"
+                ),
+                feature_id,
+                feature_id,
+                crate::git::ramas(&principal).join(", ")
+            )),
+        }
+        .into());
+    };
+
+    println!("[GitFlow] integrando {rama} -> {destino}");
+    // El trabajo de la feature vive en su worktree: si quedo algo sin
+    // commitear, se commitea AHI (nunca en el checkout principal) para que el
+    // merge se lo lleve. Sin trailers de IA (AC-16).
+    if let Some(wt) = worktree.as_ref().filter(|w| w.is_dir()) {
+        match crate::git::commit_todo(wt, &format!("chore(harness): cierre de la feature #{feature_id}")) {
+            Ok(true) => println!("  cambios del worktree commiteados en {rama}"),
+            Ok(false) => {}
+            Err(err) => println!("  [i] no pude commitear el worktree: {err:#}"),
+        }
+    }
+    if let Err(err) = crate::git::merge_en(&principal, destino, &rama) {
+        // AC-18: el merge se abortó; nada quedó a medias.
+        return Err(Exit::msg(format!(
+            "[GitFlow] no se pudo integrar {rama} en {destino}: {err:#}\n    El merge se aborto y el repo quedo como estaba. Resolvelo a mano y volve a correr el cierre con --to."
+        ))
+        .into());
+    }
+    println!("  merge hecho (sin trailers de IA)");
+
+    match crate::git::push(&principal, destino) {
+        Ok(()) => println!("  {destino} publicada en origin"),
+        Err(err) => println!("  [i] merge local hecho, pero no pude publicar {destino}: {err:#}"),
+    }
+    // AC-19: se borra el worktree, se conserva la rama.
+    if let Some(wt) = worktree {
+        match crate::git::borrar_worktree(&principal, &wt) {
+            Ok(()) => println!("  worktree {} borrado (la rama {rama} se conserva)", wt.display()),
+            Err(err) => println!("  [i] no pude borrar el worktree {}: {err:#}", wt.display()),
+        }
     }
     Ok(())
 }

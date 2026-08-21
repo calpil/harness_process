@@ -240,9 +240,13 @@ fn start_should_create_plan_and_spec_sign_both_and_check_plan_should_pass() {
     let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-pago-qr.md")).unwrap();
     assert!(spec.contains("Estado: draft"));
     assert!(spec.contains("## Criterios de aceptacion (Given/When/Then)"));
-    // current.md referencia el spec ademas del plan
-    let current = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
+    // Feature #47 (AC-8/AC-9): el estado vivo es de la feature y current.md es
+    // el indice de lo que hay abierto.
+    let current = std::fs::read_to_string(dir.path().join("hp/progress/current-1.md")).unwrap();
     assert!(current.contains("Plan: docs/plan-feature-1-pago-qr.md\nSpec: docs/spec-feature-1-pago-qr.md\n"));
+    let indice = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
+    assert!(indice.contains("#1 Pago QR"), "el indice lista la activa: {indice}");
+    assert!(indice.contains("current-1.md"));
     cmd(&bin)
         .arg("check-plan")
         .assert()
@@ -270,16 +274,71 @@ fn check_plan_should_exit_two_when_plan_edited_by_another_agent() {
 }
 
 #[test]
-fn start_should_reject_second_in_progress_feature() {
-    let (_dir, bin) = sandbox_with_binary();
+fn start_should_allow_a_second_feature_in_parallel() {
+    // Feature #47 / AC-1: se acabo el "Ya hay feature in_progress". Las dos
+    // quedan activas, cada una con SU estado vivo (AC-8), y current.md pasa a
+    // ser el indice de ambas (AC-9).
+    let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Uno"]).assert().success();
     cmd(&bin).args(["add", "--name", "Dos"]).assert().success();
     cmd(&bin).args(["start", "--feature", "1"]).assert().success();
     cmd(&bin)
         .args(["start", "--feature", "2"])
         .assert()
-        .code(1)
-        .stderr("Ya hay feature in_progress: #1 Uno\n");
+        .success()
+        .stdout(predicate::str::contains("En paralelo con: #1 Uno"));
+
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let activas: Vec<&str> = backlog["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["status"] == "in_progress")
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(activas, vec!["Uno", "Dos"], "las dos quedan en curso");
+
+    assert!(dir.path().join("hp/progress/current-1.md").is_file());
+    assert!(dir.path().join("hp/progress/current-2.md").is_file());
+    let indice = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
+    assert!(indice.contains("#1 Uno") && indice.contains("#2 Dos"), "{indice}");
+}
+
+#[test]
+fn close_should_not_touch_the_state_of_the_other_active_feature() {
+    // AC-11 (el bug de la feature #45, ahora imposible): cerrar una no puede
+    // pisar el estado vivo de la otra.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Uno"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Dos"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+
+    let vivo_2 = dir.path().join("hp/progress/current-2.md");
+    let antes = std::fs::read_to_string(&vivo_2).unwrap();
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "aparcada"])
+        .assert()
+        .success();
+
+    // El estado de la #2 quedo intacto...
+    assert_eq!(std::fs::read_to_string(&vivo_2).unwrap(), antes);
+    // ...y su stamp de autocheck tampoco se borro (AC-10).
+    assert!(dir.path().join("hp/progress/.last_autocheck-2").exists());
+    // El archivado de la #1 se llevo SU estado, no el de la #2.
+    let archivado = std::fs::read_to_string(
+        dir.path().join("docs/estado-feature-1-uno.md"),
+    )
+    .unwrap();
+    assert!(archivado.contains("Feature #1"), "{archivado}");
+    assert!(!archivado.contains("Feature #2: Dos"), "no se llevo el estado ajeno");
+    // Y el indice ya solo lista la que sigue viva.
+    let indice = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
+    assert!(indice.contains("#2 Dos") && !indice.contains("#1 Uno"), "{indice}");
 }
 
 /// Activa la regla require_spec_approved en el feature_list.json del sandbox
@@ -4102,4 +4161,168 @@ fn consolidar_without_aplicar_should_not_touch_anything() {
         instantanea(raiz),
         "con --aplicar el arbol tenia que cambiar: el test no esta midiendo nada"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Feature #47: aislamiento real (rama + worktree) y cierre GitFlow.
+// ---------------------------------------------------------------------------
+
+/// Sandbox donde el PROYECTO es un repo git de verdad: es la unica forma de
+/// probar ramas, worktrees y merges.
+fn sandbox_git() -> (tempfile::TempDir, PathBuf) {
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path();
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["config", "user.email", "test@example.com"],
+        vec!["config", "user.name", "Test"],
+    ] {
+        Command::new("git").args(&args).current_dir(raiz).output().unwrap();
+    }
+    std::fs::write(raiz.join("README.md"), "# proyecto\n").unwrap();
+    // El dir del arnes no entra al repo del proyecto (como en la vida real).
+    std::fs::write(raiz.join(".gitignore"), "hp/\n").unwrap();
+    Command::new("git").args(["add", "-A"]).current_dir(raiz).output().unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "init"])
+        .current_dir(raiz)
+        .output()
+        .unwrap();
+    (dir, bin)
+}
+
+fn git_en(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git").args(args).current_dir(dir).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn start_should_create_branch_and_worktree_per_feature() {
+    // AC-2, AC-3, AC-4: rama GitFlow + worktree hermano, reusables.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("feature/1-cobranza"))
+        .stdout(predicate::str::contains("Trabaja ahi: cd"));
+
+    let ramas = git_en(dir.path(), &["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(ramas.contains("feature/1-cobranza"), "{ramas}");
+    // El checkout principal NO cambio de rama.
+    assert_eq!(git_en(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    // El worktree es hermano del repo y tiene el arbol.
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let wt = backlog["features"][0]["worktree"].as_str().unwrap();
+    assert!(Path::new(wt).join("README.md").is_file(), "worktree poblado: {wt}");
+    assert!(wt.contains("-wt/1-cobranza"), "hermano del repo: {wt}");
+}
+
+#[test]
+fn start_should_keep_working_without_git_or_with_sin_worktree() {
+    // AC-5 y AC-6: sin repo git, o pidiendo el modo clasico, no hay aislamiento
+    // y el flujo sigue igual.
+    let (_dir, bin) = sandbox_with_binary(); // sin git
+    cmd(&bin).args(["add", "--name", "Sin Git"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sin aislamiento"));
+
+    let (_dir2, bin2) = sandbox_git();
+    cmd(&bin2).args(["add", "--name", "Clasica"]).assert().success();
+    cmd(&bin2)
+        .args(["start", "--feature", "1", "--sin-worktree"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--sin-worktree"));
+}
+
+#[test]
+fn close_done_should_refuse_without_to_and_then_integrate() {
+    // AC-14, AC-15, AC-16, AC-19: sin --to se niega; con --to mergea, el commit
+    // no lleva trailers de IA y el worktree se borra conservando la rama.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let wt = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
+    // Trabajo real dentro del worktree.
+    std::fs::write(wt.join("cobranza.txt"), "hecho\n").unwrap();
+    Command::new("git").args(["add", "-A"]).current_dir(&wt).output().unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "feat: cobranza"])
+        .current_dir(&wt)
+        .output()
+        .unwrap();
+
+    // Sin --to: exit 2 y le pide al agente que pregunte al USUARIO.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "listo"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("PREGUNTALE AL USUARIO"))
+        .stderr(predicate::str::contains("Ramas disponibles"));
+
+    // Con --to: integra.
+    cmd(&bin)
+        .args([
+            "close", "--feature", "1", "--status", "done", "--note", "listo", "--to", "main",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("merge hecho"));
+
+    assert!(dir.path().join("cobranza.txt").is_file(), "el trabajo llego a main");
+    let log = git_en(dir.path(), &["log", "-1", "--format=%B"]);
+    assert!(!log.to_lowercase().contains("co-authored-by"), "sin trailers: {log}");
+    // AC-19: worktree borrado, rama conservada.
+    assert!(!wt.exists(), "el worktree se borro");
+    let ramas = git_en(dir.path(), &["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(ramas.contains("feature/1-cobranza"), "la rama se conserva: {ramas}");
+}
+
+#[test]
+fn close_should_refuse_an_unknown_target_branch() {
+    // AC-20: falla antes de tocar nada y lista las validas.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args([
+            "close", "--feature", "1", "--status", "done", "--note", "x", "--to", "no-existe",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no existe"));
+    assert_eq!(git_en(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+}
+
+#[test]
+fn close_blocked_should_keep_branch_and_worktree() {
+    // AC-21: solo `done` integra; lo demas conserva todo para retomar.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let wt = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "trabada"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("conservada"));
+    assert!(wt.is_dir(), "el worktree se conserva para retomar");
 }

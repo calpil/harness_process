@@ -21,6 +21,9 @@ pub struct HarnessPaths {
     pub plans: PathBuf,
     pub autocheck_stamp: PathBuf,
     pub nudge_stamp: PathBuf,
+    /// Worktree secundario desde el que se invoco el arnes (feature #47), o
+    /// `None` cuando se trabaja en el checkout principal.
+    pub worktree: Option<PathBuf>,
     /// Contador de invocaciones del nudge por feature (`<id>:<n>`), feature #18.
     pub nudge_lecciones: PathBuf,
 }
@@ -35,6 +38,46 @@ impl HarnessPaths {
         Ok(Self::from_root(root))
     }
 
+    /// Rutas vistas DESDE una feature concreta: `plans` (docs/) apunta al
+    /// worktree de ESA feature, para que su spec, su plan y su evidencia vivan
+    /// en su rama y viajen con el merge (feature #47).
+    ///
+    /// Sin worktree (modo clasico o repo sin git) devuelve las rutas de
+    /// siempre. El ESTADO (`feature_list.json`, `progress/`) no cambia nunca:
+    /// es unico y del repo principal (AC-7).
+    pub fn para_feature(&self, feature: &serde_json::Map<String, serde_json::Value>) -> HarnessPaths {
+        let plans = feature
+            .get("worktree")
+            .and_then(serde_json::Value::as_str)
+            .map(|wt| PathBuf::from(wt).join("docs"))
+            .filter(|docs| docs.parent().is_some_and(Path::exists))
+            .unwrap_or_else(|| self.plans.clone());
+        HarnessPaths {
+            root: self.root.clone(),
+            features: self.features.clone(),
+            progress: self.progress.clone(),
+            current: self.current.clone(),
+            history: self.history.clone(),
+            repo_root: self.repo_root.clone(),
+            plans,
+            autocheck_stamp: self.autocheck_stamp.clone(),
+            nudge_stamp: self.nudge_stamp.clone(),
+            nudge_lecciones: self.nudge_lecciones.clone(),
+            worktree: self.worktree.clone(),
+        }
+    }
+
+    /// Estado vivo de UNA feature (feature #47 / AC-8): cada una escribe el
+    /// suyo, asi que cerrar una no puede pisar el de otra.
+    pub fn current_de(&self, fid: &str) -> PathBuf {
+        self.progress.join(format!("current-{fid}.md"))
+    }
+
+    /// Stamp de autocheck por feature (AC-10).
+    pub fn autocheck_stamp_de(&self, fid: &str) -> PathBuf {
+        self.progress.join(format!(".last_autocheck-{fid}"))
+    }
+
     pub fn from_root(root: PathBuf) -> Self {
         // Paridad harness.py: el valor del env NO se normaliza con abspath.
         let repo_root = match env_nonempty("HARNESS_REPO_ROOT") {
@@ -42,6 +85,16 @@ impl HarnessPaths {
             None => repo_root_from_marker(&root),
         };
         let progress = root.join("progress");
+        // Feature #47: el ESTADO (feature_list.json, progress/) es unico y vive
+        // en el checkout principal — esta gitignorado, no viaja con las ramas —
+        // pero los DOCS (spec, plan, impl, review) son archivos versionados que
+        // tienen que quedar en la rama de la feature. Por eso, cuando se invoca
+        // desde un worktree, `plans` apunta al docs/ de ESE worktree (AC-7).
+        let worktree = worktree_actual(&repo_root);
+        let plans = match &worktree {
+            Some(wt) => wt.join("docs"),
+            None => repo_root.join("docs"),
+        };
         HarnessPaths {
             features: root.join("feature_list.json"),
             current: progress.join("current.md"),
@@ -49,12 +102,35 @@ impl HarnessPaths {
             autocheck_stamp: progress.join(".last_autocheck"),
             nudge_stamp: progress.join(".last_nudge"),
             nudge_lecciones: progress.join(".nudge_lecciones"),
-            plans: repo_root.join("docs"),
+            plans,
             progress,
             repo_root,
             root,
+            worktree,
         }
     }
+}
+
+/// Worktree secundario desde el que se esta invocando el arnes, si lo hay.
+///
+/// Se mira el directorio ACTUAL: es el que dice en que feature esta trabajando
+/// quien corre el comando (AC-12). Un worktree cuyo repo principal es el mismo
+/// `repo_root` no cuenta: ese es el checkout de siempre.
+fn worktree_actual(repo_root: &Path) -> Option<PathBuf> {
+    // Override explicito para tests y para casos raros.
+    if let Some(v) = env_nonempty("HARNESS_WORKTREE") {
+        return Some(PathBuf::from(v));
+    }
+    let cwd = std::env::current_dir().ok()?;
+    if !crate::git::es_worktree_secundario(&cwd) {
+        return None;
+    }
+    let top = crate::git::toplevel(&cwd)?;
+    // Si el "worktree" resulta ser la propia raiz, no hay nada que redirigir.
+    if top == repo_root {
+        return None;
+    }
+    Some(top)
 }
 
 /// Rutas que siembra el instalador en la raiz de una instalacion: su presencia

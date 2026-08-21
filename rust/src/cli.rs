@@ -26,10 +26,13 @@ pub enum Command {
     Status,
     /// Primera feature pending (JSON)
     Next,
-    /// Inicia una feature (crea plan + firma)
+    /// Inicia una feature (crea plan + firma, y su rama + worktree)
     Start {
         #[arg(long)]
         feature: String,
+        /// No crear rama ni worktree: trabajar en el checkout actual
+        #[arg(long = "sin-worktree")]
+        sin_worktree: bool,
     },
     /// Cierra una feature (archiva estado, refresca memorias)
     Close {
@@ -42,6 +45,10 @@ pub enum Command {
         absorbida_por: Option<String>,
         #[arg(long)]
         note: Option<String>,
+        /// Rama a la que se integra el cierre `done` (GitFlow). Sin esto el
+        /// arnes se niega: la decide el USUARIO.
+        #[arg(long = "to")]
+        to: Option<String>,
         /// Que se aprendio: la clase de `docs/lecciones/`, o `ninguna` (#17).
         #[arg(long)]
         leccion: Option<String>,
@@ -458,22 +465,29 @@ pub fn run() -> anyhow::Result<()> {
     match cli.command {
         Command::Status => commands::status::run(&HarnessPaths::resolve()?),
         Command::Next => commands::next::run(&HarnessPaths::resolve()?),
-        Command::Start { feature } => commands::start::run(&HarnessPaths::resolve()?, &feature),
+        Command::Start {
+            feature,
+            sin_worktree,
+        } => commands::start::run(&HarnessPaths::resolve()?, &feature, sin_worktree),
         Command::Close {
             feature,
             status,
             note,
+            to,
             absorbida_por,
             leccion,
             leccion_motivo,
         } => commands::close::run(
             &HarnessPaths::resolve()?,
             &feature,
-            &status,
-            note.as_deref(),
-            absorbida_por.as_deref(),
-            leccion.as_deref(),
-            leccion_motivo.as_deref(),
+            commands::close::CierreOpts {
+                status: &status,
+                note: note.as_deref(),
+                absorbida_por: absorbida_por.as_deref(),
+                leccion: leccion.as_deref(),
+                leccion_motivo: leccion_motivo.as_deref(),
+                to: to.as_deref(),
+            },
         ),
         Command::Advance {
             feature,

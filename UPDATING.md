@@ -822,6 +822,36 @@ aparece una feature activa. El estado vive en `progress/.last_nudge` (que ahora
 guarda el nivel) y en `progress/.nudge_lecciones` (el contador por feature); un
 `.last_nudge` vacío de una instalación previa se lee como nivel 0.
 
+## Features en paralelo con worktrees y GitFlow (feature #47)
+
+Hasta ahora el arnés imponía **una feature a la vez**: `start` rechazaba la
+segunda con "Ya hay feature in_progress". Eso se terminó.
+
+Ahora cada feature que arranca se lleva su propia rama (`feature/<id>-<slug>`, o
+`bugfix/` si es `--kind bug`) y su propio worktree hermano del repo
+(`../<repo>-wt/<id>-<slug>`), así que dos implementaciones nunca comparten
+archivos en disco. El checkout principal no cambia de rama nunca.
+
+**Qué cambia en tu repo al actualizar:**
+
+- `progress/current.md` deja de ser el estado de la feature activa y pasa a ser
+  el **índice** de lo que está en curso. El estado vivo de cada feature vive en
+  `progress/current-<id>.md`, y su checkpoint en `.last_autocheck-<id>`.
+  Consecuencia directa: cerrar una feature ya no puede pisar el estado de otra
+  (era un bug real, la feature #45).
+- `close --status done` ahora exige `--to <rama>`: el arnés no elige a dónde
+  integrar, te lo pregunta. Con `--to`, commitea lo que quede en el worktree,
+  mergea (`--no-ff`), publica la rama destino, borra el worktree y conserva la
+  rama. `blocked`, `pending` y `superseded` no integran y conservan todo.
+- `one_feature_at_a_time` sigue en `feature_list.json` por compatibilidad, pero
+  **ya no bloquea**.
+- Dentro de un worktree, los comandos infieren la feature por la carpeta: no
+  hace falta `--feature`.
+
+**Nada de esto exige git.** En un directorio sin repo, o con
+`start --sin-worktree`, el arnés avisa y funciona como siempre. La rama base es
+`develop` si existe, y si no `main`; el arnés nunca la crea.
+
 ## Envio automatico a Atlassian (feature #16)
 
 La feature #15 dejó el arnés y Atlassian hablando el mismo idioma, pero había

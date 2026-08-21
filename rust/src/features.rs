@@ -126,6 +126,37 @@ pub fn active_feature_index(data: &Value, fid: Option<&str>) -> Result<usize, Ex
     }
 }
 
+/// Feature cuyo worktree contiene el directorio actual (feature #47 / AC-12):
+/// la carpeta en la que estas dice en que feature estas trabajando.
+pub fn feature_por_worktree(paths: &HarnessPaths, data: &Value) -> Option<usize> {
+    let actual = paths.worktree.as_ref()?;
+    let actual = std::fs::canonicalize(actual).unwrap_or_else(|_| actual.clone());
+    features_slice(data).iter().position(|f| {
+        f.get("worktree")
+            .and_then(Value::as_str)
+            .map(std::path::PathBuf::from)
+            .map(|wt| std::fs::canonicalize(&wt).unwrap_or(wt))
+            .is_some_and(|wt| wt == actual)
+    })
+}
+
+/// Como `active_feature_index`, pero mirando primero el worktree actual: sin
+/// `--feature` y con varias activas, la carpeta desambigua (AC-12). Fuera de
+/// todo worktree se comporta igual que antes (AC-13).
+pub fn active_feature_index_con_foco(
+    paths: &HarnessPaths,
+    data: &Value,
+    fid: Option<&str>,
+) -> Result<usize, Exit> {
+    if fid.is_none()
+        && active_indices(data).len() > 1
+        && let Some(idx) = feature_por_worktree(paths, data)
+    {
+        return Ok(idx);
+    }
+    active_feature_index(data, fid)
+}
+
 /// Acceso mutable a una feature por indice (el array debe existir).
 pub fn feature_mut(data: &mut Value, index: usize) -> anyhow::Result<&mut Map<String, Value>> {
     data.get_mut("features")

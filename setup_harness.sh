@@ -1029,7 +1029,8 @@ Archivos principales:
   estar `Estado: approved` antes de implementar. El agente lo muestra, pregunta
   y registra el si del usuario con `harness_cli approve-spec --yes`; nunca
   aprueba por su cuenta.
-- `__HREL__progress/current.md`: estado vivo de la tarea (apunta al plan).
+- `__HREL__progress/current.md`: INDICE de las features en curso; el estado vivo
+  de cada una vive en `__HREL__progress/current-<id>.md` (feature #47).
 - `__HREL__progress/history.md`: bitacora append-only.
 - `docs/prd/COMO-ESCRIBIR-UN-PRD.md` (RAIZ): el metodo para escribir el PRD (la
   historia primero, el tamano que decide el cambio, PRDs anidados y la regla
@@ -1135,6 +1136,24 @@ Si NO existe `atlassian.json` y el usuario quiere integrar Jira o Confluence,
 PREGUNTALE a que proyecto y a que space pertenece este repo — el arnes no lo
 adivina — y registralo con `atlassian bind`. Detalle completo en
 `docs/atlassian-integracion.md`.
+
+## Features en paralelo (feature #47)
+
+Puede haber varias features in_progress a la vez. `start` le da a cada una su
+rama (`feature/<id>-<slug>`, o `bugfix/` si se cargo con `add --kind bug`) y su
+worktree hermano del repo (`../<repo>-wt/<id>-<slug>`), asi que dos
+implementaciones nunca comparten archivos.
+
+- Trabaja DENTRO del worktree de tu feature: ahi los comandos la infieren solos
+  (no hace falta `--feature`) y el spec, el plan y la evidencia quedan en su
+  rama para viajar con el merge.
+- El backlog y `__HREL__progress/` son UNICOS: viven en el repo principal aunque
+  invoques el arnes desde el worktree.
+- Al cerrar como `done` hay que decir a que rama se integra:
+  `close --feature <id> --status done --to <rama>`. El arnes NO la elige: sin
+  `--to` se niega y hay que PREGUNTARLE AL USUARIO (develop, release/..., main).
+  Con `--to` mergea, publica, borra el worktree y conserva la rama.
+- `start --sin-worktree` vuelve al modo clasico de una sola carpeta.
 
 Los documentos durables (plan, investigacion, evidencia) se escriben en `docs/`
 de la raiz; `__HREL__progress/` guarda solo el estado vivo. Una respuesta corta

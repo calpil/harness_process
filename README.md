@@ -1162,6 +1162,62 @@ no te impide trabajar hoy, pero tiene que verse.
 estructuralmente paritario puede fallar igual al correr. Verificar eso exige una
 maquina con PowerShell, y esta dicho asi en vez de dejarlo creer.
 
+## Features en paralelo: una rama y un worktree por feature (feature #47)
+
+Varias features pueden estar en curso a la vez sin pisarse. Al arrancar una, el
+arnes crea su rama GitFlow y su carpeta de trabajo:
+
+```bash
+sh harness_cli start --feature 47
+#   Rama y worktree creados: feature/47-<slug> en ../<repo>-wt/47-<slug>
+#   Trabaja ahi: cd ../<repo>-wt/47-<slug>
+```
+
+- La rama es `feature/<id>-<slug>`, o `bugfix/<id>-<slug>` si la feature se
+  cargo con `add --kind bug`. Sale de `develop` si existe, y si no de `main`;
+  el arnes **nunca crea** la rama base.
+- El worktree es hermano del repo, asi que dos features editan archivos
+  distintos en disco: es imposible que se pisen.
+- El checkout principal **no cambia de rama** en ningun momento.
+- `start --sin-worktree` vuelve al modo clasico, y en un directorio sin git el
+  arnes avisa y sigue trabajando como siempre.
+
+El **estado del arnes sigue siendo uno solo**: aunque invoques los comandos
+desde un worktree, `feature_list.json` y `progress/` se leen y escriben en el
+repo principal. Lo que se parte es el estado vivo:
+
+| Archivo | Que es |
+| --- | --- |
+| `progress/current-<id>.md` | el estado vivo de ESA feature |
+| `progress/current.md` | el indice de lo que hay abierto (id, rama, worktree) |
+| `progress/.last_autocheck-<id>` | el checkpoint de esa feature |
+
+Por eso cerrar una feature ya no puede tocar el estado de otra.
+
+Dentro de un worktree no hace falta `--feature`: la carpeta dice en que feature
+estas trabajando. Fuera de todo worktree y con varias activas, los comandos
+piden `--feature <id>`, como siempre.
+
+### Cerrar: la rama destino la elegis vos
+
+```bash
+sh harness_cli close --feature 47 --status done --to develop
+```
+
+`--to` es obligatorio para `done`: sin el, el arnes se niega y le pide al
+agente que te pregunte a que rama va (y lista las disponibles). Con el:
+
+1. commitea lo que quede en el worktree de la feature,
+2. mergea la rama en la destino (`--no-ff`, en un worktree temporal, sin tocar
+   tu checkout ni exigirte tener el arbol limpio),
+3. publica la rama destino,
+4. borra el worktree y **conserva la rama**.
+
+Ningun commit que haga el arnes lleva trailers de IA. Si el merge tiene
+conflicto, se aborta y no queda nada a medias: el repo sigue como estaba y el
+mensaje dice que resolver. Los cierres `blocked`, `pending` y `superseded` no
+integran nada y conservan el worktree para poder retomar.
+
 ## Verificacion
 
 ```bash

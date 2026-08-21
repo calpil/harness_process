@@ -32,7 +32,15 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   raiz para distintos agentes.
 - `CHECKPOINTS.md`: criterios de cierre.
 - `feature_list.json`: backlog ejecutable.
-- `progress/current.md`: estado vivo de la tarea.
+- `progress/current.md`: INDICE de las features en curso (feature #47). El
+  estado vivo de cada una esta en `progress/current-<id>.md`.
+- Features en paralelo: `start` crea la rama `feature/<id>-<slug>` (o `bugfix/`
+  si es `kind: bug`) y su worktree hermano `../<repo>-wt/<id>-<slug>`. Trabaja
+  DENTRO de ese worktree: ahi los comandos infieren la feature sin `--feature`,
+  y el spec, el plan y la evidencia viven en su rama. El backlog y `progress/`
+  son unicos (del repo principal). Al cerrar como `done` hay que decir a que
+  rama se integra: `close --feature <id> --status done --to <rama>`; el arnes se
+  niega sin `--to` y hay que PREGUNTARLE AL USUARIO a cual va.
 - `progress/history.md`: bitacora append-only.
 - `docs/constitution.md`: principios no negociables (el spec y el plan los
   cumplen; el reviewer los verifica).
