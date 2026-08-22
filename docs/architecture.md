@@ -216,6 +216,9 @@ que nazcan en esa rama. El checkout principal no cambia de rama nunca.
 - Estado: `feature_list.json` y `progress/` son unicos y del repo principal;
   el estado vivo es `progress/current-<id>.md` por feature y `current.md` pasa a
   ser el indice de lo abierto, con `.last_autocheck-<id>` por feature.
+- Documentos: los tres del alcance del cierre (el PRD de origen y sus padres, el
+  SDD y `architecture.md`) se resuelven contra el `docs/` de la feature, asi que
+  `prd apply` los escribe dentro de su worktree y el merge se los lleva.
 - Foco: dentro de un worktree los comandos infieren la feature por la carpeta
   (`feature_por_worktree`); fuera y con varias activas, exigen `--feature`.
 - Cierre: `close --status done` exige `--to <rama>` (el arnes no la elige),
