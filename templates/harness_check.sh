@@ -117,7 +117,15 @@ if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
     failures=$((failures + 1))
 fi
 
-if ! bash "$HARNESS_DIR/commit_guard.sh"; then
+# El guard arranca con `INPUT=$(cat)` porque su uso normal es COMO hook: el
+# agente le manda el JSON del evento por la entrada. Invocado desde aca no hay
+# hook y no hay JSON, y dejarle stdin abierto lo deja esperando un EOF que nadie
+# va a mandar: una corrida en segundo plano, en CI o desde un CLI que no cierra
+# el pipe cuelga el check entero (medido: 18 minutos, hallazgo de la feature
+# #52). Se le cierra la entrada. El unico dato que ese JSON traia
+# —`stop_hook_active`— viaja por entorno: quien SI es un hook lo lee una vez y
+# exporta HARNESS_STOP_HOOK_ACTIVE antes de llamar al check.
+if ! bash "$HARNESS_DIR/commit_guard.sh" </dev/null; then
     failures=$((failures + 1))
 fi
 
@@ -394,6 +402,13 @@ if [ -f "$REPO_ROOT/docs/perfil-usuario.md" ]; then
             *"unrecognized subcommand"*|*"invalid value"*)
                 echo "[i] El binario instalado no conoce 'perfil check' (es anterior a la feature #19): re-corre el instalador para validar docs/perfil-usuario.md." >&2
                 ;;
+            # Sin binario no hay nada que decir del perfil. Reimprimir el error
+            # del lanzador como si fuera el veredicto de este gate lo unico que
+            # logra es que el mismo remedio aparezca dos veces y que un gate que
+            # no corrio se cuente como gate en rojo.
+            *"no encontrado"*)
+                echo "[i] Perfil sin validar: falta el binario del arnes (ver el remedio de arriba)." >&2
+                ;;
             *)
                 printf '%s\n' "$perfil_out" >&2
                 failures=$((failures + 1))
@@ -477,6 +492,14 @@ if [ "$rutas_rc" -ne 0 ]; then
     case "$rutas_err_text" in
         *"unrecognized subcommand"*|*"invalid value"*)
             echo "[i] El binario instalado no conoce 'rutas' (es anterior a la feature #26): re-corre el instalador para activar las rutas protegidas." >&2
+            ;;
+        # Sin binario no hay veredicto sobre las rutas, y decir "modificadas y
+        # sin commitear" cuando NO se pudo mirar ninguna es la peor forma de
+        # equivocarse: acusa al usuario de tocar sus propios documentos y no
+        # nombra ni uno. El lanzador ya sale 127 con su remedio; aca solo se
+        # aclara que este gate quedo sin correr.
+        *"no encontrado"*)
+            echo "[i] Rutas protegidas sin verificar: falta el binario del arnes (ver el remedio de arriba)." >&2
             ;;
         *)
             echo "[!] Rutas PROTEGIDAS modificadas y sin commitear:" >&2

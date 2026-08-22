@@ -18,6 +18,23 @@ function Assert-True {
     }
 }
 
+# `utf8NoBOM` es un valor de -Encoding que SOLO existe en PowerShell 7. Este
+# smoke declara `#requires -Version 5.1`, pero con esa palabra adentro en 5.1 no
+# llegaba ni a la primera asercion: moria con "Cannot convert value utf8NoBOM".
+# Es la razon concreta por la que once features seguidas escribieron "esta
+# maquina no tiene pwsh" y la paridad de instaladores nunca se ejecuto. UTF-8
+# sin BOM escrito a mano funciona igual en 5.1 y en 7.
+function Set-TextUtf8NoBom {
+    param(
+        [string]$Path,
+        [string]$Value
+    )
+    if (-not [IO.Path]::IsPathRooted($Path)) {
+        $Path = Join-Path (Get-Location).Path $Path
+    }
+    [IO.File]::WriteAllText($Path, $Value + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Copy-Fixture {
     param([string]$Target)
     New-Item -ItemType Directory -Path $Target -Force | Out-Null
@@ -52,12 +69,12 @@ try {
     New-Item -ItemType Directory -Path $fakeBin -Force | Out-Null
     $cargoTarget = Join-Path $fixture "cargo-target"
     New-Item -ItemType Directory -Path (Join-Path $fixture "rust") -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $fixture "rust/Cargo.toml") -Value @'
+    Set-TextUtf8NoBom -Path (Join-Path $fixture "rust/Cargo.toml") -Value @'
 [package]
 name = "harness-smoke"
 version = "0.0.0"
 edition = "2021"
-'@ -Encoding utf8NoBOM
+'@
 
     $runningOnWindows = $env:OS -eq "Windows_NT"
     if ($runningOnWindows) {
@@ -81,7 +98,7 @@ printf 'fake harness\n' > "$CARGO_TARGET_DIR/release/harness.exe"
 exit 0
 '@
         $cargoPath = Join-Path $fakeBin "cargo"
-        Set-Content -LiteralPath $cargoPath -Value $fakeCargo -Encoding utf8NoBOM
+        Set-TextUtf8NoBom -Path $cargoPath -Value $fakeCargo
         & chmod +x $cargoPath
     }
     $oldPath = $env:PATH
@@ -128,7 +145,7 @@ exit 0
     }
     else {
         $cargoPath = Join-Path $fakeBin "cargo"
-        Set-Content -LiteralPath $cargoPath -Value $secondCargo -Encoding utf8NoBOM
+        Set-TextUtf8NoBom -Path $cargoPath -Value $secondCargo
         & chmod +x $cargoPath
     }
     $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
@@ -144,7 +161,11 @@ exit 0
     $reinstalled = (Get-Content -LiteralPath (Join-Path $fixture "harness.exe") -Raw)
     Assert-True ($reinstalled -match "fake harness v2") "Re-running the installer did not replace harness.exe with the freshly built one."
     $leftovers = @(Get-ChildItem -LiteralPath $fixture -Force -Filter ".harness.exe.*" -ErrorAction SilentlyContinue)
-    Assert-True ($leftovers.Count -eq 0) "The atomic install left temporary files behind: $($leftovers.Name -join ', ')"
+    # El mensaje se arma SIEMPRE, incluso cuando la asercion pasa. En PowerShell
+    # 5.1 con Set-StrictMode -Version Latest, pedirle .Name a un array VACIO
+    # tira PropertyNotFoundStrict: el smoke moria justo cuando no habia nada
+    # que reportar. El pipe devuelve vacio sin quejarse en las dos versiones.
+    Assert-True ($leftovers.Count -eq 0) "The atomic install left temporary files behind: $(($leftovers | ForEach-Object { $_.Name }) -join ', ')"
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture ".codex/hooks.json")) "Codex hooks were not generated."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "bin/harness-hook.ps1")) "PowerShell hook runtime was not generated."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture ".gemini/commands/harness/check.toml")) "Gemini check command was not generated."
@@ -280,8 +301,8 @@ exit 0
 
     # Feature #4 / AC-6: los artefactos de feature comparten carpeta con los docs
     # generados y el reset NO puede llevarselos por delante.
-    Set-Content -LiteralPath (Join-Path $fixture "docs/spec-feature-1-demo.md") -Value "# spec" -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path $fixture "docs/plan-feature-1-demo.md") -Value "# plan" -Encoding utf8NoBOM
+    Set-TextUtf8NoBom -Path (Join-Path $fixture "docs/spec-feature-1-demo.md") -Value "# spec"
+    Set-TextUtf8NoBom -Path (Join-Path $fixture "docs/plan-feature-1-demo.md") -Value "# plan"
 
     & (Join-Path $fixture "setup_harness.ps1") `
         -Root -NoGraphify -NoGraphifySkills -NoAntigravity -Reset
@@ -312,11 +333,11 @@ exit 0
     Copy-Fixture -Target $subdirHarness
     New-Item -ItemType Directory -Path (Join-Path $subdirHarness "docs") -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $subdirRoot "docs") -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $subdirHarness "docs/architecture.md") -Value "VIEJO-ARCHITECTURE" -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path $subdirHarness "docs/verification.md") -Value "VIEJO-VERIFICATION" -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path $subdirHarness "docs/conventions.md") -Value "VIEJO-CONVENTIONS" -Encoding utf8NoBOM
+    Set-TextUtf8NoBom -Path (Join-Path $subdirHarness "docs/architecture.md") -Value "VIEJO-ARCHITECTURE"
+    Set-TextUtf8NoBom -Path (Join-Path $subdirHarness "docs/verification.md") -Value "VIEJO-VERIFICATION"
+    Set-TextUtf8NoBom -Path (Join-Path $subdirHarness "docs/conventions.md") -Value "VIEJO-CONVENTIONS"
     $teamSentinel = "SENTINEL-CONVENTIONS-DEL-EQUIPO-PS"
-    Set-Content -LiteralPath (Join-Path $subdirRoot "docs/conventions.md") -Value $teamSentinel -Encoding utf8NoBOM
+    Set-TextUtf8NoBom -Path (Join-Path $subdirRoot "docs/conventions.md") -Value $teamSentinel
     & (Join-Path $subdirHarness "setup_harness.ps1") `
         -NoGraphify -NoGraphifySkills -NoAntigravity -CargoTargetDir $cargoTarget
 
@@ -614,7 +635,7 @@ exit /b 0
 exit 0
 '@
         $fakeKimiPath = Join-Path $kimiHomeOn "bin/kimi"
-        Set-Content -LiteralPath $fakeKimiPath -Value $fakeKimi -Encoding utf8NoBOM
+        Set-TextUtf8NoBom -Path $fakeKimiPath -Value $fakeKimi
         & chmod +x $fakeKimiPath
     }
     $kimiSentinel = "SENTINEL-KIMI-USER-CONFIG-PS"
@@ -626,7 +647,7 @@ exit 0
 event = "UserPromptSubmit"
 command = "echo hook-del-usuario"
 '@
-    Set-Content -LiteralPath $kimiConfigPath -Value ($kimiUserConfig.Replace("__KIMI_SENTINEL__", $kimiSentinel)) -Encoding utf8NoBOM
+    Set-TextUtf8NoBom -Path $kimiConfigPath -Value ($kimiUserConfig.Replace("__KIMI_SENTINEL__", $kimiSentinel))
     $kimiBeginMarker = "# >>> harness-process hooks >>>"
     $oldKimiHomeEnv = $env:KIMI_CODE_HOME
     $env:KIMI_CODE_HOME = $kimiHomeOn

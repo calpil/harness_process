@@ -51,3 +51,31 @@ falta una maquina con PowerShell:
 .\tests\setup_smoke.ps1
 .\harness_cli.ps1 status
 ```
+
+Al correrlo por primera vez en Windows PowerShell 5.1 quedo claro por que la
+deuda duro once features: el smoke usaba `-Encoding utf8NoBOM`, que **solo
+existe en PowerShell 7**, y moria antes de la primera asercion aunque el archivo
+declare `#requires -Version 5.1`. Corregido. Sigue **sin pasar entero**: siembra
+un `harness.exe` falso (un archivo de texto) y despues le pide al CLI que
+ejecute `prd add` de verdad, asi que necesita sembrar el binario real como hace
+el smoke de sh. Lo que si quedo verificado en 5.1: `setup_harness.ps1` completa
+una instalacion root de punta a punta.
+
+El commit_guard, que es el gate que mas veces corre:
+
+```bash
+bash tests/commit_guard_check.sh
+```
+
+Cinco modos, e incluye la **prueba del rojo**: reconstruye la invocacion previa
+al arreglo y verifica que esa si se cuelga. Sin ese modo, el que dice "no se
+cuelga" podria estar pasando por casualidad.
+
+El instalador para `cmd.exe`:
+
+```bash
+bash tests/cmd_installer_check.sh
+```
+
+Los modos que necesitan `cmd.exe` se saltean **con un `[Ok]` explicito** fuera de
+Windows: un skip silencioso se lee igual que un verde, y no lo es.

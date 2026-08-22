@@ -11,6 +11,40 @@ No existe un comando mágico `harness_cli upgrade` dentro de tus proyectos. La f
 - Los scripts (`harness_cli`, `harness_check.sh`, roles, etc.) se copian desde `templates/`, y el binario Rust `harness` se compila desde `rust/` durante el setup (cargo requerido).
 - Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
 
+## Windows: instalador y comando desde cmd.exe
+
+Ya no hace falta abrir PowerShell a mano para instalar ni para usar el arnes:
+
+```bat
+setup_harness.cmd                 :: instala (delega en setup_harness.ps1)
+setup_harness.cmd --dry-run       :: las opciones estilo .sh se traducen a -DryRun
+harness_cli.cmd status            :: el comando del dia a dia, sin pasar por PowerShell
+```
+
+`setup_harness.cmd` **no es un tercer instalador**: encuentra PowerShell (pwsh o
+el 5.1 del sistema), saltea la ExecutionPolicy que rechaza un `.ps1` sin firmar
+—solo para ese proceso, no toca la configuracion de la maquina— y devuelve el
+exit code de verdad. `harness_cli.cmd` va directo a `harness.exe` y traduce el
+"binario mas viejo que los scripts" al mismo remedio que la version sh.
+
+Los dos se instalan en tu proyecto junto a `harness_cli` y `harness_cli.ps1`.
+
+## El commit_guard ya no cuelga a quien no es un hook
+
+`commit_guard.sh` arranca leyendo stdin porque su uso normal es COMO hook: el
+agente le manda el JSON del evento por la entrada. Cuando lo llamaba
+`harness_check.sh` no habia hook ni JSON, y con la entrada abierta se quedaba
+esperando un EOF que nadie iba a mandar: en una corrida en segundo plano o en CI
+el check entero se colgaba (medido: 18 minutos). Ahora se lo invoca con la
+entrada cerrada y el unico dato que ese JSON traia —`stop_hook_active`— viaja
+por `HARNESS_STOP_HOOK_ACTIVE`, que el hook exporta despues de leerlo una vez.
+
+En el camino aparecio otra: en Git Bash el guard **no encontraba ningun repo**.
+Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
+(`C:/Users/...`), que nunca dan iguales en Windows, asi que salia en verde sin
+haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
+depende de la forma de la ruta.
+
 ## El paquete de contexto (feature #56)
 
 Antes de leer el repo, el agente pide el material ya juntado:
