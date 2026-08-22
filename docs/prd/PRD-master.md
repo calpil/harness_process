@@ -215,3 +215,4 @@ con su fecha.>
 - #44 verify_detecta_filtro_vacio -> done 2026-08-19 · spec: docs/spec-feature-44-verify-detecta-filtro-vacio.md · impl: docs/impl-44.md
 - #47 features_en_paralelo_con_worktrees -> done 2026-08-22 · spec: ../harness_process-wt/47-features-en-paralelo-con-worktrees/docs/spec-feature-47-features-en-paralelo-con-worktrees.md · impl: docs/impl-47.md
 - #49 architecture_en_el_worktree_de_la_feature -> done 2026-08-22 · spec: ../harness_process-wt/49-architecture-en-el-worktree-de-la-feature/docs/spec-feature-49-architecture-en-el-worktree-de-la-feature.md · impl: docs/impl-49.md
+- #50 mensaje_de_cierre_dice_la_verdad -> done 2026-08-22 · spec: ../harness_process-wt/50-mensaje-de-cierre-dice-la-verdad/docs/spec-feature-50-mensaje-de-cierre-dice-la-verdad.md · impl: docs/impl-50.md
