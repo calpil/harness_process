@@ -45,6 +45,27 @@ $env:CARGO_HOME = "$HOME\.cargo"
 
 El instalador agrega `harness_cli.ps1`, que ejecuta `harness.exe` (Rust). Git for Windows Bash sigue siendo necesario para scripts/hook POSIX historicos; ambos instaladores se mantienen. (Sin fallback Python desde feature #2).
 
+Desde `cmd.exe`, sin abrir PowerShell a mano:
+
+```bat
+setup_harness.cmd
+setup_harness.cmd --dry-run
+harness_cli.cmd status
+```
+
+`setup_harness.cmd` **no es un tercer instalador**: una tercera implementacion
+garantizaba drift con las otras dos, que es justo lo que `tests/parity_check.sh`
+existe para evitar. Resuelve solo lo que `cmd.exe` no sabe hacer solo: encuentra
+PowerShell (pwsh o el 5.1 del sistema), saltea la ExecutionPolicy que rechaza un
+`.ps1` sin firmar —del alcance de ese proceso, sin tocar la configuracion de la
+maquina— traduce las opciones estilo `.sh` (`--dry-run` -> `-DryRun`) y devuelve
+el exit code de verdad.
+
+`harness_cli.cmd` es el comando del dia a dia desde `cmd.exe`: va directo a
+`harness.exe` sin pagar el arranque de otro shell, y traduce el binario mas
+viejo que los scripts al mismo remedio que la version sh. Los dos se instalan
+junto a `harness_cli` y `harness_cli.ps1`.
+
 Para instalar el arnes directamente en la raiz multi-repo:
 
 ```bash
@@ -1157,6 +1178,22 @@ silencian:
 
 `harness_check.sh` lo corre y **avisa** sin bloquear: una opcion desincronizada
 no te impide trabajar hoy, pero tiene que verse.
+
+### Lo que aparecio al correr el smoke de PowerShell por primera vez
+
+La deuda no duro once features solo por falta de maquinas: `tests/setup_smoke.ps1`
+usaba `-Encoding utf8NoBOM`, **un valor que solo existe en PowerShell 7**, y en
+el Windows PowerShell 5.1 que trae el sistema moria antes de la primera
+asercion, aunque el archivo declare `#requires -Version 5.1`. Corregido, junto
+con un `.Name` sobre un array vacio que `Set-StrictMode -Version Latest` rechaza
+en 5.1.
+
+Con eso, lo verificado en 5.1 es que **`setup_harness.ps1` completa una
+instalacion root de punta a punta**. El smoke todavia **no pasa entero**: siembra
+un `harness.exe` falso (un archivo de texto) y mas adelante le pide al CLI que
+ejecute `prd add` de verdad. Necesita sembrar el binario real, como hace el smoke
+de sh. Queda dicho para que nadie lea "el smoke ps1 ya corre" como "el smoke ps1
+ya pasa".
 
 **Lo que esto NO hace**: no ejecuta el instalador de Windows. Un `.ps1`
 estructuralmente paritario puede fallar igual al correr. Verificar eso exige una

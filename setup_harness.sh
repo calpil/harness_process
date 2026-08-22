@@ -1250,12 +1250,27 @@ run_pre_tool() {
 }
 
 run_stop() {
+    # El JSON del Stop trae `stop_hook_active`, que le dice al commit_guard que
+    # no vuelva a bloquear en un turno que YA es consecuencia de un bloqueo
+    # suyo. Antes ese JSON llegaba al guard por herencia de stdin, lo que ataba
+    # el gate entero a que la entrada estuviera abierta y en el punto justo. Se
+    # lee ACA, una sola vez, y el dato viaja por entorno: a los scripts se los
+    # llama con la entrada cerrada, asi ninguno se cuelga esperando un EOF
+    # (feature #52).
+    stop_input=""
+    [ -t 0 ] || stop_input="$(cat 2>/dev/null || true)"
+    if printf '%s' "$stop_input" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+        HARNESS_STOP_HOOK_ACTIVE=1
+    else
+        HARNESS_STOP_HOOK_ACTIVE=0
+    fi
+    export HARNESS_STOP_HOOK_ACTIVE
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Checkpoint automatico de avance; harness_check conserva el exit code.
         HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" autocheck 1>&2 || true
-        HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh"
+        HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/harness_check.sh" </dev/null
     else
-        HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/commit_guard.sh"
+        HARNESS_REPO_ROOT="$ROOT" bash "$HARNESS_DIR/commit_guard.sh" </dev/null
     fi
 }
 
@@ -1854,6 +1869,7 @@ required_assets=(
     "harness_check.sh"
     "harness_cli"
     "harness_cli.ps1"
+    "harness_cli.cmd"
     "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -2318,6 +2334,7 @@ generated=(
     "harness_check.sh"
     "harness_cli"
     "harness_cli.ps1"
+    "harness_cli.cmd"
     "UPDATING.md"
 )
 if [ "$WITH_SUBAGENTS" -eq 1 ]; then
@@ -2476,6 +2493,7 @@ install_asset "harness_status.sh"
 install_asset "harness_check.sh"
 install_asset "harness_cli"
 install_asset "harness_cli.ps1"
+install_asset "harness_cli.cmd"
 install_asset "UPDATING.md"
 write_file_notice "scripts base ($HARNESS_DIR)"
 

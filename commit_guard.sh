@@ -1,11 +1,21 @@
 #!/bin/sh
 # harness-managed-hook v4
-INPUT=$(cat 2>/dev/null)
+# Uso normal: COMO hook. El agente manda el JSON del evento por la entrada y de
+# ahi sale el unico dato que se lee, `stop_hook_active`. Con stdin en una
+# terminal no hay JSON que esperar y `cat` se quedaria pidiendo un EOF que nadie
+# va a escribir: el guard se cuelga en vez de fallar (feature #52). Quien no es
+# un hook —harness_check.sh— cierra la entrada y pasa el dato por entorno.
+if [ -t 0 ]; then
+    INPUT=""
+else
+    INPUT=$(cat 2>/dev/null)
+fi
 MODE="${HARNESS_COMMIT_GUARD_MODE:-block}" # block | warn | off
 
 [ "$MODE" = "off" ] && exit 0
 
 STOP_HOOK_ACTIVE=0
+[ "${HARNESS_STOP_HOOK_ACTIVE:-0}" = "1" ] && STOP_HOOK_ACTIVE=1
 printf '%s' "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && STOP_HOOK_ACTIVE=1
 
 HARNESS_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
@@ -74,9 +84,14 @@ for repo in "$REPO_ROOT"/*; do
     [ -d "$repo" ] || continue
     repo_abs=$(cd "$repo" && pwd -P)
     [ "$repo_abs" = "$HARNESS_DIR" ] && continue
-    git -C "$repo" rev-parse --show-toplevel >/dev/null 2>&1 || continue
-    git_top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
-    [ "$git_top" = "$repo_abs" ] || continue
+    # ¿Es este dir la RAIZ de un repo, y no un subdirectorio de uno? Se le
+    # pregunta a git en vez de comparar rutas: en Git Bash `pwd -P` devuelve
+    # /c/Users/... y `rev-parse --show-toplevel` devuelve C:/Users/..., asi que
+    # la comparacion de textos NUNCA daba igual y el guard no encontraba ningun
+    # repo en Windows: salia verde sin haber mirado nada. `--show-prefix` vacio
+    # dice lo mismo sin depender de la forma de la ruta.
+    git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+    [ -z "$(git -C "$repo" rev-parse --show-prefix 2>/dev/null)" ] || continue
     if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
         DIRTY="$DIRTY $(basename "$repo")"
     fi

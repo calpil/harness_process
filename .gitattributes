@@ -3,3 +3,9 @@
 *.sh text eol=lf
 templates/harness_cli text eol=lf
 harness_cli text eol=lf
+
+# Y los batch al reves: cmd.exe lee los .cmd linea por linea y con LF solo
+# puede perderse en un `goto` o en la ultima etiqueta del archivo. Se fuerza
+# CRLF para que un checkout en Linux/macOS no deje un instalador roto en el
+# repo de Windows.
+*.cmd text eol=crlf

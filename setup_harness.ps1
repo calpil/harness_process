@@ -635,6 +635,7 @@ function Assert-HarnessAssets {
         "harness_check.sh",
         "harness_cli",
         "harness_cli.ps1",
+        "harness_cli.cmd",
         "UPDATING.md"
     )
     if ($script:WithSubagents) {
@@ -1187,6 +1188,35 @@ else {
 }
 $cli = Join-Path $harnessDir "harness_cli.ps1"
 
+function ConvertTo-BashPath {
+    param([string]$Path)
+    # Git Bash acepta rutas con letra de unidad si el separador es '/'.
+    ($Path -replace '\\', '/')
+}
+
+function Get-BashPath {
+    $command = Get-Command bash.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $candidates = @()
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($git) {
+        # ...\Git\cmd\git.exe o ...\Git\bin\git.exe -> ...\Git\bin\bash.exe
+        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+        $candidates += (Join-Path $gitRoot "bin/bash.exe")
+    }
+    $candidates += @(
+        (Join-Path $env:ProgramFiles "Git/bin/bash.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Git/bin/bash.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs/Git/bin/bash.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
 function Invoke-HarnessEvent {
     switch -Regex ($Event) {
         "^(session-start|SessionStart|InstructionsLoaded|BeforeAgent)$" {
@@ -1200,18 +1230,46 @@ function Invoke-HarnessEvent {
             & $cli status
         }
         "^(stop|Stop|AfterAgent|SessionEnd|SessionStop)$" {
+            # `stop_hook_active` se lee UNA vez y viaja por entorno, igual que en
+            # run_stop del hook POSIX: es lo que evita que el commit_guard vuelva
+            # a bloquear un turno que ya es consecuencia de un bloqueo suyo. Con
+            # la entrada sin redirigir no hay JSON que esperar (feature #52).
+            $stopInput = ""
+            if ([Console]::IsInputRedirected) { $stopInput = [Console]::In.ReadToEnd() }
+            $env:HARNESS_STOP_HOOK_ACTIVE = if ($stopInput -match '"stop_hook_active"\s*:\s*true') { "1" } else { "0" }
             if (__WITH_SUBAGENTS__ -eq 1) {
                 & $cli autocheck
-                # Paridad con harness_check.sh (superficie sh): el Stop aplica
-                # AMBOS gates, plan y spec. harness_cli.ps1 delega en harness.exe
-                # con `exit $LASTEXITCODE`; `& $cli` NO lanza excepcion con exit
-                # != 0, asi que probamos el codigo a mano y lanzamos para que el
-                # bloque `catch` emita la decision de block (exit 2 = stale, o
-                # regla require_spec_approved activa con spec sin aprobar).
-                & $cli check-plan
-                if ($LASTEXITCODE -eq 2) { throw "Plan desactualizado (modificado por otro LLM). Re-lee el plan antes de continuar." }
-                & $cli check-spec
-                if ($LASTEXITCODE -eq 2) { throw "Spec sin aprobar o modificado. Si esta en draft, mostrale el spec al USUARIO, preguntale si lo aprueba y con su SI registra 'harness_cli.ps1 approve-spec --yes'." }
+            }
+            # Homologacion con la superficie sh: el gate de cierre es el MISMO
+            # script, corrido con Git Bash. harness_check.sh aplica todo lo que
+            # el Stop de Unix aplica —check-plan, check-spec, commit_guard,
+            # current.md, graphify stale, espejos de roles, constitution— y
+            # reimplementarlo aca en PowerShell garantizaba drift entre
+            # plataformas. Sin subagentes el gate es el commit_guard solo, que es
+            # lo que registra el .claude/settings.json de la instalacion basica.
+            $bash = Get-BashPath
+            if ($bash) {
+                $gate = if (__WITH_SUBAGENTS__ -eq 1) { "harness_check.sh" } else { "commit_guard.sh" }
+                $env:HARNESS_REPO_ROOT = ConvertTo-BashPath $root
+                # `$null |` cierra la entrada del proceso: PowerShell 5.1 no tiene
+                # el operador `<`, y el guard colgado esperando EOF es justo el
+                # cuelgue que este arreglo saca del camino.
+                $null | & $bash (ConvertTo-BashPath (Join-Path $harnessDir $gate))
+                if ($LASTEXITCODE -ne 0) { throw "Gate de cierre en rojo ($gate, exit $LASTEXITCODE). Arriba esta el detalle: resolvelo o documenta el bloqueo antes de cerrar." }
+            }
+            else {
+                Write-Warning "[Harness] Git Bash no disponible: gates en modo degradado. NO se ejecuta harness_check.sh (commit_guard, current.md, graphify stale, integridad de subagentes, constitution). Instala Git for Windows para tener los mismos gates que la superficie sh."
+                if (__WITH_SUBAGENTS__ -eq 1) {
+                    # Lo unico que el binario nativo resuelve solo. harness_cli.ps1
+                    # delega en harness.exe con `exit $LASTEXITCODE`; `& $cli` NO
+                    # lanza excepcion con exit != 0, asi que se prueba el codigo a
+                    # mano y se lanza para que el `catch` emita el block (exit 2 =
+                    # stale, o require_spec_approved con spec sin aprobar).
+                    & $cli check-plan
+                    if ($LASTEXITCODE -eq 2) { throw "Plan desactualizado (modificado por otro LLM). Re-lee el plan antes de continuar." }
+                    & $cli check-spec
+                    if ($LASTEXITCODE -eq 2) { throw "Spec sin aprobar o modificado. Si esta en draft, mostrale el spec al USUARIO, preguntale si lo aprueba y con su SI registra 'harness_cli.ps1 approve-spec --yes'." }
+                }
             }
             & $cli status
         }
@@ -1845,6 +1903,7 @@ try {
         "harness_check.sh",
         "harness_cli",
         "harness_cli.ps1",
+        "harness_cli.cmd",
         "UPDATING.md"
     )
     if ($script:WithSubagents) {
