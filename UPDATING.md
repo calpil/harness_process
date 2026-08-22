@@ -11,6 +11,35 @@ No existe un comando mágico `harness_cli upgrade` dentro de tus proyectos. La f
 - Los scripts (`harness_cli`, `harness_check.sh`, roles, etc.) se copian desde `templates/`, y el binario Rust `harness` se compila desde `rust/` durante el setup (cargo requerido).
 - Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
 
+## El paquete de contexto (feature #56)
+
+Antes de leer el repo, el agente pide el material ya juntado:
+
+```bash
+sh harness_cli contexto --feature <id>
+sh harness_cli contexto --tema "motor de reajuste"     # sin feature todavia
+sh harness_cli contexto --feature <id> --max-lineas 150 # mas apretado
+sh harness_cli contexto --feature <id> --con-grafo      # ademas corre graphify query
+```
+
+Trae el mapa de arquitectura **siguiendo el puntero** si `docs/architecture.md`
+apunta a otro archivo, si ese mapa **cubre el tema**, el impacto del hub (con
+limite de 5s: si no contesta es un hueco, no un error), la edad del grafo de
+graphify (vencido a los 7 dias), la historia acotada, las lecciones que aplican
+y las features anteriores del mismo servicio. Declara su tamaño en lineas y
+tokens, y lista sus huecos con el comando que consigue cada uno.
+
+Lo mas importante que hace es avisar cuando **no** hay material:
+
+```
+EL MAPA NO CUBRE ESTE TEMA: 'docs/architecture.md' no menciona ninguno de estos
+terminos: motor, reajuste.
+```
+
+Ese aviso sale ademas solo en cada `start`, sin pedirlo. Existe porque un mapeo
+exploratorio de cuatro agentes costo 693.6k tokens para descubrir exactamente
+eso. El comando es de SOLO LECTURA: no escribe archivos ni toca estado.
+
 ## Cómo actualizar
 
 Desde la carpeta del `harness_process` (la fuente):

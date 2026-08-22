@@ -204,6 +204,24 @@ contra el backlog al cerrar.
   aprobar con la regla `require_spec_approved` activa. El stdout distingue el
   caso (plan vs spec).
 
+## Paquete de contexto (feature #56)
+
+`rust/src/contexto.rs` + `harness contexto [--feature <id> | --tema "<texto>"]
+[--max-lineas N] [--con-grafo] [--json]`: el gemelo de `revision`, del lado de
+implementar. Junta el mapa de `docs/architecture.md` —resolviendo el puntero si
+lo hay, contra el directorio del documento— y decide si **cubre** el tema
+(terminos sin acentos, sin palabras vacias, minimo tres letras); el impacto del
+hub consultado en un hilo con limite de 5s; la edad del grafo de
+`graphify-out/graph.json` (vencido a los 7 dias); la historia de `buscar`
+acotada a 12 hits; las lecciones cuyos triggers pegan con el tema; y las
+features `done` del mismo servicio. Es de SOLO LECTURA, declara lo que recorta,
+reporta su tamaño en lineas y tokens estimados, y lista cada hueco con el
+comando que lo consigue.
+
+`graphify query` NO se invoca por default (cuesta): solo con `--con-grafo` y si
+el binario esta. `commands/start.rs` imprime el resumen del paquete en cada
+`start`, incluido —sobre todo— cuando esta vacio.
+
 ## MCP de Atlassian por proyecto (feature #52)
 
 `write_mcp_atlassian()` en `setup_harness.sh` (`Write-McpAtlassian` en el ps1):

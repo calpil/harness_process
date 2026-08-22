@@ -4435,3 +4435,106 @@ fn revision_should_respect_the_budget_and_say_what_it_cut() {
         "lo no indexado se nombra: {texto}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #56: el paquete de contexto para implementar.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn contexto_should_deliver_the_package_and_say_what_is_missing() {
+    // AC-1 + AC-10 + AC-15: entrega el paquete en orden, dice lo que falta y
+    // cuanto cuesta leerlo. Sin mapa, sin grafo y sin hub: sale igual.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Motor de reajuste"]).assert().success();
+
+    let out = cmd(&bin).args(["contexto", "--feature", "1"]).output().unwrap();
+    assert!(out.status.success());
+    let texto = String::from_utf8_lossy(&out.stdout);
+    assert!(texto.contains("Paquete de contexto - Feature #1"));
+    for seccion in [
+        "## Mapa",
+        "## Cobertura del tema",
+        "## Impacto (hub)",
+        "## Grafo (graphify)",
+        "## Historia",
+        "## Lecciones que aplican",
+        "## Features que tocaron lo mismo",
+    ] {
+        assert!(texto.contains(seccion), "falta la seccion {seccion}: {texto}");
+    }
+    assert!(texto.contains("## Falta"), "sin material, los huecos se nombran");
+    assert!(texto.contains("[paquete]") && texto.contains("tokens estimados"));
+    // No escribe NADA: es de solo lectura.
+    assert!(!dir.path().join("docs/contexto-1.md").exists());
+}
+
+#[test]
+fn contexto_should_warn_when_the_map_does_not_cover_the_topic() {
+    // AC-6: la senal que hoy no existe. El mapa esta, tiene contenido, y no
+    // menciona el tema: eso se dice con esas palabras.
+    let (dir, bin) = sandbox_with_binary();
+    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    std::fs::write(
+        dir.path().join("docs/architecture.md"),
+        "# Arquitectura\n\n## Autenticacion\n\njwt, sesiones y refresh tokens\n",
+    )
+    .unwrap();
+
+    let out = cmd(&bin)
+        .args(["contexto", "--tema", "motor de reajuste"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let texto = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        texto.contains("EL MAPA NO CUBRE ESTE TEMA"),
+        "tiene que avisar antes de que el agente gaste: {texto}"
+    );
+    assert!(texto.contains("reajuste"), "y decir con que terminos busco");
+
+    // AC-7: con un mapa que SI lo cubre, entrega la seccion en vez del aviso.
+    std::fs::write(
+        dir.path().join("docs/architecture.md"),
+        "# Arquitectura\n\n## Autenticacion\n\njwt\n\n## Reajuste\n\nel motor corre mensual\n",
+    )
+    .unwrap();
+    let out = cmd(&bin)
+        .args(["contexto", "--tema", "motor de reajuste"])
+        .output()
+        .unwrap();
+    let texto = String::from_utf8_lossy(&out.stdout);
+    assert!(!texto.contains("EL MAPA NO CUBRE"));
+    assert!(texto.contains("el motor corre mensual"), "entrega la seccion: {texto}");
+}
+
+#[test]
+fn contexto_should_refuse_without_feature_or_topic() {
+    // AC-3: sin feature activa y sin --tema, el error dice las DOS formas.
+    let (_dir, bin) = sandbox_with_binary();
+    let out = cmd(&bin).args(["contexto"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--feature"), "el remedio nombra --feature: {err}");
+    assert!(err.contains("--tema"), "y --tema: {err}");
+}
+
+#[test]
+fn start_should_always_print_the_context_summary() {
+    // AC-12 (OBS-3): el resumen sale SIEMPRE, y sobre todo cuando esta vacio,
+    // que es el caso que nadie pediria a mano.
+    let (dir, bin) = sandbox_with_binary();
+    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    std::fs::write(
+        dir.path().join("docs/architecture.md"),
+        "# Arquitectura\n\n## Autenticacion\n\njwt y sesiones\n",
+    )
+    .unwrap();
+    cmd(&bin).args(["add", "--name", "Motor de reajuste"]).assert().success();
+
+    let out = cmd(&bin).args(["start", "--feature", "1"]).output().unwrap();
+    assert!(out.status.success());
+    let texto = String::from_utf8_lossy(&out.stdout);
+    assert!(texto.contains("== Contexto =="), "start resume el contexto: {texto}");
+    assert!(texto.contains("NO cubre"), "y avisa del hueco en el acto: {texto}");
+    assert!(texto.contains("harness contexto"), "con como pedir el cuerpo");
+}

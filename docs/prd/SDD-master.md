@@ -48,6 +48,25 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**El material se entrega y el vacio se dice** (feature #56). La #51 dejo de
+hacer que el REVISOR explorara; esta hace lo mismo con el que IMPLEMENTA, y
+agrega la parte que faltaba: avisar cuando no hay nada que entregar. Tres
+decisiones que valen para cualquier feature futura que le de contexto a un
+agente:
+
+- **Los punteros se siguen y se verifican.** Un `architecture.md` que apunta a
+  otro archivo se resuelve contra el directorio del documento, y si el destino
+  no existe eso es un HUECO con la ruta que falta — un diagnostico distinto de
+  "no hay mapa". Un puntero roto se lee como "aca no hay nada escrito" y manda a
+  explorar el repo entero.
+- **El vacio se declara, no se disimula.** Si el mapa no menciona el tema, el
+  paquete lo dice con esas palabras y con los terminos que busco, para que un
+  falso positivo se pueda diagnosticar de un vistazo. Y si la consulta no tiene
+  terminos utiles, el aviso apunta a la consulta, no al mapa.
+- **El aviso no depende de que alguien lo pida.** `start` imprime el resumen
+  siempre, porque el caso donde mas importa —el paquete vacio— es justo el que
+  nadie pediria (`promesas-estructurales-vs-disciplina`).
+
 **El MCP se instala por proyecto; la autorizacion es del usuario** (feature #52).
 `atlassian drain` imprime un plan de llamadas MCP desde la feature #15, pero el
 arnes nunca instalaba el MCP que ese plan asume. Tres decisiones que valen para

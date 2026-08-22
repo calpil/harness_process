@@ -8,8 +8,20 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
 1. Lee `harness_process/roles/README.md`, `harness_process/feature_list.json`,
    `harness_process/progress/current.md` y `docs/constitution.md` (los principios que el
    spec y el plan deben cumplir).
-2. Revisa el mapa del hub: `sh "harness_process/harness_cli" graph mapa`.
-3. Para cada servicio candidato, calcula su radio de impacto:
+2. **PEDI EL PAQUETE ANTES DE LEER NADA** (feature #56):
+   `sh "harness_process/harness_cli" contexto --feature <id>` (o `--tema "<texto>"` si
+   todavia no hay feature). Trae el mapa de arquitectura —siguiendo el puntero
+   si `architecture.md` apunta a otro archivo—, **si ese mapa cubre el tema**,
+   el impacto del hub, la edad del grafo de graphify, la historia acotada, las
+   lecciones que aplican y las features anteriores del mismo servicio. Declara
+   su propio tamaño y lista sus huecos.
+   - Si el paquete dice **EL MAPA NO CUBRE ESTE TEMA**: **PARA**. Salir a
+     explorar el repo entero para descubrir lo que el paquete ya te dijo es
+     exactamente lo que costo 693.6k tokens una vez. Proponeselo al USUARIO:
+     mapear primero o avanzar sin mapa es SU decision, no tuya.
+   - Si declara huecos (sin grafo, hub sin responder, puntero roto), escribilos
+     en el plan: son parte del estado del proyecto.
+3. Solo si el paquete no alcanza, profundiza con las fuentes sueltas:
    `sh "harness_process/harness_cli" graph impacto --microservicio <proyecto>/<servicio>`
 4. Si existe `graphify-out/graph.json`, consulta el grafo antes de leer a ciegas:
    `graphify query "<pregunta de la task>"`

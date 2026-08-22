@@ -174,10 +174,12 @@ impl GraphMemoryManager {
         })
     }
 
-    pub fn impact(&mut self, service: &str) -> anyhow::Result<()> {
+    /// Los microservicios que dependen de `service`, como DATOS. `impact` los
+    /// imprime; el paquete de contexto (feature #56) los necesita en una lista.
+    pub fn impacto_de(&mut self, service: &str) -> anyhow::Result<Vec<String>> {
         let t = qualify(&self.env.project, service);
         self.locked(|m| m.store.load())?;
-        let mut affected: Vec<&str> = self
+        let mut affected: Vec<String> = self
             .store
             .edges
             .iter()
@@ -186,8 +188,15 @@ impl GraphMemoryManager {
                     && e.get("target").and_then(Value::as_str) == Some(t.as_str())
             })
             .filter_map(|e| e.get("source").and_then(Value::as_str))
+            .map(str::to_string)
             .collect();
         affected.sort_unstable();
+        Ok(affected)
+    }
+
+    pub fn impact(&mut self, service: &str) -> anyhow::Result<()> {
+        let t = qualify(&self.env.project, service);
+        let affected = self.impacto_de(service)?;
         if affected.is_empty() {
             println!("[Impacto] Ningun microservicio registrado depende de '{t}'");
         } else {
