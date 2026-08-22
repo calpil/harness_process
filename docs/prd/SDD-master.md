@@ -48,6 +48,20 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**El arnes no se bloquea a si mismo, tambien en el guard** (feature #58).
+`docs/rutas-protegidas.md` ya declaraba la regla —"la proteccion es contra las
+herramientas del agente, no contra el binario"— pero el commit guard no la
+aplicaba, y en un proyecto donde `docs/` es su propio repo eso bloqueaba el
+turno en cada documento que el arnes escribia. Dos decisiones:
+
+- **La exencion es por ARTEFACTO y por UBICACION, nunca por carpeta.** Un
+  `docs/runbook.md` sigue bloqueando, y un `impl-notas.md` dentro de un
+  microservicio tampoco se exime: el nombre solo no alcanza. Un gate que se
+  relaja de mas es peor que uno estricto, porque nadie revisa lo que cree
+  cubierto.
+- **Cuando un gate se saltea algo, lo dice.** Una linea `[i]` con el repo y la
+  razon. Un guard que se calla en silencio es indistinguible de uno apagado.
+
 **El material se entrega y el vacio se dice** (feature #56). La #51 dejo de
 hacer que el REVISOR explorara; esta hace lo mismo con el que IMPLEMENTA, y
 agrega la parte que faltaba: avisar cuando no hay nada que entregar. Tres
