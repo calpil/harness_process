@@ -3,10 +3,10 @@ nombre: probar-contra-datos-reales
 descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
-origen: [22, 25, 30, 36, 29, 28]
+origen: [22, 25, 30, 36, 29, 28, 47]
 usos: 0
 ultimo_uso:
-ultima_actualizacion: 2026-08-17
+ultima_actualizacion: 2026-08-21
 estado: activa
 ---
 
@@ -36,6 +36,23 @@ en la cabeza.
 5. Para los reportes de problemas, verificá **a mano** que cada uno reportado sea
    real. Un falso positivo cuesta mas que un falso negativo: el primero hace que
    se ignore la herramienta entera.
+
+## Tambien pasa sin calibracion: cuando el sandbox no reproduce la topologia
+
+La feature #47 (worktrees por feature) cerro con 515 tests en verde — incluidos
+seis de integracion sobre repos git de verdad — y aun asi tenia un bug que se
+veia a simple vista al usarla: el `docs/` se resolvia por el **directorio
+actual**, asi que el spec generado desde el checkout principal "desaparecia"
+(`estado: ausente`) al mirarlo desde el worktree, y al reves.
+
+Los tests no lo agarraron porque cada uno corria en UNA sola ubicacion. El bug
+solo existe cuando hay dos lugares desde donde invocar la herramienta — y eso es
+justamente lo que la feature construia.
+
+Regla practica: si la feature cambia **desde donde** se corre el comando (o
+cuantos lugares hay), la fixture tiene que tener los dos lugares, y la
+verificacion de cierre tiene que ejecutarse desde cada uno. Un test que solo
+corre desde el default prueba la mecanica, no la topologia.
 
 ## El otro lado: el OK que dice de mas
 

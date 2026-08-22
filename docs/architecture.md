@@ -204,6 +204,23 @@ contra el backlog al cerrar.
   aprobar con la regla `require_spec_approved` activa. El stdout distingue el
   caso (plan vs spec).
 
+## Features en paralelo (feature #47)
+
+`start` le da a cada feature su rama GitFlow (`feature/<id>-<slug>`, o
+`bugfix/<id>-<slug>` si se cargo con `add --kind bug`) y su worktree hermano
+(`../<repo>-wt/<id>-<slug>`), creado ANTES de escribir el plan y el spec para
+que nazcan en esa rama. El checkout principal no cambia de rama nunca.
+
+- `rust/src/git.rs`: ramas, worktrees, merge (en un worktree temporal), push y
+  commit sin trailers de IA. Sin repo git, todo degrada a no hacer nada.
+- Estado: `feature_list.json` y `progress/` son unicos y del repo principal;
+  el estado vivo es `progress/current-<id>.md` por feature y `current.md` pasa a
+  ser el indice de lo abierto, con `.last_autocheck-<id>` por feature.
+- Foco: dentro de un worktree los comandos infieren la feature por la carpeta
+  (`feature_por_worktree`); fuera y con varias activas, exigen `--feature`.
+- Cierre: `close --status done` exige `--to <rama>` (el arnes no la elige),
+  mergea, publica, borra el worktree y conserva la rama. Un conflicto aborta.
+
 ## Flujo Spec-Driven Development (SDD)
 
 Inspirado en spec-kit, adaptado y con **layout plano** (specs junto a los planes
