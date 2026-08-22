@@ -822,6 +822,31 @@ aparece una feature activa. El estado vive en `progress/.last_nudge` (que ahora
 guarda el nivel) y en `progress/.nudge_lecciones` (el contador por feature); un
 `.last_nudge` vacío de una instalación previa se lee como nivel 0.
 
+## El MCP de Atlassian llega a los cuatro backends (feature #52)
+
+`atlassian drain` siempre asumió que el agente tenía el MCP de Atlassian
+conectado — y el arnés nunca lo instalaba. Ahora, si el repo tiene binding, el
+instalador deja el MCP configurado **por proyecto** en los backends que lo
+admiten: `.mcp.json` (Claude), `.kimi-code/mcp.json` (Kimi) y `.grok/config.toml`
+(Grok, vía `mcp-remote`).
+
+Dos rarezas que se verificaron contra los CLIs reales y quedaron resueltas:
+
+- **Grok** no completa el flujo OAuth sobre HTTP (falla con `OAuth authorization
+  required`), así que su configuración va por el bridge `npx mcp-remote`.
+- **Codex** necesita el plugin `atlassian-rovo@openai-curated` **además** del
+  servidor MCP: con el servidor solo, el agente contesta "necesito que instales
+  el plugin"; con el plugin solo, "no hay acceso visible".
+
+Codex no admite MCP por proyecto, así que **su configuración global no se toca**:
+el instalador imprime los dos comandos para que los corras vos.
+
+Nada de esto ocurre sin `atlassian.json`, `--no-mcp-atlassian` lo apaga, no se
+pisa lo que ya tengas (ni se pierden otros servidores MCP) y **el arnés no hace
+el OAuth**: al terminar te dice cómo autorizar en cada CLI. Los archivos se
+versionan a propósito —no llevan credenciales— para que el próximo que clone el
+repo no repita la configuración.
+
 ## Features en paralelo con worktrees y GitFlow (feature #47)
 
 Hasta ahora el arnés imponía **una feature a la vez**: `start` rechazaba la

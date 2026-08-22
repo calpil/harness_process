@@ -204,6 +204,20 @@ contra el backlog al cerrar.
   aprobar con la regla `require_spec_approved` activa. El stdout distingue el
   caso (plan vs spec).
 
+## MCP de Atlassian por proyecto (feature #52)
+
+`write_mcp_atlassian()` en `setup_harness.sh` (`Write-McpAtlassian` en el ps1):
+con `atlassian.json` presente y sin `--no-mcp-atlassian`, escribe la
+configuracion MCP de PROYECTO de cada backend que la admite — `.mcp.json`
+(Claude), `.kimi-code/mcp.json` (Kimi) y `.grok/config.toml` (Grok, via
+`npx -y mcp-remote@latest`, porque su cliente HTTP no completa el flujo OAuth de
+MCP). Codex no admite alcance de proyecto: NO se toca `~/.codex/config.toml`, se
+imprimen `codex mcp add atlassian --url ...` y
+`codex plugin add atlassian-rovo@openai-curated`, que hacen falta los dos.
+Respeta un servidor `atlassian` ya declarado, conserva los demas servidores del
+archivo y no escribe credenciales: la URL del MCP es publica y el OAuth lo hace
+cada CLI contra Atlassian.
+
 ## Paquete de revision (feature #51)
 
 `rust/src/revision.rs` + `harness revision --feature <id> [--max-lineas N]

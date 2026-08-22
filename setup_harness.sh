@@ -57,6 +57,9 @@ JIRA_ISSUE_TYPE="${HARNESS_JIRA_ISSUE_TYPE:-Story}"
 # Feature #16: crear proyecto/space si faltan, SOLO con flag explicito.
 CREATE_JIRA_PROJECT=0
 CREATE_CONFLUENCE_SPACE=0
+# Feature #52: el MCP de Atlassian por proyecto viene encendido cuando hay
+# binding; este flag lo apaga.
+MCP_ATLASSIAN=1
 
 # Nuevas opciones globales (mejoras)
 DRY_RUN=0
@@ -377,6 +380,9 @@ Opciones:
   --jira-issue-type <TIPO>     Tipo de issue para una feature (default: Story).
   --create-jira-project        Si el proyecto Jira no existe, crearlo (requiere
                                permiso de admin y token configurado).
+  --no-mcp-atlassian           No configurar el MCP de Atlassian por proyecto
+                               (.mcp.json, .kimi-code/mcp.json, .grok/config.toml).
+                               Solo se escribe si el repo tiene atlassian.json.
   --create-confluence-space    Si el space no existe, crearlo (requiere permiso).
                                Sin estos dos flags el arnes NUNCA crea nada:
                                solo avisa que falta y como crearlo.
@@ -493,6 +499,7 @@ while [ "$#" -gt 0 ]; do
             shift
             JIRA_ISSUE_TYPE="$1"
             ;;
+        --no-mcp-atlassian) MCP_ATLASSIAN=0 ;;
         --create-jira-project) CREATE_JIRA_PROJECT=1 ;;
         --create-confluence-space) CREATE_CONFLUENCE_SPACE=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -2175,6 +2182,119 @@ JSONBINDING
     fi
 }
 write_atlassian_binding
+
+# ---------------------------------------------------------------------------
+# MCP de Atlassian por PROYECTO (feature #52). Solo cuando el repo tiene
+# binding: sin `atlassian.json` no hay nada que conectar.
+#
+# Alcance de PROYECTO donde el CLI lo admite (Claude, Kimi, Grok). Codex no lo
+# admite, y su config global NO se toca: se imprimen los comandos. El OAuth es
+# del usuario en todos los casos — el arnes no lo hace ni lo finge.
+#
+# Los formatos y las dos rarezas (Grok necesita `mcp-remote`; Codex necesita
+# ademas el plugin `atlassian-rovo`) se verificaron contra los CLIs instalados
+# el 2026-08-22.
+# ---------------------------------------------------------------------------
+MCP_ATLASSIAN_URL="https://mcp.atlassian.com/v1/mcp/authv2"
+
+# True si el archivo JSON ya declara un servidor llamado `atlassian`.
+mcp_ya_declarado() {
+    [ -f "$1" ] && grep -q '"atlassian"' "$1"
+}
+
+# Escribe un mcp.json con el servidor, conservando los que ya hubiera (AC-9).
+write_mcp_json() {
+    target="$1"
+    mkdir -p "$(dirname "$target")"
+    if [ ! -f "$target" ]; then
+        cat > "$target" <<MCPJSON
+{
+  "mcpServers": {
+    "atlassian": {
+      "url": "$MCP_ATLASSIAN_URL"
+    }
+  }
+}
+MCPJSON
+        return 0
+    fi
+    # Ya existe: se agrega sin tocar el resto (python3 es requisito del smoke).
+    python3 - "$target" "$MCP_ATLASSIAN_URL" <<'PYMCP'
+import json, sys
+ruta, url = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(ruta))
+except Exception:
+    data = {}
+servers = data.setdefault("mcpServers", {})
+servers["atlassian"] = {"url": url}
+json.dump(data, open(ruta, "w"), indent=2)
+open(ruta, "a").write("\n")
+PYMCP
+}
+
+write_mcp_atlassian() {
+    if [ "$MCP_ATLASSIAN" -eq 0 ]; then
+        return 0
+    fi
+    if [ -z "$JIRA_PROJECT" ] && [ ! -f "$SURFACE_DIR/atlassian.json" ]; then
+        return 0   # AC-1: sin binding, nada que hacer
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Configuraria el MCP de Atlassian en .mcp.json, .kimi-code/mcp.json y .grok/config.toml"
+        return 0
+    fi
+
+    # --- Claude Code: .mcp.json de proyecto (AC-4) ---
+    if mcp_ya_declarado "$SURFACE_DIR/.mcp.json"; then
+        log_info "MCP Atlassian: .mcp.json ya lo declara (respetado)."
+    else
+        write_mcp_json "$SURFACE_DIR/.mcp.json"
+        track_action "mcp claude"
+        log_success "MCP Atlassian: .mcp.json (Claude Code, alcance de proyecto)."
+    fi
+
+    # --- Kimi Code: .kimi-code/mcp.json de proyecto (AC-5) ---
+    if mcp_ya_declarado "$SURFACE_DIR/.kimi-code/mcp.json"; then
+        log_info "MCP Atlassian: .kimi-code/mcp.json ya lo declara (respetado)."
+    else
+        write_mcp_json "$SURFACE_DIR/.kimi-code/mcp.json"
+        track_action "mcp kimi"
+        log_success "MCP Atlassian: .kimi-code/mcp.json (Kimi Code)."
+    fi
+
+    # --- Grok: .grok/config.toml de proyecto, VIA mcp-remote (AC-6) ---
+    if [ -f "$SURFACE_DIR/.grok/config.toml" ] && grep -q "mcp_servers.atlassian" "$SURFACE_DIR/.grok/config.toml"; then
+        log_info "MCP Atlassian: .grok/config.toml ya lo declara (respetado)."
+    else
+        mkdir -p "$SURFACE_DIR/.grok"
+        cat >> "$SURFACE_DIR/.grok/config.toml" <<GROKMCP
+
+# MCP de Atlassian (harness_process). Va por \`mcp-remote\` a proposito: el
+# cliente HTTP de Grok no completa el flujo OAuth de MCP y falla con
+# "OAuth authorization required"; el bridge si lo resuelve.
+[mcp_servers.atlassian]
+command = "npx"
+args = ["-y", "mcp-remote@latest", "$MCP_ATLASSIAN_URL"]
+GROKMCP
+        track_action "mcp grok"
+        log_success "MCP Atlassian: .grok/config.toml (Grok, via mcp-remote)."
+        command -v npx >/dev/null 2>&1 || log_warn "MCP Atlassian: falta 'npx' en el PATH; Grok no va a poder levantar mcp-remote."
+    fi
+
+    # --- Codex: NO se toca su config global (AC-7) ---
+    log_info "MCP Atlassian: Codex no admite MCP por proyecto, asi que su config NO se toca. Corre vos, una sola vez:"
+    log_info "    codex mcp add atlassian --url $MCP_ATLASSIAN_URL"
+    log_info "    codex plugin add atlassian-rovo@openai-curated   # imprescindible: sin el plugin, el agente no ve las tools"
+
+    # --- Autorizacion: el arnes NO hace el OAuth (AC-10) ---
+    log_info "MCP Atlassian: falta AUTORIZAR (el arnes no hace el OAuth). Por CLI:"
+    log_info "    Claude: /mcp             (aproba el servidor del proyecto)"
+    log_info "    Kimi:   /mcp-config login atlassian"
+    log_info "    Grok:   se autoriza en el primer uso (mcp-remote abre el navegador)"
+    log_info "    Codex:  el propio 'codex mcp add' abre el OAuth"
+}
+write_mcp_atlassian
 
 archive_legacy_file ".claudemd" ".claudemd es obsoleto; Claude Code lee CLAUDE.md"
 archive_legacy_file "validate_aks.sh" "validate_aks.sh quedo obsoleto"

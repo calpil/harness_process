@@ -33,6 +33,7 @@ param(
     [string]$JiraProject,
     [string]$ConfluenceSpace,
     [string]$JiraIssueType,
+    [switch]$NoMcpAtlassian,
     [switch]$CreateJiraProject,
     [switch]$CreateConfluenceSpace,
     [string]$CargoTargetDir
@@ -295,6 +296,64 @@ function Initialize-HarnessEnvTemplate {
 "@
     Write-HarnessText -Path $target -Content ($template + [Environment]::NewLine)
     Write-HarnessLog INFO "Local config seeded: $target (put the Atlassian email and token there; already gitignored)."
+}
+
+function Write-McpAtlassian {
+    # Feature #52: MCP de Atlassian por PROYECTO en los backends que lo admiten
+    # (Claude, Kimi, Grok). Codex no admite alcance de proyecto y su config
+    # global NO se toca: se imprimen los comandos. El OAuth es del usuario.
+    # Paridad con write_mcp_atlassian() de setup_harness.sh.
+    if ($NoMcpAtlassian) { return }
+    $binding = Join-Path $script:SurfaceDir "atlassian.json"
+    if (-not (Test-Path -LiteralPath $binding -PathType Leaf)) { return }
+    $url = "https://mcp.atlassian.com/v1/mcp/authv2"
+    if ($DryRun) {
+        Write-HarnessLog INFO "[DRY-RUN] Would configure the Atlassian MCP in .mcp.json, .kimi-code/mcp.json and .grok/config.toml"
+        return
+    }
+
+    foreach ($rel in @(".mcp.json", ".kimi-code/mcp.json")) {
+        $target = Join-Path $script:SurfaceDir $rel
+        if ((Test-Path -LiteralPath $target -PathType Leaf) -and ((Get-Content -LiteralPath $target -Raw) -match '"atlassian"')) {
+            Write-HarnessLog INFO "MCP Atlassian: $rel ya lo declara (respetado)."
+            continue
+        }
+        $dir = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $data = if (Test-Path -LiteralPath $target -PathType Leaf) {
+            try { Get-Content -LiteralPath $target -Raw | ConvertFrom-Json -AsHashtable } catch { @{} }
+        } else { @{} }
+        if (-not $data.ContainsKey("mcpServers")) { $data["mcpServers"] = @{} }
+        $data["mcpServers"]["atlassian"] = @{ url = $url }
+        Write-HarnessText -Path $target -Content (($data | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
+        Write-HarnessLog OK "MCP Atlassian: $rel."
+    }
+
+    $grok = Join-Path $script:SurfaceDir ".grok/config.toml"
+    $yaEsta = (Test-Path -LiteralPath $grok -PathType Leaf) -and ((Get-Content -LiteralPath $grok -Raw) -match "mcp_servers.atlassian")
+    if ($yaEsta) {
+        Write-HarnessLog INFO "MCP Atlassian: .grok/config.toml ya lo declara (respetado)."
+    }
+    else {
+        $grokDir = Split-Path -Parent $grok
+        if (-not (Test-Path -LiteralPath $grokDir)) { New-Item -ItemType Directory -Path $grokDir -Force | Out-Null }
+        $bloque = @"
+
+# MCP de Atlassian (harness_process). Va por ``mcp-remote`` a proposito: el
+# cliente HTTP de Grok no completa el flujo OAuth de MCP y falla con
+# "OAuth authorization required"; el bridge si lo resuelve.
+[mcp_servers.atlassian]
+command = "npx"
+args = ["-y", "mcp-remote@latest", "$url"]
+"@
+        Add-Content -LiteralPath $grok -Value $bloque
+        Write-HarnessLog OK "MCP Atlassian: .grok/config.toml (via mcp-remote)."
+    }
+
+    Write-HarnessLog INFO "MCP Atlassian: Codex no admite MCP por proyecto, asi que su config NO se toca. Corre vos, una sola vez:"
+    Write-HarnessLog INFO "    codex mcp add atlassian --url $url"
+    Write-HarnessLog INFO "    codex plugin add atlassian-rovo@openai-curated   # imprescindible: sin el plugin, el agente no ve las tools"
+    Write-HarnessLog INFO "MCP Atlassian: falta AUTORIZAR (el arnes no hace el OAuth): Claude '/mcp', Kimi '/mcp-config login atlassian', Grok en el primer uso, Codex con el propio 'codex mcp add'."
 }
 
 function Write-AtlassianBinding {
@@ -1775,6 +1834,7 @@ try {
 
     Initialize-HarnessEnvTemplate
     Write-AtlassianBinding
+    Write-McpAtlassian
 
     $generatedAssets = @(
         "init.sh",
