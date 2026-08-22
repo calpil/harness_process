@@ -1,6 +1,13 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+# El smoke no puede depender del entorno de quien lo llama: si el proceso padre
+# trae HARNESS_REPO_ROOT (por ejemplo `harness verify`, que corre los comandos
+# declarados en los AC), esa variable se filtra a TODOS los sandboxes y el
+# instalador resuelve la raiz equivocada. Se encontro asi: el smoke pasaba a
+# mano y fallaba dentro de `verify` por un hook que no aparecia donde debia.
+unset HARNESS_REPO_ROOT
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/harness-setup-smoke.XXXXXX")"
 TMP_ROOT="$(cd "$TMP_ROOT" && pwd -P)"
@@ -1566,6 +1573,65 @@ grep -qF "mcp-remote@latest" "$REPO_ROOT/setup_harness.ps1" \
     || { echo "[!] AC-11: ps1 tiene que usar mcp-remote para Grok." >&2; exit 1; }
 grep -qF "atlassian-rovo@openai-curated" "$REPO_ROOT/setup_harness.ps1" \
     || { echo "[!] AC-11: ps1 tiene que nombrar el plugin de Codex." >&2; exit 1; }
+# ---------------------------------------------------------------------------
+# Feature #58: el guard no bloquea por lo que escribe el ARNES.
+# Se prueba el guard INSTALADO, con un proyecto de fixture que tiene dos repos
+# hermanos (docs y ms-auth), que es la forma real del caso: en un proyecto donde
+# `docs/` es su propio repo, cada documento del arnes bloqueaba el turno.
+# ---------------------------------------------------------------------------
+GUARD58="$TMP_ROOT/guard58"
+rm -rf "$GUARD58"
+mkdir -p "$GUARD58/proyecto/docs/prd" "$GUARD58/proyecto/ms-auth" "$GUARD58/proyecto/harness_process"
+cp "$SUBDIR_HARNESS/commit_guard.sh" "$GUARD58/proyecto/harness_process/commit_guard.sh"
+for guard58_repo in docs ms-auth; do
+    git -C "$GUARD58/proyecto/$guard58_repo" init -q
+    echo base > "$GUARD58/proyecto/$guard58_repo/base.txt"
+    git -C "$GUARD58/proyecto/$guard58_repo" add -A
+    git -C "$GUARD58/proyecto/$guard58_repo" -c user.email=t@e.cl -c user.name=T commit -q -m base
+done
+guard58_run() {
+    HARNESS_REPO_ROOT="$GUARD58/proyecto" sh "$GUARD58/proyecto/harness_process/commit_guard.sh" </dev/null 2>&1
+}
+# AC-1 + AC-2: solo artefactos del arnes -> no bloquea y LO DICE.
+echo x > "$GUARD58/proyecto/docs/spec-feature-7-x.md"
+echo y > "$GUARD58/proyecto/docs/impl-7.md"
+echo z > "$GUARD58/proyecto/docs/prd/PRD-master.md"
+guard58_rc=0
+guard58_out="$(guard58_run)" || guard58_rc=$?
+[ "$guard58_rc" -eq 0 ] \
+    || { echo "[!] AC-1: el guard bloqueo por artefactos del arnes (rc=$guard58_rc)" >&2; exit 1; }
+printf '%s' "$guard58_out" | grep -q '^\[i\] docs: solo artefactos del arnes' \
+    || { echo "[!] AC-2: el guard no dijo que se salteo docs: $guard58_out" >&2; exit 1; }
+# AC-5: un documento que NO es del arnes, en el MISMO repo -> bloquea.
+echo r > "$GUARD58/proyecto/docs/runbook.md"
+guard58_run >/dev/null 2>&1 \
+    && { echo "[!] AC-5: un doc ajeno (runbook.md) tiene que bloquear" >&2; exit 1; }
+rm "$GUARD58/proyecto/docs/runbook.md"
+# AC-3 + AC-4: codigo sin commitear -> bloquea, y el repo del arnes se sigue eximiendo.
+echo "package main" > "$GUARD58/proyecto/ms-auth/main.go"
+guard58_rc=0
+guard58_out="$(guard58_run)" || guard58_rc=$?
+[ "$guard58_rc" -eq 2 ] \
+    || { echo "[!] AC-3: el codigo sin commitear tiene que bloquear (rc=$guard58_rc)" >&2; exit 1; }
+printf '%s' "$guard58_out" | grep -q 'Cambios sin commitear en: ms-auth' \
+    || { echo "[!] AC-3: el bloqueo tiene que nombrar ms-auth: $guard58_out" >&2; exit 1; }
+printf '%s' "$guard58_out" | grep -q '^\[i\] docs: solo artefactos' \
+    || { echo "[!] AC-4: docs se sigue eximiendo aunque otro repo bloquee" >&2; exit 1; }
+rm "$GUARD58/proyecto/ms-auth/main.go"
+# Un artefacto MODIFICADO (no untracked) tambien se exime.
+git -C "$GUARD58/proyecto/docs" add -A
+git -C "$GUARD58/proyecto/docs" -c user.email=t@e.cl -c user.name=T commit -q -m docs
+echo cambio >> "$GUARD58/proyecto/docs/impl-7.md"
+guard58_run >/dev/null 2>&1 \
+    || { echo "[!] AC-1: un artefacto MODIFICADO tambien se exime" >&2; exit 1; }
+# El nombre NO alcanza: un `impl-*.md` dentro de un microservicio no es del
+# arnes y tiene que seguir bloqueando (encontrado rompiendo esta feature).
+echo "notas del servicio" > "$GUARD58/proyecto/ms-auth/impl-notas.md"
+guard58_run >/dev/null 2>&1 \
+    && { echo "[!] AC-5: un impl-*.md dentro de un microservicio NO es artefacto del arnes" >&2; exit 1; }
+rm "$GUARD58/proyecto/ms-auth/impl-notas.md"
+echo "[Ok] Guard #58: los artefactos del arnes no bloquean (y se dice), el codigo y los docs ajenos si."
+
 echo "[Ok] MCP Atlassian #52: por proyecto en Claude/Kimi/Grok, Codex por comando, respeta lo existente, conserva otros servidores y se apaga con el flag."
 
 echo "[Ok] Roles #51: opus para el implementer, fable para lider y reviewer, xhigh los tres, sin pisarse al reinstalar y tunables por variable."

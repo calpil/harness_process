@@ -48,6 +48,35 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**Un gate solo verifica lo que puede ejecutar** (feature #46). El comando que
+mejor prueba una feature suele ser el mas verboso, y era justo el que no se
+podia declarar: `verify` leia los pipes DESPUES de esperar al proceso, asi que
+cualquier comando que pasara los ~64 KB del buffer trababa a los dos. Tres
+decisiones:
+
+- **Leer mientras corre, no despues.** Un hilo por descriptor, lanzado antes de
+  esperar. Es la unica forma de que el productor no se bloquee.
+- **Ningun camino puede esperar sin limite.** El timeout corta al proceso y una
+  gracia corta corta a los lectores: si un nieto heredo el pipe, se reporta lo
+  leido y se sigue. Cambiar un cuelgue por otro es no haber arreglado nada.
+- **Lo que se recorta se declara.** Tope de 4 MB reteniendo la cola —donde estan
+  los resumenes que deciden el estado— y una linea en el reporte diciendo
+  cuanto quedo afuera y sobre que se midio.
+
+**El arnes no se bloquea a si mismo, tambien en el guard** (feature #58).
+`docs/rutas-protegidas.md` ya declaraba la regla —"la proteccion es contra las
+herramientas del agente, no contra el binario"— pero el commit guard no la
+aplicaba, y en un proyecto donde `docs/` es su propio repo eso bloqueaba el
+turno en cada documento que el arnes escribia. Dos decisiones:
+
+- **La exencion es por ARTEFACTO y por UBICACION, nunca por carpeta.** Un
+  `docs/runbook.md` sigue bloqueando, y un `impl-notas.md` dentro de un
+  microservicio tampoco se exime: el nombre solo no alcanza. Un gate que se
+  relaja de mas es peor que uno estricto, porque nadie revisa lo que cree
+  cubierto.
+- **Cuando un gate se saltea algo, lo dice.** Una linea `[i]` con el repo y la
+  razon. Un guard que se calla en silencio es indistinguible de uno apagado.
+
 **El material se entrega y el vacio se dice** (feature #56). La #51 dejo de
 hacer que el REVISOR explorara; esta hace lo mismo con el que IMPLEMENTA, y
 agrega la parte que faltaba: avisar cuando no hay nada que entregar. Tres

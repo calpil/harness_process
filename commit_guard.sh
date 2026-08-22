@@ -79,6 +79,59 @@ if [ -z "$REPO_ROOT" ]; then
         REPO_ROOT="$HARNESS_DIR"
     fi
 fi
+# Feature #58: el arnes no se bloquea a si mismo.
+#
+# El guard trata como microservicio a todo subdirectorio que sea un repo git, y
+# en un proyecto donde `docs/` es su PROPIO repo eso incluye los 137 artefactos
+# que el arnes escribe ahi. Resultado: cada start/advance/prd apply terminaba el
+# turno pidiendo "commit por microservicio" de archivos que el propio `close` va
+# a commitear, y la salida facil era apagar el guard tambien para el codigo.
+#
+# La regla ya estaba escrita en docs/rutas-protegidas.md ("la proteccion es
+# contra las herramientas del agente, no contra el binario"); aca se aplica.
+# La exencion es POR ARTEFACTO, no por carpeta (decision del usuario): alcanza
+# UN archivo que no sea del arnes para que el repo vuelva a contar como sucio.
+es_artefacto_del_arnes() {
+    # $1 ruta relativa al repo, $2 basename del repo.
+    #
+    # No alcanza con el nombre: los artefactos del arnes viven en `docs/`, o sea
+    # que la ruta arranca con `docs/` o el repo sucio ES el `docs/`. Sin esta
+    # condicion, un `impl-notas.md` dentro de un microservicio se eximia como si
+    # fuera del arnes y el guard dejaba de mirar un documento real (encontrado
+    # intentando romper esta misma feature).
+    case "$1" in
+        docs/*) ruta="${1#docs/}" ;;
+        *)
+            [ "$2" = "docs" ] || return 1
+            ruta="$1"
+            ;;
+    esac
+    case "$ruta" in
+        spec-feature-*.md|plan-feature-*.md|impl-*.md|review-*.md|verify-*.md) return 0 ;;
+        estado-feature-*.md|prd-diff-*.md) return 0 ;;
+        prd/*|lecciones/*) return 0 ;;
+        architecture.md|perfil-usuario.md) return 0 ;;
+    esac
+    return 1
+}
+
+# 0 solo si hubo cambios y TODOS son artefactos del arnes.
+solo_artefactos_del_arnes() {
+    hubo=1
+    while IFS= read -r linea; do
+        [ -n "$linea" ] || continue
+        ruta=${linea#???}                                   # XY + espacio
+        case "$ruta" in *" -> "*) ruta=${ruta##* -> } ;; esac  # renombrados
+        ruta=${ruta#\"}
+        ruta=${ruta%\"}
+        es_artefacto_del_arnes "$ruta" "$(basename "$1")" || return 1
+        hubo=0
+    done <<EOF
+$(git -C "$1" status --porcelain 2>/dev/null)
+EOF
+    return $hubo
+}
+
 DIRTY=""
 for repo in "$REPO_ROOT"/*; do
     [ -d "$repo" ] || continue
@@ -93,7 +146,12 @@ for repo in "$REPO_ROOT"/*; do
     git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
     [ -z "$(git -C "$repo" rev-parse --show-prefix 2>/dev/null)" ] || continue
     if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
-        DIRTY="$DIRTY $(basename "$repo")"
+        if solo_artefactos_del_arnes "$repo"; then
+            # Se dice: un guard que se calla en silencio es como no tenerlo.
+            echo "[i] $(basename "$repo"): solo artefactos del arnes sin commitear (los commitea 'close'); no cuenta como sucio."
+        else
+            DIRTY="$DIRTY $(basename "$repo")"
+        fi
     fi
 done
 
