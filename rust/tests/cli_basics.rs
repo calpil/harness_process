@@ -4323,6 +4323,8 @@ fn close_blocked_should_keep_branch_and_worktree() {
         .args(["close", "--feature", "1", "--status", "blocked", "--note", "trabada"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("conservada"));
+        // Feature #50: con la rama Y el worktree presentes, el mensaje lo dice
+        // en plural y no promete nada que no haya mirado.
+        .stdout(predicate::str::contains("y su worktree conservados"));
     assert!(wt.is_dir(), "el worktree se conserva para retomar");
 }

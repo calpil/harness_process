@@ -245,6 +245,31 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     Ok(())
 }
 
+/// Que informar sobre la rama y el worktree cuando el cierre NO integra
+/// (feature #50). Devuelve `None` cuando no queda ninguno de los dos: prometer
+/// que se "conserva" algo que ya no esta es peor que no decir nada.
+///
+/// Funcion pura: recibe lo que se encontro, no lo consulta.
+fn mensaje_conservacion(
+    rama: &str,
+    status: &str,
+    hay_rama: bool,
+    hay_worktree: bool,
+) -> Option<String> {
+    match (hay_rama, hay_worktree) {
+        (true, true) => Some(format!(
+            "  Rama {rama} y su worktree conservados (el cierre `{status}` no integra)."
+        )),
+        (true, false) => Some(format!(
+            "  Rama {rama} conservada (el cierre `{status}` no integra); su worktree ya no esta."
+        )),
+        (false, true) => Some(format!(
+            "  La rama {rama} ya no esta, pero queda su worktree (el cierre `{status}` no integra)."
+        )),
+        (false, false) => None,
+    }
+}
+
 /// Integracion GitFlow del cierre (feature #47 / AC-14..AC-21).
 ///
 /// Solo `done` integra: `blocked`, `pending` y `superseded` conservan la rama y
@@ -275,9 +300,15 @@ fn integrar(
         return Ok(());
     };
     if status != "done" {
-        println!(
-            "  Rama {rama} conservada (el cierre `{status}` no integra); su worktree tambien."
-        );
+        // Feature #50: se mira el repo ANTES de afirmar. El backlog dice que la
+        // feature tuvo rama y worktree; que sigan existiendo es otra cosa (el
+        // usuario pudo haberlos borrado a mano).
+        let hay_rama = crate::git::repo_principal(&paths.repo_root)
+            .is_some_and(|principal| crate::git::rama_existe(&principal, &rama));
+        let hay_worktree = worktree.as_ref().is_some_and(|wt| wt.is_dir());
+        if let Some(linea) = mensaje_conservacion(&rama, status, hay_rama, hay_worktree) {
+            println!("{linea}");
+        }
         return Ok(());
     }
     let Some(principal) = crate::git::repo_principal(&paths.repo_root) else {
@@ -372,5 +403,45 @@ fn echo_to_prd(paths: &HarnessPaths, feature: &serde_json::Map<String, Value>, s
         }
         Ok(_) => println!("[i] El PRD {rel} ya tenia registrada esta feature."),
         Err(err) => println!("[i] No se pudo actualizar {rel}: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Feature #50: la tabla completa de lo que el cierre puede encontrarse.
+    /// El caso que motivo la feature es el ultimo: borrar la rama y el worktree
+    /// a mano y cerrar despues, que antes respondia "conservada" sobre las dos.
+    #[test]
+    fn mensaje_conservacion_should_only_claim_what_exists() {
+        // AC-1: estan los dos.
+        let ambos = mensaje_conservacion("feature/50-x", "pending", true, true);
+        let Some(ambos) = ambos else {
+            panic!("con rama y worktree tiene que informar");
+        };
+        assert!(ambos.contains("feature/50-x"));
+        assert!(ambos.contains("conservados"));
+        assert!(ambos.contains("pending"), "nombra el estado que no integra");
+
+        // AC-2: quedo la rama, no el worktree.
+        let Some(solo_rama) = mensaje_conservacion("feature/50-x", "blocked", true, false) else {
+            panic!("con rama tiene que informar");
+        };
+        assert!(solo_rama.contains("conservada"));
+        assert!(solo_rama.contains("worktree ya no esta"));
+
+        // AC-3: quedo el worktree, no la rama.
+        let Some(solo_wt) = mensaje_conservacion("feature/50-x", "superseded", false, true) else {
+            panic!("con worktree tiene que informar");
+        };
+        assert!(solo_wt.contains("rama feature/50-x ya no esta"));
+        assert!(solo_wt.contains("queda su worktree"));
+
+        // AC-4: no queda nada -> silencio, no una promesa vacia.
+        assert!(
+            mensaje_conservacion("feature/50-x", "superseded", false, false).is_none(),
+            "sin rama ni worktree no hay nada que informar"
+        );
     }
 }
