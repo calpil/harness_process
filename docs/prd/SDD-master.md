@@ -48,6 +48,21 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**Aislamiento entre features** (feature #47). Dos implementaciones simultaneas
+no comparten archivos: cada feature vive en su rama GitFlow y en su worktree
+hermano del repo. Tres decisiones que valen para cualquier feature futura que
+toque el flujo:
+
+- **El estado del arnes es unico.** `feature_list.json` y `progress/` se
+  resuelven contra el repo PRINCIPAL (`git rev-parse --git-common-dir`) aunque
+  el binario se invoque desde un worktree: el backlog no se bifurca nunca.
+- **Los docs se resuelven DESDE la feature, no desde el directorio actual.**
+  `HarnessPaths::para_feature()` apunta `docs/` al worktree de esa feature, para
+  que su spec, su plan y su evidencia viajen con el merge de su rama.
+- **El arnes nunca reescribe historia ni elige la rama destino.** Sin `--force`,
+  sin rebase, sin squash y sin borrar ramas; el merge corre en un worktree
+  temporal (no toca tu checkout) y `--to` lo decide el USUARIO.
+
 **Como habla el arnes con un LLM** (feature #28, la unica parte que usa modelo).
 La cadena es `HARNESS_CONSOLIDAR_CMD` -> primer CLI de una tabla corta
 (`claude -p`, `kimi -p`) -> **skip limpio**. Apagada por default y de forma
