@@ -86,7 +86,15 @@ pub fn alcance(paths: &HarnessPaths, feature: &Value) -> Vec<Documento> {
         });
     }
 
-    let arch = paths.repo_root.join(ARCHITECTURE);
+    // Feature #49: se resuelve contra el `docs/` de la FEATURE — el mismo del
+    // que salen el PRD y el SDD — y no contra la raiz. Con worktree (feature
+    // #47) eso hace que el cambio viaje con el merge de su rama; sin worktree,
+    // `plans` ES el docs/ de la raiz y el comportamiento no cambia.
+    let arch = paths.plans.join(
+        ARCHITECTURE
+            .strip_prefix("docs/")
+            .unwrap_or(ARCHITECTURE),
+    );
     if arch.is_file() {
         out.push(Documento {
             rel: ARCHITECTURE.to_string(),
@@ -500,13 +508,69 @@ mod tests {
             std::fs::write(prd.join(SDD), "# SDD\n\ncuerpo del sdd\n").unwrap();
         }
         if con_arch {
-            std::fs::create_dir_all(paths.repo_root.join("docs")).unwrap();
+            // Feature #49: architecture.md vive en el mismo `docs/` que el PRD
+            // y el SDD (el de la feature). Sin worktree, ese docs/ es el de la
+            // raiz, asi que esto siembra donde siempre.
+            std::fs::create_dir_all(&paths.plans).unwrap();
             std::fs::write(
-                paths.repo_root.join(ARCHITECTURE),
+                paths.plans.join("architecture.md"),
                 "# Arquitectura\n\nlinea dos\nlinea tres\n",
             )
             .unwrap();
         }
+    }
+
+    #[test]
+    fn architecture_should_come_from_the_feature_docs_not_the_repo_root() {
+        // Feature #49 / AC-1 + AC-4: cuando la feature trabaja en un worktree,
+        // `plans` apunta al docs/ DE ESA FEATURE. architecture.md tiene que
+        // salir de ahi — como el PRD y el SDD — para viajar con el merge de su
+        // rama. Si alguien vuelve a armar la ruta contra `repo_root`, este test
+        // falla.
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = paths_en(dir.path());
+        // Simula el worktree: su docs/ es otro directorio.
+        let worktree_docs = dir.path().join("wt-49/docs");
+        std::fs::create_dir_all(&worktree_docs).unwrap();
+        paths.plans = worktree_docs.clone();
+        sembrar_docs(&paths, true, true);
+
+        // Y en la raiz hay un architecture.md VIEJO que no debe ganar.
+        std::fs::create_dir_all(paths.repo_root.join("docs")).unwrap();
+        std::fs::write(
+            paths.repo_root.join(ARCHITECTURE),
+            "# Arquitectura vieja\n",
+        )
+        .unwrap();
+
+        let Some(arch) = alcance(&paths, &json!({"id": 49, "prd": "master"}))
+            .into_iter()
+            .find(|d| d.rel == ARCHITECTURE)
+        else {
+            panic!("architecture.md tiene que entrar al alcance");
+        };
+        assert_eq!(
+            arch.path,
+            worktree_docs.join("architecture.md"),
+            "sale del docs/ de la feature, no de la raiz"
+        );
+        // La etiqueta relativa no cambia: es como se nombra el documento.
+        assert_eq!(arch.rel, "docs/architecture.md");
+    }
+
+    #[test]
+    fn architecture_should_fall_back_to_the_root_without_worktree() {
+        // AC-3: sin worktree, `plans` ES el docs/ de la raiz: cero regresion.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_en(dir.path());
+        sembrar_docs(&paths, true, true);
+        let Some(arch) = alcance(&paths, &json!({"id": 1, "prd": "master"}))
+            .into_iter()
+            .find(|d| d.rel == ARCHITECTURE)
+        else {
+            panic!("architecture.md tiene que entrar al alcance");
+        };
+        assert_eq!(arch.path, paths.repo_root.join(ARCHITECTURE));
     }
 
     #[test]
