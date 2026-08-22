@@ -48,6 +48,21 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**Un gate solo verifica lo que puede ejecutar** (feature #46). El comando que
+mejor prueba una feature suele ser el mas verboso, y era justo el que no se
+podia declarar: `verify` leia los pipes DESPUES de esperar al proceso, asi que
+cualquier comando que pasara los ~64 KB del buffer trababa a los dos. Tres
+decisiones:
+
+- **Leer mientras corre, no despues.** Un hilo por descriptor, lanzado antes de
+  esperar. Es la unica forma de que el productor no se bloquee.
+- **Ningun camino puede esperar sin limite.** El timeout corta al proceso y una
+  gracia corta corta a los lectores: si un nieto heredo el pipe, se reporta lo
+  leido y se sigue. Cambiar un cuelgue por otro es no haber arreglado nada.
+- **Lo que se recorta se declara.** Tope de 4 MB reteniendo la cola —donde estan
+  los resumenes que deciden el estado— y una linea en el reporte diciendo
+  cuanto quedo afuera y sobre que se midio.
+
 **El arnes no se bloquea a si mismo, tambien en el guard** (feature #58).
 `docs/rutas-protegidas.md` ya declaraba la regla —"la proteccion es contra las
 herramientas del agente, no contra el binario"— pero el commit guard no la

@@ -24,6 +24,11 @@ pub const TIMEOUT_DEFAULT: u64 = 300;
 /// Lineas de salida que se guardan de un fallo.
 pub const LINEAS_SALIDA: usize = 20;
 
+/// Tope de salida retenida por comando (decision del usuario, OBS-1 de la #46).
+/// Se retiene la COLA: una suite entera entra holgada y una salida infinita no
+/// puede voltear al arnes por memoria.
+pub const MAX_SALIDA_BYTES: usize = 4 * 1024 * 1024;
+
 /// Un AC del spec y, si lo declara, su comando de verificacion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verificacion {
@@ -238,6 +243,10 @@ pub fn ejecutar(comando: &str, cwd: &Path, timeout: Duration) -> (Estado, Option
             );
         }
     };
+    // Feature #46: los lectores arrancan ANTES de esperar al proceso. Si se
+    // espera primero, el hijo se bloquea al llenar el buffer del pipe (~64 KB)
+    // y nadie lo desbloquea nunca.
+    let lectores = lanzar_lectores(&mut hijo);
     let estado_salida = match hijo.wait_timeout(timeout) {
         Ok(Some(s)) => Some(s),
         Ok(None) => {
@@ -246,6 +255,8 @@ pub fn ejecutar(comando: &str, cwd: &Path, timeout: Duration) -> (Estado, Option
             None
         }
         Err(err) => {
+            let _ = hijo.kill();
+            let _ = juntar_lectores(lectores);
             return (
                 Estado::Rojo,
                 None,
@@ -260,9 +271,24 @@ pub fn ejecutar(comando: &str, cwd: &Path, timeout: Duration) -> (Estado, Option
     // ultimas LINEAS_SALIDA en cuanto el comando imprime algo despues, y el
     // detector se apaga solo justo cuando mas hace falta: `cargo test` manda los
     // diagnosticos de compilacion por stderr, y stderr va al final.
-    let completa = leer_salida(&mut hijo);
+    // Los hilos terminan solos cuando el proceso cierra sus pipes (tambien
+    // cuando se lo mata por timeout), asi que este join no puede quedarse.
+    let (completa, omitidos, quedo_abierto) = juntar_lectores(lectores);
     let casos = casos_corridos(&completa);
-    let salida = recortar_salida(&completa);
+    let mut salida = recortar_salida(&completa);
+    // OBS-2: si el tope recorto, se DICE, y se dice cuanto quedo afuera.
+    if quedo_abierto {
+        salida = format!(
+            "(un proceso hijo dejo el pipe abierto: se reporta lo leido hasta el corte)\n{salida}"
+        );
+    }
+    if omitidos > 0 {
+        salida = format!(
+            "(... {} KB del principio omitidos por el tope de {} MB; el estado se midio sobre lo retenido)\n{salida}",
+            omitidos / 1024,
+            MAX_SALIDA_BYTES / (1024 * 1024)
+        );
+    }
     match estado_salida {
         None => (Estado::Timeout, None, duracion, salida),
         // Feature #44: el camino feliz ya no descarta la salida. Un exit 0 dice
@@ -276,18 +302,106 @@ pub fn ejecutar(comando: &str, cwd: &Path, timeout: Duration) -> (Estado, Option
     }
 }
 
-fn leer_salida(hijo: &mut std::process::Child) -> String {
-    use std::io::Read;
+/// Buffer compartido entre el hilo lector y quien lo espera. Compartido y no
+/// devuelto al final porque el lector puede NO terminar: si el comando deja un
+/// nieto vivo con el pipe heredado, no hay EOF hasta que ese nieto muera. En
+/// ese caso el gate se queda con lo leido hasta el momento y sigue.
+#[derive(Default)]
+struct Buf {
+    datos: std::collections::VecDeque<u8>,
+    /// Bytes leidos en total, que puede ser mas que los retenidos.
+    total: usize,
+}
+
+type Compartido = std::sync::Arc<std::sync::Mutex<Buf>>;
+
+/// Cuanto se espera a un lector DESPUES de que el proceso termino. Pasado esto
+/// se asume un descriptor heredado por un nieto y se sigue con lo que haya.
+const GRACIA_LECTOR: Duration = Duration::from_secs(2);
+
+/// Vacia un pipe HASTA EL EOF en un hilo aparte, reteniendo como mucho
+/// `MAX_SALIDA_BYTES` — y reteniendo la **cola**, no la cabeza (OBS-2): los
+/// resumenes que deciden el estado (`test result:`, `FAILED`) estan al final.
+///
+/// Esta funcion es el corazon de la feature #46. Antes se leia DESPUES de
+/// esperar al proceso, y un comando que imprimia mas que el buffer del pipe
+/// (~64 KB) se bloqueaba escribiendo mientras `verify` se bloqueaba
+/// esperandolo: deadlock. Medido en vivo: el instalador once minutos sin
+/// avanzar, con `stdout`/`stderr` en PIPE y sin un solo hijo.
+fn lector<R: std::io::Read + Send + 'static>(
+    mut pipe: R,
+) -> (std::thread::JoinHandle<()>, Compartido) {
+    let compartido: Compartido = std::sync::Arc::new(std::sync::Mutex::new(Buf::default()));
+    let mio = std::sync::Arc::clone(&compartido);
+    let hilo = std::thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let Ok(mut buf) = mio.lock() else { break };
+                    buf.total += n;
+                    buf.datos.extend(&chunk[..n]);
+                    // `drain` en un VecDeque cuesta lo que se tira, no lo que
+                    // queda: por eso el tope no vuelve cuadratica la lectura de
+                    // una salida enorme.
+                    if buf.datos.len() > MAX_SALIDA_BYTES {
+                        let sobra = buf.datos.len() - MAX_SALIDA_BYTES;
+                        buf.datos.drain(..sobra);
+                    }
+                }
+            }
+        }
+    });
+    (hilo, compartido)
+}
+
+/// Lanza los dos hilos lectores. Se llama ANTES de esperar al proceso: esa es
+/// toda la diferencia con la version que se colgaba.
+type Lectores = Vec<(std::thread::JoinHandle<()>, Compartido)>;
+
+fn lanzar_lectores(hijo: &mut std::process::Child) -> Lectores {
+    let mut out = Vec::new();
+    if let Some(p) = hijo.stdout.take() {
+        out.push(lector(p));
+    }
+    if let Some(p) = hijo.stderr.take() {
+        out.push(lector(p));
+    }
+    out
+}
+
+/// Junta lo que leyeron los hilos —stdout primero y stderr despues, como
+/// siempre, porque la leccion de la #44 depende de que el resumen quede al
+/// final— **sin quedarse esperando para siempre**.
+///
+/// El limite existe por un caso concreto: `(sleep 30 &) ; echo listo` termina al
+/// instante, pero el nieto se queda con el pipe abierto y no hay EOF. Sin
+/// gracia, el gate esperaba 30 segundos con un timeout de 3: el corte existia y
+/// el join lo ignoraba.
+///
+/// Devuelve el texto, cuantos bytes se perdieron por el tope, y si algun lector
+/// quedo abierto.
+fn juntar_lectores(lectores: Lectores) -> (String, usize, bool) {
     let mut texto = String::new();
-    if let Some(mut out) = hijo.stdout.take() {
-        let _ = out.read_to_string(&mut texto);
+    let mut omitidos = 0usize;
+    let mut quedo_abierto = false;
+    for (hilo, compartido) in lectores {
+        let limite = Instant::now() + GRACIA_LECTOR;
+        while !hilo.is_finished() && Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if !hilo.is_finished() {
+            quedo_abierto = true;
+        }
+        // Se toma una foto del buffer: si el hilo sigue vivo, es lo leido hasta
+        // aca, que es mejor que nada y que esperar para siempre.
+        let Ok(buf) = compartido.lock() else { continue };
+        let bytes: Vec<u8> = buf.datos.iter().copied().collect();
+        omitidos += buf.total.saturating_sub(bytes.len());
+        texto.push_str(&String::from_utf8_lossy(&bytes));
     }
-    if let Some(mut err) = hijo.stderr.take() {
-        let mut e = String::new();
-        let _ = err.read_to_string(&mut e);
-        texto.push_str(&e);
-    }
-    texto
+    (texto, omitidos, quedo_abierto)
 }
 
 /// Ultimas `LINEAS_SALIDA` lineas: lo suficiente para diagnosticar sin volcar
@@ -475,6 +589,122 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use serde_json::json;
+
+    // -----------------------------------------------------------------
+    // Feature #46: el deadlock del pipe lleno.
+    //
+    // Todos estos tests se COLGABAN antes del arreglo (el comando se bloquea
+    // escribiendo, `ejecutar` se bloquea esperandolo). Que terminen ES la
+    // verificacion: por eso cada uno mide ademas su duracion.
+    // -----------------------------------------------------------------
+
+    /// ~120 KB, casi el doble del buffer tipico de un pipe (64 KB).
+    const LINEAS_GRANDES: usize = 4000;
+
+    fn corre(comando: &str) -> (Estado, Option<i32>, u128, String) {
+        ejecutar(comando, Path::new("."), Duration::from_secs(60))
+    }
+
+    #[test]
+    fn verify_salida_grande_stdout() {
+        let cmd = format!("for i in $(seq 1 {LINEAS_GRANDES}); do echo \"linea larga de relleno numero $i\"; done");
+        let (estado, code, ms, _) = corre(&cmd);
+        assert_eq!(estado, Estado::Verde, "un comando verboso que sale 0 es verde");
+        assert_eq!(code, Some(0));
+        assert!(ms < 60_000, "termino solo, no por timeout ({ms} ms)");
+    }
+
+    #[test]
+    fn verify_salida_grande_stderr() {
+        let cmd = format!("for i in $(seq 1 {LINEAS_GRANDES}); do echo \"error de relleno numero $i\" >&2; done");
+        let (estado, _, ms, _) = corre(&cmd);
+        assert_eq!(estado, Estado::Verde);
+        assert!(ms < 60_000, "termino solo ({ms} ms)");
+    }
+
+    #[test]
+    fn verify_salida_grande_ambos() {
+        // El caso real: el instalador escribe por los dos a la vez. Con un solo
+        // lector secuencial, el segundo pipe se llena mientras se drena el
+        // primero y el hijo queda bloqueado igual.
+        let cmd = format!(
+            "for i in $(seq 1 {LINEAS_GRANDES}); do echo \"salida $i\"; echo \"error $i\" >&2; done"
+        );
+        let (estado, _, ms, _) = corre(&cmd);
+        assert_eq!(estado, Estado::Verde);
+        assert!(ms < 60_000, "termino solo ({ms} ms)");
+    }
+
+    #[test]
+    fn verify_estado_sobre_salida_completa() {
+        // Leccion de la #44: el resumen que decide el estado llega al final, y
+        // detras de miles de lineas. Si el estado se midiera sobre lo recortado
+        // (20 lineas) esto daria Vacio.
+        let cmd = format!(
+            "for i in $(seq 1 {LINEAS_GRANDES}); do echo \"compilando modulo $i\"; done; \
+             echo 'test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out'"
+        );
+        let (estado, _, _, _) = corre(&cmd);
+        assert_eq!(estado, Estado::Verde, "3 casos corridos: verde, no vacio");
+
+        // Y el detector sigue distinguiendo el 0: exit 0 sin casos es Vacio.
+        let cmd_vacio = format!(
+            "for i in $(seq 1 {LINEAS_GRANDES}); do echo \"compilando modulo $i\"; done; \
+             echo 'test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out'"
+        );
+        let (estado, _, _, _) = corre(&cmd_vacio);
+        assert_eq!(estado, Estado::Vacio, "0 casos: el filtro no matcheo nada");
+    }
+
+    #[test]
+    fn verify_nieto_que_hereda_el_pipe() {
+        // El unico riesgo que introduce leer con hilos: si el comando deja un
+        // NIETO vivo con el pipe heredado, el lector no ve el EOF aunque el
+        // hijo haya terminado, y el join se quedaria esperando.
+        //
+        // Los procesos detached del propio arnes (atlassian push, graphify) ya
+        // redirigen sus descriptores a null, asi que no caen aca. Este test fija
+        // el comportamiento para el resto.
+        let arranque = Instant::now();
+        let (estado, _, _, _) = ejecutar(
+            "(sleep 30 &) ; echo listo",
+            Path::new("."),
+            Duration::from_secs(3),
+        );
+        let ms = arranque.elapsed().as_millis();
+        assert!(
+            ms < 20_000,
+            "un nieto con el pipe heredado no puede colgar el gate ({ms} ms, estado {estado:?})"
+        );
+    }
+
+    #[test]
+    fn verify_timeout_sigue_cortando() {
+        // Un comando que de verdad no termina se sigue cortando: el arreglo no
+        // puede haber cambiado esto por otro cuelgue.
+        let (estado, code, _, _) = ejecutar("sleep 30", Path::new("."), Duration::from_secs(1));
+        assert_eq!(estado, Estado::Timeout);
+        assert_eq!(code, None, "no hay codigo de salida cuando se lo mata");
+    }
+
+    #[test]
+    fn verify_salida_acotada() {
+        // Mas de 4 MB: se retiene la COLA y el recorte se DECLARA (OBS-1/OBS-2).
+        // El comando sale 1 a proposito, porque el camino verde no guarda salida.
+        let cmd = "head -c 5000000 /dev/zero | tr '\\0' 'x' | fold -w 100; exit 1";
+        let (estado, _, ms, salida) = corre(cmd);
+        assert_eq!(estado, Estado::Rojo);
+        assert!(ms < 60_000, "termino solo ({ms} ms)");
+        assert!(
+            salida.contains("omitidos por el tope"),
+            "el recorte por tope se declara: {}",
+            &salida[..salida.len().min(200)]
+        );
+        assert!(
+            salida.contains("el estado se midio sobre lo retenido"),
+            "y se dice sobre que se midio"
+        );
+    }
 
     #[test]
     fn parse_should_take_the_command_below_its_ac() {
