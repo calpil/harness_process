@@ -57,6 +57,37 @@ pagina hija, respetando el arbol de `prd tree`), el SDD maestro y cada spec
 (colgado del PRD que lo origina). Cada pagina enlaza a su issue y cada issue a
 su pagina.
 
+## El MCP en tus agentes (feature #52)
+
+Si el repo tiene binding, el instalador tambien deja el MCP de Atlassian
+configurado **para ese proyecto**, en el formato real de cada CLI:
+
+| Backend | Archivo (del proyecto) | Como |
+| --- | --- | --- |
+| Claude Code | `.mcp.json` | HTTP directo; se aprueba con `/mcp` |
+| Kimi Code | `.kimi-code/mcp.json` | HTTP directo; se autoriza con `/mcp-config login atlassian` |
+| Grok | `.grok/config.toml` | via `npx mcp-remote`: su cliente HTTP no completa el OAuth |
+| Codex | *(no admite alcance de proyecto)* | el instalador imprime los dos comandos |
+
+Codex necesita **dos** cosas, y con una sola no anda:
+
+```bash
+codex mcp add atlassian --url https://mcp.atlassian.com/v1/mcp/authv2
+codex plugin add atlassian-rovo@openai-curated   # sin el plugin, el agente no ve las tools
+```
+
+Tres reglas de este bloque:
+
+- **Sin binding no se escribe nada**, y `--no-mcp-atlassian` lo apaga.
+- **No se pisa lo que ya tengas**: si tu archivo ya declara `atlassian`, se
+  respeta; si tiene otros servidores, se conservan.
+- **El arnes NO hace el OAuth** (no puede: es interactivo). Al terminar te dice
+  el comando de autorizacion de cada CLI.
+
+Los archivos son del proyecto y **se versionan**: asi el proximo que clone el
+repo ya tiene el MCP configurado. No llevan credenciales — solo la URL publica
+del servidor.
+
 ## Se envia solo (feature #16)
 
 Con binding + token, **no hay que correr nada a mano**: cada transicion del

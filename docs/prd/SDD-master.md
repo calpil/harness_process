@@ -48,6 +48,23 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**El MCP se instala por proyecto; la autorizacion es del usuario** (feature #52).
+`atlassian drain` imprime un plan de llamadas MCP desde la feature #15, pero el
+arnes nunca instalaba el MCP que ese plan asume. Tres decisiones que valen para
+cualquier integracion futura por MCP:
+
+- **Alcance de proyecto, nunca global.** El instalador escribe la configuracion
+  MCP DEL REPO (`.mcp.json`, `.kimi-code/mcp.json`, `.grok/config.toml`) y para
+  el backend que no admite alcance de proyecto (Codex) imprime el comando en vez
+  de tocar la configuracion global del usuario. Instalar un arnes en un repo no
+  cambia como se comportan sus herramientas en los demas.
+- **El arnes no hace el OAuth y no lo finge.** Dice, por CLI, que comando correr
+  y deja claro que esa parte es del usuario.
+- **Las rarezas de cada backend se reproducen y se escriben.** Grok necesita el
+  bridge `mcp-remote`; Codex necesita el plugin `atlassian-rovo` ADEMAS del
+  servidor. Las dos se verificaron contra los CLIs instalados y quedaron en el
+  spec como hallazgos, no como deducciones.
+
 **Que revisar no cueste una fortuna** (feature #51). Verificar lo implementado
 llego a costar 10 millones de tokens, casi todos gastados explorando el repo.
 Dos decisiones que valen para cualquier feature futura que involucre a un

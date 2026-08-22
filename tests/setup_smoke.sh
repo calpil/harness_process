@@ -1486,6 +1486,78 @@ grep -qF 'claude-opus-5' "$REPO_ROOT/setup_harness.ps1" \
     || { echo "[!] AC-3: ps1 tiene que usar claude-opus-5 para el implementer." >&2; exit 1; }
 grep -qF '"xhigh"' "$REPO_ROOT/setup_harness.ps1" \
     || { echo "[!] AC-3: ps1 tiene que usar xhigh." >&2; exit 1; }
+# Feature #52: MCP de Atlassian por proyecto en los backends que lo admiten.
+MCP52="$TMP_ROOT/mcp-atlassian"
+copy_flat_fixture "$MCP52"
+# AC-1: sin binding no se escribe NADA de MCP.
+run_setup "$MCP52" --root > /dev/null 2>&1
+test ! -e "$MCP52/.mcp.json" \
+    || { echo "[!] AC-1: sin binding no se debe escribir .mcp.json." >&2; exit 1; }
+test ! -e "$MCP52/.grok/config.toml" \
+    || { echo "[!] AC-1: sin binding no se debe escribir .grok/config.toml." >&2; exit 1; }
+
+# AC-2/AC-4/AC-5/AC-6: con binding, los tres archivos de proyecto.
+printf '%s' '{"site":"calpil.atlassian.net","enabled":true,"jira":{"project_key":"ADR"},"confluence":{"space_key":"SD"}}' > "$MCP52/atlassian.json"
+run_setup "$MCP52" --root > "$TMP_ROOT/mcp52.log" 2>&1
+for f in .mcp.json .kimi-code/mcp.json .grok/config.toml; do
+    test -f "$MCP52/$f" || { echo "[!] AC-2: falta $f." >&2; exit 1; }
+done
+grep -q "mcp.atlassian.com/v1/mcp/authv2" "$MCP52/.mcp.json" \
+    || { echo "[!] AC-4: .mcp.json sin la URL del MCP." >&2; exit 1; }
+grep -q "mcp-remote" "$MCP52/.grok/config.toml" \
+    || { echo "[!] AC-6: Grok tiene que ir por mcp-remote (su cliente HTTP no hace OAuth)." >&2; exit 1; }
+# AC-7: la config global de Codex NO se toca; se imprimen los dos comandos.
+grep -q "codex plugin add atlassian-rovo" "$TMP_ROOT/mcp52.log" \
+    || { echo "[!] AC-7: falta el aviso del plugin de Codex." >&2; exit 1; }
+grep -q "codex mcp add atlassian" "$TMP_ROOT/mcp52.log" \
+    || { echo "[!] AC-7: falta el comando de Codex." >&2; exit 1; }
+# AC-10: se dice como autorizar y que el arnes no hace el OAuth.
+grep -q "falta AUTORIZAR" "$TMP_ROOT/mcp52.log" \
+    || { echo "[!] AC-10: hay que decir que falta autorizar." >&2; exit 1; }
+
+# AC-9: reinstalar conserva OTROS servidores y re-agrega el de Atlassian.
+python3 - "$MCP52/.kimi-code/mcp.json" <<'PYOTRO'
+import json, sys
+ruta = sys.argv[1]
+d = json.load(open(ruta))
+d["mcpServers"] = {"otro": {"url": "https://otro.example/mcp"}}
+json.dump(d, open(ruta, "w"), indent=2)
+PYOTRO
+run_setup "$MCP52" --root > /dev/null 2>&1
+python3 - "$MCP52/.kimi-code/mcp.json" <<'PYCHK'
+import json, sys
+d = json.load(open(sys.argv[1]))
+s = d.get("mcpServers", {})
+assert "otro" in s, "AC-9: se perdio un servidor MCP ajeno"
+assert "atlassian" in s, "AC-9: no se re-agrego atlassian"
+PYCHK
+[ $? -eq 0 ] || { echo "[!] AC-9: la fusion de servidores fallo." >&2; exit 1; }
+
+# AC-8: un `atlassian` propio del usuario no se pisa.
+printf '%s' '{"mcpServers":{"atlassian":{"url":"https://mio.example/mcp"}}}' > "$MCP52/.mcp.json"
+run_setup "$MCP52" --root > "$TMP_ROOT/mcp52-respeta.log" 2>&1
+grep -q "mio.example" "$MCP52/.mcp.json" \
+    || { echo "[!] AC-8: no se debe pisar un servidor atlassian del usuario." >&2; exit 1; }
+grep -q "ya lo declara (respetado)" "$TMP_ROOT/mcp52-respeta.log" \
+    || { echo "[!] AC-8: hay que informar que se respeto lo existente." >&2; exit 1; }
+
+# AC-3: el flag apaga todo.
+MCP52_OFF="$TMP_ROOT/mcp-atlassian-off"
+copy_flat_fixture "$MCP52_OFF"
+printf '%s' '{"site":"x.atlassian.net","enabled":true,"jira":{"project_key":"ADR"},"confluence":{"space_key":"SD"}}' > "$MCP52_OFF/atlassian.json"
+run_setup "$MCP52_OFF" --root --no-mcp-atlassian > /dev/null 2>&1
+test ! -e "$MCP52_OFF/.mcp.json" \
+    || { echo "[!] AC-3: --no-mcp-atlassian debe apagar la escritura." >&2; exit 1; }
+
+# AC-11: paridad ps1 (verificacion estatica, no hay pwsh en esta maquina).
+grep -qF "function Write-McpAtlassian" "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-11: falta Write-McpAtlassian en setup_harness.ps1." >&2; exit 1; }
+grep -qF "mcp-remote@latest" "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-11: ps1 tiene que usar mcp-remote para Grok." >&2; exit 1; }
+grep -qF "atlassian-rovo@openai-curated" "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-11: ps1 tiene que nombrar el plugin de Codex." >&2; exit 1; }
+echo "[Ok] MCP Atlassian #52: por proyecto en Claude/Kimi/Grok, Codex por comando, respeta lo existente, conserva otros servidores y se apaga con el flag."
+
 echo "[Ok] Roles #51: opus para el implementer, fable para lider y reviewer, xhigh los tres, sin pisarse al reinstalar y tunables por variable."
 
 echo "[Ok] Atlassian #16: verificacion del binding delegada al binario, flags de creacion y auto push reportado."
