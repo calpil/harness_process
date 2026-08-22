@@ -176,6 +176,16 @@ pub enum Command {
         #[command(subcommand)]
         command: PerfilCommand,
     },
+    /// Paquete minimo de revision de una feature (solo lectura)
+    Revision {
+        #[arg(long)]
+        feature: Option<String>,
+        /// Presupuesto de lineas del diff (default 400)
+        #[arg(long = "max-lineas")]
+        max_lineas: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Integracion con Atlassian: binding, outbox, Jira, sprints y Confluence
     Atlassian {
         #[command(subcommand)]
@@ -651,6 +661,16 @@ pub fn run() -> anyhow::Result<()> {
                 AtlassianCommand::Publish => commands::atlassian::publish(&paths),
             }
         }
+        Command::Revision {
+            feature,
+            max_lineas,
+            json,
+        } => commands::revision::run(
+            &HarnessPaths::resolve()?,
+            feature.as_deref(),
+            max_lineas,
+            json,
+        ),
         Command::Graph { command } => graph::run(command),
         Command::AtlassianWorker { root, lock } => atlassian::push::worker(&root, &lock),
         Command::GraphifyWorker { root, stale, lock } => graphify::worker(&root, &stale, &lock),

@@ -24,6 +24,7 @@ mod plan;
 mod prd;
 mod rutas;
 mod progress;
+mod revision;
 mod pycompat;
 mod spec;
 mod verificacion;

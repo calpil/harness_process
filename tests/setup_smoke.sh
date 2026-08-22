@@ -1450,6 +1450,44 @@ grep -qF "CreateJiraProject" "$REPO_ROOT/setup_harness.ps1" \
 auto_status="$(harness_bin "$ATLASSIAN_FLAGS" atlassian status 2>&1 || true)"
 printf '%s' "$auto_status" | grep -q "Auto push  : apagado" \
     || { echo "[!] sin token, el envio automatico debe reportarse apagado. Salida real:" >&2; printf '%s\n' "$auto_status" >&2; exit 1; }
+# Feature #51: modelo por rol y esfuerzo, iguales en los dos instaladores y sin
+# pisar lo commiteado (AC-1..AC-5).
+ROLES_MODELO="$TMP_ROOT/roles-modelo"
+copy_flat_fixture "$ROLES_MODELO"
+run_setup "$ROLES_MODELO" --root > "$TMP_ROOT/roles-modelo.log" 2>&1
+grep -qx "model: claude-opus-5" "$ROLES_MODELO/.claude/agents/implementer.md" \
+    || { echo "[!] AC-1: el implementer tiene que quedar con claude-opus-5." >&2; exit 1; }
+for rol in leader reviewer; do
+    grep -qx "model: claude-fable-5" "$ROLES_MODELO/.claude/agents/$rol.md" \
+        || { echo "[!] AC-2: $rol tiene que quedar con claude-fable-5." >&2; exit 1; }
+done
+for rol in leader implementer reviewer; do
+    grep -qx "effort: xhigh" "$ROLES_MODELO/.claude/agents/$rol.md" \
+        || { echo "[!] AC-1/AC-2: $rol tiene que quedar con effort xhigh." >&2; exit 1; }
+done
+# AC-4: reinstalar no cambia nada de lo ya generado.
+cp "$ROLES_MODELO/.claude/agents/implementer.md" "$TMP_ROOT/implementer.antes"
+run_setup "$ROLES_MODELO" --root > /dev/null 2>&1
+cmp -s "$TMP_ROOT/implementer.antes" "$ROLES_MODELO/.claude/agents/implementer.md" \
+    || { echo "[!] AC-4: reinstalar no debe cambiar el espejo del rol." >&2; exit 1; }
+# AC-5: se puede cambiar sin tocar codigo.
+( cd "$ROLES_MODELO" && HOME="$TMP_ROOT/home" HARNESS_HUB="$ROLES_MODELO/.test-hub" \
+  DB_HOST=x DB_USER=x DB_PASSWORD=x DB_NAME=x DB_SSL_MODE=require \
+  HARNESS_MODEL_IMPLEMENTER=claude-sonnet-5 HARNESS_CLAUDE_EFFORT=high \
+  bash setup_harness.sh --root --no-graphify --no-graphify-skills --no-antigravity >/dev/null 2>&1 )
+grep -qx "model: claude-sonnet-5" "$ROLES_MODELO/.claude/agents/implementer.md" \
+    || { echo "[!] AC-5: las variables tienen que poder cambiar el modelo." >&2; exit 1; }
+grep -qx "effort: high" "$ROLES_MODELO/.claude/agents/implementer.md" \
+    || { echo "[!] AC-5: las variables tienen que poder cambiar el esfuerzo." >&2; exit 1; }
+# AC-3: paridad ps1 (verificacion estatica, no hay pwsh en esta maquina).
+grep -qF 'implementer = if ($env:HARNESS_MODEL_IMPLEMENTER)' "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-3: falta la tabla de roles en setup_harness.ps1." >&2; exit 1; }
+grep -qF 'claude-opus-5' "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-3: ps1 tiene que usar claude-opus-5 para el implementer." >&2; exit 1; }
+grep -qF '"xhigh"' "$REPO_ROOT/setup_harness.ps1" \
+    || { echo "[!] AC-3: ps1 tiene que usar xhigh." >&2; exit 1; }
+echo "[Ok] Roles #51: opus para el implementer, fable para lider y reviewer, xhigh los tres, sin pisarse al reinstalar y tunables por variable."
+
 echo "[Ok] Atlassian #16: verificacion del binding delegada al binario, flags de creacion y auto push reportado."
 
 echo "[Ok] Atlassian: binding por flags y por config, apagado sin config, no-pisa, intent en la outbox y paridad ps1."

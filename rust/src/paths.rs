@@ -130,7 +130,26 @@ fn worktree_actual(repo_root: &Path) -> Option<PathBuf> {
     if top == repo_root {
         return None;
     }
+    // El worktree tiene que ser DEL MISMO repo que este arnes. Sin esta
+    // comprobacion, correr el binario de un proyecto parado en el worktree de
+    // OTRO repo le desvia los docs a un arbol ajeno — paso de verdad al correr
+    // la suite de tests desde un worktree: los sandboxes escribieron sus specs
+    // en el docs/ del worktree real (feature #51).
+    let mismo_repo = crate::git::repo_principal(&cwd)
+        .zip(crate::git::repo_principal(repo_root))
+        .is_some_and(|(a, b)| mismo_dir(&a, &b));
+    if !mismo_repo {
+        return None;
+    }
     Some(top)
+}
+
+/// Compara dos rutas por identidad real, con fallback lexico.
+fn mismo_dir(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
 }
 
 /// Rutas que siembra el instalador en la raiz de una instalacion: su presencia

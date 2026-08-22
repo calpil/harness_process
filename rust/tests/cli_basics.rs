@@ -4328,3 +4328,110 @@ fn close_blocked_should_keep_branch_and_worktree() {
         .stdout(predicate::str::contains("y su worktree conservados"));
     assert!(wt.is_dir(), "el worktree se conserva para retomar");
 }
+
+// ---------------------------------------------------------------------------
+// Feature #51: el paquete de revision.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn revision_should_gather_the_package_and_report_its_size() {
+    // AC-11 + AC-12b + AC-13: junta lo que hay, nombra lo que falta y dice
+    // cuanto cuesta leerlo.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let spec = dir.path().join("docs/spec-feature-1-cobranza.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace(
+            "- AC-1: Given <contexto>, When <accion>, Then <resultado observable>.",
+            "- AC-1: Given un pago, When se concilia, Then queda enlazado.",
+        ),
+    )
+    .unwrap();
+
+    let out = cmd(&bin).args(["revision", "--feature", "1"]).output().unwrap();
+    assert!(out.status.success());
+    let texto = String::from_utf8_lossy(&out.stdout);
+    assert!(texto.contains("Paquete de revision - Feature #1"));
+    assert!(texto.contains("AC-1"), "trae los AC del spec: {texto}");
+    assert!(texto.contains("sin verificar"), "sin verify, el AC lo dice");
+    // AC-13: lo que falta se nombra en vez de fallar.
+    assert!(texto.contains("## Falta"));
+    assert!(texto.contains("la evidencia"), "impl-1.md no existe todavia");
+    // AC-12b: el costo se ve.
+    assert!(texto.contains("[paquete]") && texto.contains("tokens estimados"));
+}
+
+#[test]
+fn revision_should_cross_the_verify_state_and_expose_json() {
+    // AC-11 (estado por AC) + AC-14 (JSON para agentes).
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let spec = dir.path().join("docs/spec-feature-1-cobranza.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace(
+            "- AC-1: Given <contexto>, When <accion>, Then <resultado observable>.",
+            "- AC-1: Given un pago, When se concilia, Then queda enlazado.\n- AC-2: Given un pago huerfano, When se concilia, Then va a excepciones.",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("docs/verify-1.md"),
+        "# Verificacion\n\n| AC | Estado | Comando |\n| --- | --- | --- |\n| AC-1 | verde | `x` |\n| AC-2 | rojo | `y` |\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("docs/impl-1.md"),
+        "# Evidencia\n\n| AC | Estado | Evidencia |\n| --- | --- | --- |\n| AC-1 | OK | test de conciliacion |\n",
+    )
+    .unwrap();
+
+    let out = cmd(&bin)
+        .args(["revision", "--feature", "1", "--json"])
+        .output()
+        .unwrap();
+    let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(j["feature"], "1");
+    assert_eq!(j["acs"][0]["estado"], "verde");
+    assert_eq!(j["acs"][1]["estado"], "rojo", "el rojo tambien viaja");
+    assert!(j["evidencia"][0].as_str().unwrap().contains("test de conciliacion"));
+    assert!(j["tamano"]["tokens_estimados"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn revision_should_respect_the_budget_and_say_what_it_cut() {
+    // AC-12: el recorte se declara, nunca es silencioso.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let wt = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
+    // Un archivo nuevo (sin git add) y un cambio grande sobre uno ya versionado:
+    // el paquete tiene que ver los dos.
+    std::fs::write(wt.join("grande.txt"), "nuevo sin indexar\n").unwrap();
+    let largo: String = (1..=200).map(|i| format!("linea {i}\n")).collect();
+    std::fs::write(wt.join("README.md"), largo).unwrap();
+
+    let out = cmd(&bin)
+        .args(["revision", "--feature", "1", "--max-lineas", "20"])
+        .output()
+        .unwrap();
+    let texto = String::from_utf8_lossy(&out.stdout);
+    assert!(texto.contains("[recortado]"), "declara el recorte: {texto}");
+    assert!(texto.contains("se muestran 20 de"), "dice cuanto quedo afuera");
+    // Y el trabajo sin commitear del worktree SI aparece: el cambio sobre el
+    // archivo versionado y el archivo nuevo que todavia no paso por `git add`.
+    assert!(texto.contains("README.md"), "lo modificado se ve: {texto}");
+    assert!(
+        texto.contains("grande.txt (nuevo, sin git add)"),
+        "lo no indexado se nombra: {texto}"
+    );
+}

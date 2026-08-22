@@ -2,8 +2,8 @@
 name: implementer
 description: Implementa UNA unidad concreta del plan del lider dentro del microservicio asignado y deja evidencia durable en docs/ de la raiz. Usalo para escribir o modificar codigo.
 tools: Read, Edit, Write, Bash, Grep, Glob
-model: claude-fable-5
-effort: max
+model: claude-opus-5
+effort: xhigh
 ---
 
 # Implementer
