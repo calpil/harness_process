@@ -204,6 +204,19 @@ contra el backlog al cerrar.
   aprobar con la regla `require_spec_approved` activa. El stdout distingue el
   caso (plan vs spec).
 
+## Paquete de revision (feature #51)
+
+`rust/src/revision.rs` + `harness revision --feature <id> [--max-lineas N]
+[--json]`: junta los AC del spec con su estado en `verify-<id>.md`, las filas de
+evidencia de `impl-<id>.md`, los archivos tocados por la feature (incluido lo
+sin commitear y lo no indexado, marcado aparte), el diff acotado y las rutas
+protegidas tocadas. Es de SOLO LECTURA, declara lo que recorta y reporta su
+tamaño en lineas y tokens estimados.
+
+El modelo y el esfuerzo de los subagentes de Claude salen de la tabla de roles
+de cada instalador (`CLAUDE_MODEL_*` en `setup_harness.sh`, `$claudeModels` en
+`setup_harness.ps1`), no del espejo `.claude/agents/*.md`, que es generado.
+
 ## Features en paralelo (feature #47)
 
 `start` le da a cada feature su rama GitFlow (`feature/<id>-<slug>`, o

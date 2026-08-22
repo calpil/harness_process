@@ -77,12 +77,21 @@ subagente `leader`.
 
 ## Modelos, effort y tools por rol (tunable)
 
-- **Claude** (`.claude/agents/*.md`): los tres roles (`leader`, `implementer`
-  y `reviewer`) con `model: claude-fable-5` (Fable 5) y `effort: max`. `model:`
-  acepta ID fijo o alias auto-ultima-version (`fable`, `opus`, `sonnet`,
-  `haiku`, `inherit`); `effort:` es `low|medium|high|xhigh|max` (`xhigh` solo
-  Opus 4.7+). El `effort:` del frontmatter NO sobreescribe la env var
-  `CLAUDE_CODE_EFFORT_LEVEL`.
+- **Claude** (`.claude/agents/*.md`): un modelo por rol (feature #51) —
+  `implementer` con `claude-opus-5` (el que escribe codigo piensa con Opus) y
+  `leader` + `reviewer` con `claude-fable-5`; los tres con `effort: xhigh`.
+  `model:` acepta ID fijo o alias auto-ultima-version (`fable`, `opus`,
+  `sonnet`, `haiku`, `inherit`); `effort:` es `low|medium|high|xhigh|max`
+  (`xhigh` solo Opus 4.7+). El `effort:` del frontmatter NO sobreescribe la env
+  var `CLAUDE_CODE_EFFORT_LEVEL`.
+
+  **Donde se cambia**: `.claude/agents/*.md` es un artefacto GENERADO — si lo
+  editas a mano, la proxima instalacion te lo pisa. El modelo y el esfuerzo se
+  cambian en la TABLA DE ROLES de los dos instaladores (busca
+  `CLAUDE_MODEL_IMPLEMENTER` en `setup_harness.sh` y `$claudeModels` en
+  `setup_harness.ps1`), o sin tocar codigo con las variables
+  `HARNESS_MODEL_LEADER`, `HARNESS_MODEL_IMPLEMENTER`, `HARNESS_MODEL_REVIEWER`
+  y `HARNESS_CLAUDE_EFFORT` al correr el instalador.
 - **Codex** (`.codex/agents/*.toml`): `model` se hereda de la sesion;
   `model_reasoning_effort = high` (tope de Codex). El formato NO admite
   allowlist de herramientas (los subagentes usan las del chat padre), asi que

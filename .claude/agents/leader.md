@@ -3,7 +3,7 @@ name: leader
 description: Coordinador del harness. Usalo al INICIAR una tarea para fijar alcance, calcular impacto entre microservicios y producir el plan en docs/ de la raiz. No implementa codigo.
 tools: Read, Grep, Glob, Bash
 model: claude-fable-5
-effort: max
+effort: xhigh
 ---
 
 # Lider (planner)

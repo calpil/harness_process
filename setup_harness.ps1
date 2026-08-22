@@ -1020,6 +1020,20 @@ function Write-AgentDefinitions {
         implementer = "Implements one concrete unit from the plan and records durable evidence."
         reviewer = "Verifies tests, impact, per-AC evidence, checkpoints, and Git state before closure."
     }
+    # TABLA DE ROLES (feature #51): gemela de la de setup_harness.sh. El modelo y
+    # el esfuerzo de cada subagente de Claude se cambian ACA y alla, en ningun
+    # otro lado: `.claude/agents/*.md` es artefacto generado y se pisa en cada
+    # instalacion.
+    #
+    # Decision del usuario (2026-08-22): Opus para el que escribe codigo, Fable
+    # para el que planifica y el que revisa, y `xhigh` para los tres.
+    $claudeModels = @{
+        leader = if ($env:HARNESS_MODEL_LEADER) { $env:HARNESS_MODEL_LEADER } else { "claude-fable-5" }
+        implementer = if ($env:HARNESS_MODEL_IMPLEMENTER) { $env:HARNESS_MODEL_IMPLEMENTER } else { "claude-opus-5" }
+        reviewer = if ($env:HARNESS_MODEL_REVIEWER) { $env:HARNESS_MODEL_REVIEWER } else { "claude-fable-5" }
+    }
+    $claudeEffort = if ($env:HARNESS_CLAUDE_EFFORT) { $env:HARNESS_CLAUDE_EFFORT } else { "xhigh" }
+
     foreach ($role in @("leader", "implementer", "reviewer")) {
         $rolePath = Join-Path $script:HarnessDir "roles/$role.md"
         $body = (Get-Content -LiteralPath $rolePath -Raw).Replace("__HREL__", $script:Hrel)
@@ -1036,8 +1050,8 @@ function Write-AgentDefinitions {
 name: $role
 description: $($descriptions[$role])
 tools: $tools
-model: claude-fable-5
-effort: max
+model: $($claudeModels[$role])
+effort: $claudeEffort
 ---
 
 $body

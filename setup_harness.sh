@@ -2510,9 +2510,22 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     desc_rev="Verifica tests, impacto, evidencia por AC, checkpoints y estado Git antes de cerrar una feature; escribe veredicto en docs/ de la raiz. Solo lectura; no implementa."
 
     # --- Claude Code: .claude/agents/*.md (frontmatter + cuerpo de rol) ----------
-    build_claude_agent leader      leader      claude-fable-5    max "Read, Grep, Glob, Bash"              "$desc_leader"
-    build_claude_agent implementer implementer claude-fable-5    max "Read, Edit, Write, Bash, Grep, Glob" "$desc_impl"
-    build_claude_agent reviewer    reviewer    claude-fable-5    max "Read, Grep, Glob, Bash"              "$desc_rev"
+    # TABLA DE ROLES (feature #51): el modelo y el esfuerzo de cada subagente se
+    # cambian ACA y en su gemela de setup_harness.ps1 — en ningun otro lado. Si
+    # los editas a mano en `.claude/agents/*.md`, la proxima instalacion te los
+    # pisa: son artefactos generados.
+    #
+    # Decision del usuario (2026-08-22): el que escribe codigo piensa con Opus;
+    # el que planifica y el que revisa, con Fable. Los tres al maximo esfuerzo
+    # disponible para subagentes (`xhigh`).
+    CLAUDE_MODEL_LEADER="${HARNESS_MODEL_LEADER:-claude-fable-5}"
+    CLAUDE_MODEL_IMPLEMENTER="${HARNESS_MODEL_IMPLEMENTER:-claude-opus-5}"
+    CLAUDE_MODEL_REVIEWER="${HARNESS_MODEL_REVIEWER:-claude-fable-5}"
+    CLAUDE_EFFORT="${HARNESS_CLAUDE_EFFORT:-xhigh}"
+
+    build_claude_agent leader      leader      "$CLAUDE_MODEL_LEADER"      "$CLAUDE_EFFORT" "Read, Grep, Glob, Bash"              "$desc_leader"
+    build_claude_agent implementer implementer "$CLAUDE_MODEL_IMPLEMENTER" "$CLAUDE_EFFORT" "Read, Edit, Write, Bash, Grep, Glob" "$desc_impl"
+    build_claude_agent reviewer    reviewer    "$CLAUDE_MODEL_REVIEWER"    "$CLAUDE_EFFORT" "Read, Grep, Glob, Bash"              "$desc_rev"
 
     # --- Codex CLI: .codex/agents/*.toml (sandbox por rol; effort high = tope) ---
     build_codex_agent leader      workspace-write high "$desc_leader"

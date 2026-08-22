@@ -6,7 +6,7 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
 ## Flujo
 
 ```
-  __HREL__feature_list.json
+  harness_process/feature_list.json
             |
             v
    +-----------+  spec+plan   +-----------+  aprueba  +--------------+  evidencia  +------------+
@@ -25,7 +25,7 @@ Arnes multi-LLM con tres roles. Lee solo lo necesario para la tarea actual
 
 Entre el LIDER y el IMPLEMENTER se ejecuta el **ritual de aprobacion**: el agente
 lee el spec, se lo MUESTRA al usuario (chat + editor), le PREGUNTA si lo aprueba
-y solo con su SI lo REGISTRA con `sh "__HREL__harness_cli" approve-spec --yes`
+y solo con su SI lo REGISTRA con `sh "harness_process/harness_cli" approve-spec --yes`
 (que sella quien/cuando y re-firma el spec para que `check-spec` no lo reporte
 como edicion de otro LLM). La decision es del usuario: ningun agente aprueba por
 su cuenta, y el gate `check-spec` bloquea hasta esa aprobacion.
@@ -38,8 +38,8 @@ su cuenta, y el gate `check-spec` bloquea hasta esa aprobacion.
 | implementer | Escribir o modificar una unidad de codigo | Read, Edit, Write, Bash | docs/impl-<f>.md          |
 | reviewer    | Antes de cerrar: tests, impacto, gates    | Read, Grep, Glob, Bash  | docs/review-<f>.md        |
 
-Definicion completa: `__HREL__roles/leader.md`, `__HREL__roles/implementer.md`,
-`__HREL__roles/reviewer.md`.
+Definicion completa: `harness_process/roles/leader.md`, `harness_process/roles/implementer.md`,
+`harness_process/roles/reviewer.md`.
 
 ## Como se orquesta por herramienta
 
@@ -65,7 +65,7 @@ Mismos tres roles; cada CLI los recibe en su formato nativo (auto-registrados):
   SOLO globales (`KIMI_CODE_HOME/config.toml`, default `~/.kimi-code/`, bloque
   delimitado del arnes con guard por proyecto).
 
-Sin archivo de definicion soportado (aplican `__HREL__roles/*.md` como fases
+Sin archivo de definicion soportado (aplican `harness_process/roles/*.md` como fases
 secuenciales lider -> implementer -> reviewer en una sola sesion):
 
 - **Antigravity**: crea sus subagentes dinamicamente en runtime; lee tambien
@@ -77,12 +77,21 @@ subagente `leader`.
 
 ## Modelos, effort y tools por rol (tunable)
 
-- **Claude** (`.claude/agents/*.md`): los tres roles (`leader`, `implementer`
-  y `reviewer`) con `model: claude-fable-5` (Fable 5) y `effort: max`. `model:`
-  acepta ID fijo o alias auto-ultima-version (`fable`, `opus`, `sonnet`,
-  `haiku`, `inherit`); `effort:` es `low|medium|high|xhigh|max` (`xhigh` solo
-  Opus 4.7+). El `effort:` del frontmatter NO sobreescribe la env var
-  `CLAUDE_CODE_EFFORT_LEVEL`.
+- **Claude** (`.claude/agents/*.md`): un modelo por rol (feature #51) —
+  `implementer` con `claude-opus-5` (el que escribe codigo piensa con Opus) y
+  `leader` + `reviewer` con `claude-fable-5`; los tres con `effort: xhigh`.
+  `model:` acepta ID fijo o alias auto-ultima-version (`fable`, `opus`,
+  `sonnet`, `haiku`, `inherit`); `effort:` es `low|medium|high|xhigh|max`
+  (`xhigh` solo Opus 4.7+). El `effort:` del frontmatter NO sobreescribe la env
+  var `CLAUDE_CODE_EFFORT_LEVEL`.
+
+  **Donde se cambia**: `.claude/agents/*.md` es un artefacto GENERADO — si lo
+  editas a mano, la proxima instalacion te lo pisa. El modelo y el esfuerzo se
+  cambian en la TABLA DE ROLES de los dos instaladores (busca
+  `CLAUDE_MODEL_IMPLEMENTER` en `setup_harness.sh` y `$claudeModels` en
+  `setup_harness.ps1`), o sin tocar codigo con las variables
+  `HARNESS_MODEL_LEADER`, `HARNESS_MODEL_IMPLEMENTER`, `HARNESS_MODEL_REVIEWER`
+  y `HARNESS_CLAUDE_EFFORT` al correr el instalador.
 - **Codex** (`.codex/agents/*.toml`): `model` se hereda de la sesion;
   `model_reasoning_effort = high` (tope de Codex). El formato NO admite
   allowlist de herramientas (los subagentes usan las del chat padre), asi que

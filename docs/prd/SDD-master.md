@@ -48,6 +48,20 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**Que revisar no cueste una fortuna** (feature #51). Verificar lo implementado
+llego a costar 10 millones de tokens, casi todos gastados explorando el repo.
+Dos decisiones que valen para cualquier feature futura que involucre a un
+agente revisando:
+
+- **El material se entrega, no se busca.** `revision --feature <id>` arma el
+  paquete (AC + estado de verify + evidencia + archivos + diff + rutas
+  protegidas) acotado por presupuesto, declara lo que recorta y reporta su
+  propio tamaño antes de que alguien lo lea.
+- **Un modelo por rol, en la tabla de roles de cada instalador.** El que escribe
+  codigo piensa con Opus; el que planifica y el que revisa, con Fable; los tres
+  en `xhigh`. `.claude/agents/*.md` es artefacto generado: editarlo a mano no
+  sobrevive a la instalacion.
+
 **Aislamiento entre features** (feature #47). Dos implementaciones simultaneas
 no comparten archivos: cada feature vive en su rama GitFlow y en su worktree
 hermano del repo. Tres decisiones que valen para cualquier feature futura que
