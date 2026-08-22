@@ -800,6 +800,69 @@ command = "echo hook-del-usuario"
     Assert-True ($binding -match '"feature": "Story"') "Story is the default issue type for a feature (OBS-6)."
     Assert-True ($binding -match '"blocked_flag": "Impediment"') "blocked maps to the Impediment flag (OBS-7)."
 
+    # -----------------------------------------------------------------------
+    # Feature #52 (AC-1..AC-11): MCP de Atlassian por proyecto.
+    #
+    # El AC-11 decia "paridad verificada por assert" y del lado Windows no habia
+    # ninguno: el smoke de sh cubre este bloque entero y este no lo tocaba. Lo
+    # unico que existia era una verificacion ESTATICA en el smoke de sh
+    # (`grep -qF "function Write-McpAtlassian" setup_harness.ps1`), que es un
+    # detector-de-cambios: pasa con la funcion rota y falla ante un refactor
+    # correcto. Ahora se ejecuta.
+    # -----------------------------------------------------------------------
+    $mcp52 = Join-Path $tempRoot "mcp-atlassian"
+    Copy-Fixture -Target $mcp52
+    $mcpSetup = Join-Path $mcp52 "setup_harness.ps1"
+    $mcpTarget = Join-Path $mcp52 "cargo-target"
+
+    # AC-1: sin binding no se escribe NADA de MCP.
+    & $mcpSetup -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi -CargoTargetDir $mcpTarget
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $mcp52 ".mcp.json"))) "Without a binding no .mcp.json must be written (AC-1)."
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $mcp52 ".grok/config.toml"))) "Without a binding no .grok/config.toml must be written (AC-1)."
+
+    # AC-2/AC-4/AC-6: con binding, los tres archivos de proyecto.
+    Set-TextUtf8NoBom -Path (Join-Path $mcp52 "atlassian.json") `
+        -Value '{"site":"calpil.atlassian.net","enabled":true,"jira":{"project_key":"ADR"},"confluence":{"space_key":"SD"}}'
+    $mcpLog = (& $mcpSetup -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi -CargoTargetDir $mcpTarget 6>&1 | Out-String)
+    foreach ($f in @(".mcp.json", ".kimi-code/mcp.json", ".grok/config.toml")) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $mcp52 $f)) "With a binding the installer must write $f (AC-2)."
+    }
+    Assert-True ((Get-Utf8Text -Path (Join-Path $mcp52 ".mcp.json")) -match 'mcp\.atlassian\.com/v1/mcp/authv2') ".mcp.json is missing the MCP URL (AC-4)."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $mcp52 ".grok/config.toml")) -match 'mcp-remote') "Grok must go through mcp-remote: its HTTP client does not do OAuth (AC-6)."
+
+    # AC-7: la config GLOBAL de Codex no se toca; se imprimen sus dos comandos.
+    Assert-True ($mcpLog -match 'codex plugin add atlassian-rovo') "The Codex plugin notice is missing (AC-7)."
+    Assert-True ($mcpLog -match 'codex mcp add atlassian') "The Codex command is missing (AC-7)."
+    # AC-10: se dice que falta autorizar y que el arnes NO hace el OAuth.
+    Assert-True ($mcpLog -match 'falta AUTORIZAR') "The installer must say the OAuth is still pending (AC-10)."
+
+    # AC-9: reinstalar conserva OTROS servidores y re-agrega el de Atlassian.
+    $kimiMcp = Join-Path $mcp52 ".kimi-code/mcp.json"
+    $kimiJson = (Get-Utf8Text -Path $kimiMcp) | ConvertFrom-Json
+    $kimiJson.mcpServers = [ordered]@{ otro = [ordered]@{ url = "https://otro.example/mcp" } }
+    Set-TextUtf8NoBom -Path $kimiMcp -Value ($kimiJson | ConvertTo-Json -Depth 10)
+    & $mcpSetup -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi -CargoTargetDir $mcpTarget
+    $kimiTras = (Get-Utf8Text -Path $kimiMcp) | ConvertFrom-Json
+    $nombres = @($kimiTras.mcpServers.PSObject.Properties.Name)
+    Assert-True ($nombres -contains "otro") "Reinstalling dropped somebody else's MCP server (AC-9)."
+    Assert-True ($nombres -contains "atlassian") "Reinstalling did not re-add the atlassian server (AC-9)."
+
+    # AC-8: un `atlassian` PROPIO del usuario no se pisa, y se dice.
+    Set-TextUtf8NoBom -Path (Join-Path $mcp52 ".mcp.json") `
+        -Value '{"mcpServers":{"atlassian":{"url":"https://mio.example/mcp"}}}'
+    $mcpRespeta = (& $mcpSetup -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi -CargoTargetDir $mcpTarget 6>&1 | Out-String)
+    Assert-True ((Get-Utf8Text -Path (Join-Path $mcp52 ".mcp.json")) -match 'mio\.example') "The user's own atlassian server must not be overwritten (AC-8)."
+    Assert-True ($mcpRespeta -match 'ya lo declara \(respetado\)') "Respecting what was already there has to be said (AC-8)."
+
+    # AC-3: el flag apaga todo.
+    $mcp52Off = Join-Path $tempRoot "mcp-atlassian-off"
+    Copy-Fixture -Target $mcp52Off
+    Set-TextUtf8NoBom -Path (Join-Path $mcp52Off "atlassian.json") `
+        -Value '{"site":"x.atlassian.net","enabled":true,"jira":{"project_key":"ADR"},"confluence":{"space_key":"SD"}}'
+    & (Join-Path $mcp52Off "setup_harness.ps1") -Root -NoGraphify -NoGraphifySkills -NoAntigravity -NoKimi `
+        -NoMcpAtlassian -CargoTargetDir (Join-Path $mcp52Off "cargo-target")
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $mcp52Off ".mcp.json"))) "-NoMcpAtlassian must turn the whole thing off (AC-3)."
+
     Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite; incl. efficient Kimi CLI usage guide linked from the surface), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global), and Atlassian binding (off without flags, written with flags, Story/Impediment defaults)."
 }
 finally {

@@ -1566,13 +1566,14 @@ run_setup "$MCP52_OFF" --root --no-mcp-atlassian > /dev/null 2>&1
 test ! -e "$MCP52_OFF/.mcp.json" \
     || { echo "[!] AC-3: --no-mcp-atlassian debe apagar la escritura." >&2; exit 1; }
 
-# AC-11: paridad ps1 (verificacion estatica, no hay pwsh en esta maquina).
-grep -qF "function Write-McpAtlassian" "$REPO_ROOT/setup_harness.ps1" \
-    || { echo "[!] AC-11: falta Write-McpAtlassian en setup_harness.ps1." >&2; exit 1; }
-grep -qF "mcp-remote@latest" "$REPO_ROOT/setup_harness.ps1" \
-    || { echo "[!] AC-11: ps1 tiene que usar mcp-remote para Grok." >&2; exit 1; }
-grep -qF "atlassian-rovo@openai-curated" "$REPO_ROOT/setup_harness.ps1" \
-    || { echo "[!] AC-11: ps1 tiene que nombrar el plugin de Codex." >&2; exit 1; }
+# AC-11 (paridad ps1) ya NO se verifica aca. Eran tres greps sobre el TEXTO de
+# setup_harness.ps1 -un detector-de-cambios de los que prohibe
+# docs/conventions.md: pasan con la funcion rota y fallan ante un refactor
+# correcto- y estaban ahi porque "no hay pwsh en esta maquina". Ahora
+# tests/setup_smoke.ps1 EJECUTA este mismo bloque contra el instalador de
+# Windows, y en su primera corrida encontro lo que los greps no podian ver: el
+# merge usaba `ConvertFrom-Json -AsHashtable`, que no existe en PowerShell 5.1,
+# y reinstalar borraba en silencio los demas servidores MCP del usuario.
 # ---------------------------------------------------------------------------
 # Feature #58: el guard no bloquea por lo que escribe el ARNES.
 # Se prueba el guard INSTALADO, con un proyecto de fixture que tiene dos repos

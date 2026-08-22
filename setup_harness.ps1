@@ -320,11 +320,24 @@ function Write-McpAtlassian {
         }
         $dir = Split-Path -Parent $target
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        $data = if (Test-Path -LiteralPath $target -PathType Leaf) {
-            try { Read-HarnessText -Path $target | ConvertFrom-Json -AsHashtable } catch { @{} }
-        } else { @{} }
-        if (-not $data.ContainsKey("mcpServers")) { $data["mcpServers"] = @{} }
-        $data["mcpServers"]["atlassian"] = @{ url = $url }
+        $data = [ordered]@{}
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            $leido = $null
+            try { $leido = ConvertTo-HashtableProfunda (Read-HarnessText -Path $target | ConvertFrom-Json) }
+            catch { $leido = $null }
+            if ($null -eq $leido) {
+                # El archivo existe y no se pudo leer. Escribir igual lo
+                # reemplazaria por uno con solo Atlassian adentro: se avisa y no
+                # se toca. Lo del usuario no se pisa por no haber podido leerlo.
+                Write-HarnessLog WARN "MCP Atlassian: $rel existe y no se pudo interpretar como JSON; se deja como esta."
+                continue
+            }
+            $data = $leido
+        }
+        if (-not $data.Contains("mcpServers") -or $null -eq $data["mcpServers"]) {
+            $data["mcpServers"] = [ordered]@{}
+        }
+        $data["mcpServers"]["atlassian"] = [ordered]@{ url = $url }
         Write-HarnessText -Path $target -Content (($data | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
         Write-HarnessLog OK "MCP Atlassian: $rel."
     }
@@ -568,6 +581,30 @@ function Read-HarnessText {
 function Read-HarnessLines {
     param([string]$Path)
     return [IO.File]::ReadAllLines($Path, [Text.UTF8Encoding]::new($false))
+}
+
+# `ConvertFrom-Json -AsHashtable` es de PowerShell 6+. En el 5.1 de Windows la
+# llamada falla por parametro desconocido, el `catch` se la tragaba y el mapa
+# quedaba VACIO: reinstalar borraba en silencio todos los demas servidores MCP
+# que el usuario tuviera declarados. El AC-9 de la #52 existe justamente para
+# que eso no pase, y del lado Windows no habia quien lo ejecutara.
+function ConvertTo-HashtableProfunda {
+    param($Objeto)
+    if ($null -eq $Objeto) { return $null }
+    if ($Objeto -is [System.Collections.IDictionary]) {
+        $out = [ordered]@{}
+        foreach ($k in @($Objeto.Keys)) { $out[$k] = ConvertTo-HashtableProfunda $Objeto[$k] }
+        return $out
+    }
+    if ($Objeto -is [System.Management.Automation.PSCustomObject]) {
+        $out = [ordered]@{}
+        foreach ($prop in $Objeto.PSObject.Properties) { $out[$prop.Name] = ConvertTo-HashtableProfunda $prop.Value }
+        return $out
+    }
+    if ($Objeto -is [object[]]) {
+        return @($Objeto | ForEach-Object { ConvertTo-HashtableProfunda $_ })
+    }
+    return $Objeto
 }
 
 function Write-HarnessText {

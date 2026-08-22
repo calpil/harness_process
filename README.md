@@ -1209,6 +1209,7 @@ reales del arnes, todas silenciosas:
 | `.harness_layout` con CRLF no matcheaba `subdir` en los cuatro scripts sh | la resolucion de raiz se iba al camino equivocado, sin avisar |
 | `init.sh` comparaba `pwd -P` contra `git rev-parse --show-toplevel` | en Windows no conectaba **ningun** hook de git |
 | el binario miraba `USERPROFILE` y los scripts `HOME` | la guarda que impide sembrar el arnes sobre la carpeta del usuario no aplicaba parejo |
+| el merge de MCP usaba `ConvertFrom-Json -AsHashtable`, que no existe en 5.1 | cada reinstalacion **borraba en silencio** los demas servidores MCP del usuario |
 
 Hoy los dos smokes pasan enteros en Windows:
 

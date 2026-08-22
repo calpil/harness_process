@@ -167,7 +167,7 @@ modo_superficies() {
 # y el .ps1 usa 132 `Assert-True` sin secciones nombradas—, asi que contar
 # bloques no compara nada. Lo que si compara es la COBERTURA: cada tema que el
 # .sh declara tiene que aparecer, por su palabra clave, en el .ps1.
-TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian"
+TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian mcp|Mcp"
 
 modo_smokes() {
     [ -f "$REPO_ROOT/tests/setup_smoke.ps1" ] || { ok "smokes: no hay smoke ps1, nada que comparar"; return; }

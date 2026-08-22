@@ -57,6 +57,26 @@ fallas reales, todas silenciosas:
 Los dos smokes -`tests/setup_smoke.sh` y `tests/setup_smoke.ps1`- pasan enteros
 en Windows.
 
+## El MCP de Atlassian dejaba de existir al reinstalar en Windows (#52)
+
+`setup_harness.ps1` fusionaba los servidores MCP con
+`ConvertFrom-Json -AsHashtable`, **un parametro que no existe en Windows
+PowerShell 5.1**. La llamada fallaba, un `catch` se la tragaba, el mapa quedaba
+vacio y el instalador escribia el archivo con Atlassian y nada mas: cada
+reinstalacion **borraba en silencio los demas servidores MCP** de `.mcp.json` y
+`.kimi-code/mcp.json`.
+
+El AC-9 de la #52 existe exactamente para que eso no pase, pero del lado Windows
+no habia quien lo ejecutara: el AC-11 decia "paridad verificada por assert" y lo
+unico que existia eran tres `grep` sobre el texto del `.ps1` desde el smoke de
+sh. Un grep pasa con la funcion rota. Ahora `tests/setup_smoke.ps1` corre el
+bloque entero de MCP —los siete AC— contra el instalador de Windows, y esos tres
+greps se borraron.
+
+Ademas, un `.mcp.json` que exista y no se pueda interpretar como JSON ya no se
+reemplaza: se avisa y se deja como esta. Lo del usuario no se pisa por no haber
+podido leerlo.
+
 ## Windows: instalador y comando desde cmd.exe
 
 Ya no hace falta abrir PowerShell a mano para instalar ni para usar el arnes:
