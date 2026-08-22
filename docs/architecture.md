@@ -204,6 +204,18 @@ contra el backlog al cerrar.
   aprobar con la regla `require_spec_approved` activa. El stdout distingue el
   caso (plan vs spec).
 
+## Lectura de la salida en `verify` (feature #46)
+
+`rust/src/verificacion.rs`: `ejecutar()` lanza `lanzar_lectores()` **antes** de
+`wait_timeout`. Cada pipe tiene su hilo (`lector()`), que vacia hasta el EOF
+sobre un `VecDeque` compartido (`Arc<Mutex<Buf>>`) reteniendo la **cola** con
+tope `MAX_SALIDA_BYTES` (4 MB). `juntar_lectores()` espera a cada hilo como
+mucho `GRACIA_LECTOR` (2 s) despues de que el proceso murio y, si alguno quedo
+abierto —un nieto con el descriptor heredado—, toma una foto del buffer y lo
+declara en el reporte. El estado se sigue midiendo sobre la salida retenida
+completa (leccion de la #44: el resumen llega al final, detras de la
+compilacion). Sin dependencias nuevas: `wait-timeout` sigue solo para el corte.
+
 ## El commit guard y los artefactos del arnes (feature #58)
 
 `commit_guard.sh` (y su plantilla) trae `es_artefacto_del_arnes()` y
