@@ -2485,6 +2485,70 @@ fn verify_should_refuse_to_run_commands_from_a_draft_spec() {
     assert!(!dir.path().join("docs/verify-1.md").exists());
 }
 
+/// Anota en el backlog el worktree de la feature 1, como hace `start` desde la
+/// #47. El sandbox no es un repo git, asi que el worktree se arma a mano: lo que
+/// se prueba es a donde MIRA el arnes, no que git sepa crear worktrees.
+fn anotar_worktree(harness_dir: &Path, worktree: &Path) {
+    let path = harness_dir.join("feature_list.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    data.as_object_mut()
+        .unwrap()
+        .get_mut("features")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()[0]
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "worktree".to_string(),
+            serde_json::json!(worktree.to_string_lossy()),
+        );
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+}
+
+#[test]
+fn verify_should_run_the_commands_inside_the_feature_worktree() {
+    // Feature #57. El peor resultado de un gate no es un rojo: es un VERDE que
+    // no probo nada. `verify` leia el spec del worktree y corria los comandos en
+    // el checkout principal, donde el codigo de la feature todavia no existe; al
+    // cerrar la #56, cinco AC salieron verdes habiendo ejecutado cero casos.
+    //
+    // El comando deja rastro en el disco, asi que el archivo aparece exactamente
+    // donde corrio. `echo x > rastro.txt` corre igual en sh y en cmd.exe.
+    let (dir, bin, spec) = feature_con_spec(
+        "- AC-1: Given algo, Then otra.
+  Comando: `echo x > rastro.txt`",
+    );
+    let worktree = dir.path().join("demo-wt/1-demo");
+    std::fs::create_dir_all(worktree.join("docs")).unwrap();
+    // En un worktree de verdad el spec ya vive ahi: viaja con la rama.
+    std::fs::copy(&spec, worktree.join("docs/spec-feature-1-demo.md")).unwrap();
+    anotar_worktree(&dir.path().join("hp"), &worktree);
+
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Directorio de ejecucion:"));
+
+    assert!(
+        worktree.join("rastro.txt").exists(),
+        "el comando no corrio en el worktree de la feature"
+    );
+    assert!(
+        !dir.path().join("rastro.txt").exists(),
+        "el comando corrio en el checkout principal: ese verde no prueba nada"
+    );
+    // Y el reporte, que es la evidencia que queda, dice donde fue.
+    let reporte = std::fs::read_to_string(worktree.join("docs/verify-1.md")).unwrap();
+    assert!(
+        reporte.contains("Directorio:"),
+        "el reporte no declara el directorio de ejecucion: {reporte}"
+    );
+}
+
 /// Spec de tres AC: uno verde, uno rojo con salida, uno sin comando.
 const TRES_AC: &str = "- AC-1: Given algo, Then otra.\n  Comando: `true`\n\
      - AC-2: Given algo, Then falla.\n  Comando: `echo se-rompio-esto >&2; exit 4`\n\

@@ -67,6 +67,33 @@ impl HarnessPaths {
         }
     }
 
+    /// Directorio desde el que se EJECUTAN los comandos de una feature
+    /// (feature #57): su worktree cuando lo tiene, la raiz de siempre cuando no.
+    ///
+    /// Es la contracara de `para_feature`. Esa resuelve donde se LEEN y se
+    /// ESCRIBEN los documentos de la feature; esta, donde corre el codigo que
+    /// esos documentos dicen verificar. Que las dos existieran pero solo una
+    /// tuviera nombre fue el bug: `verify` leia el spec del worktree y corria
+    /// `cargo test` en el checkout principal, donde el codigo de la feature
+    /// todavia no existe. No fallaba —eso habria sido facil de ver—: salia
+    /// VERDE habiendo ejecutado cero casos, que es el peor resultado posible de
+    /// un gate. Se descubrio cerrando la feature #56.
+    ///
+    /// Un `worktree` anotado que ya no esta en el disco cae a la raiz: la
+    /// alternativa seria correr en un directorio inexistente y traducir eso a
+    /// un rojo que no dice nada del codigo.
+    pub fn raiz_de_ejecucion(
+        &self,
+        feature: &serde_json::Map<String, serde_json::Value>,
+    ) -> PathBuf {
+        feature
+            .get("worktree")
+            .and_then(serde_json::Value::as_str)
+            .map(PathBuf::from)
+            .filter(|wt| wt.is_dir())
+            .unwrap_or_else(|| self.repo_root.clone())
+    }
+
     /// Estado vivo de UNA feature (feature #47 / AC-8): cada una escribe el
     /// suyo, asi que cerrar una no puede pisar el de otra.
     pub fn current_de(&self, fid: &str) -> PathBuf {
@@ -227,9 +254,27 @@ fn parent_has_footprint(parent: &Path) -> bool {
 
 /// True si `parent` es `$HOME` y no esta el escape
 /// `HARNESS_ALLOW_HOME_SURFACE=1` (paridad con la guarda del instalador).
+///
+/// En Windows el binario y los scripts no coincidian sobre que es "$HOME":
+/// `home_dir()` mira `USERPROFILE` y los cuatro scripts sh miran `HOME`, que en
+/// Git Bash puede ser otro directorio. Con las dos mitades del arnes en
+/// desacuerdo, la misma instalacion resolvia la raiz distinto segun quien
+/// preguntara, y la guarda —que existe para no sembrar el arnes sobre la
+/// carpeta del usuario— se saltaba en el lado que no miraba. Aca se aceptan
+/// LAS DOS: la guarda protege de mas, nunca de menos, que es lo que
+/// corresponde a un chequeo de seguridad.
 fn parent_is_home(parent: &Path) -> bool {
-    env_nonempty("HARNESS_ALLOW_HOME_SURFACE").as_deref() != Some("1")
-        && crate::pycompat::home_dir().is_some_and(|home| same_dir(parent, &home))
+    if env_nonempty("HARNESS_ALLOW_HOME_SURFACE").as_deref() == Some("1") {
+        return false;
+    }
+    let candidatos = [
+        crate::pycompat::home_dir(),
+        env_nonempty("HOME").map(PathBuf::from),
+    ];
+    candidatos
+        .iter()
+        .flatten()
+        .any(|home| same_dir(parent, home))
 }
 
 /// True si `root` parece el checkout FUENTE del arnes y `parent` no parece la
@@ -256,6 +301,8 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+    use serde_json::{Map, Value};
+
     use super::*;
 
     #[test]
@@ -282,6 +329,47 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".harness_layout"), "root").unwrap();
         assert_eq!(repo_root_from_marker(dir.path()), dir.path());
+    }
+
+    /// Feature #57: donde CORREN los comandos de una feature.
+    fn paths_con_worktree(worktree: Option<&Path>) -> (tempfile::TempDir, HarnessPaths, Map<String, Value>) {
+        let dir = tempfile::tempdir().unwrap();
+        let harness = dir.path().join("harness_process");
+        std::fs::create_dir_all(&harness).unwrap();
+        let paths = HarnessPaths::from_root(harness);
+        let mut feature = Map::new();
+        if let Some(wt) = worktree {
+            feature.insert(
+                "worktree".to_string(),
+                Value::String(wt.to_string_lossy().into_owned()),
+            );
+        }
+        (dir, paths, feature)
+    }
+
+    #[test]
+    fn raiz_de_ejecucion_should_be_the_worktree_of_the_feature() {
+        let base = tempfile::tempdir().unwrap();
+        let wt = base.path().join("repo-wt/57-demo");
+        std::fs::create_dir_all(&wt).unwrap();
+        let (_dir, paths, feature) = paths_con_worktree(Some(&wt));
+        assert_eq!(paths.raiz_de_ejecucion(&feature), wt);
+    }
+
+    #[test]
+    fn raiz_de_ejecucion_should_be_the_root_without_worktree() {
+        // Modo clasico (sin la #47) o repo sin git: la raiz de siempre.
+        let (_dir, paths, feature) = paths_con_worktree(None);
+        assert_eq!(paths.raiz_de_ejecucion(&feature), paths.repo_root);
+    }
+
+    #[test]
+    fn raiz_de_ejecucion_should_fall_back_when_the_worktree_is_gone() {
+        // Un worktree anotado que alguien borro a mano. Correr en un directorio
+        // que no existe daria un rojo que no habla del codigo, sino del disco.
+        let base = tempfile::tempdir().unwrap();
+        let (_dir, paths, feature) = paths_con_worktree(Some(&base.path().join("no-esta")));
+        assert_eq!(paths.raiz_de_ejecucion(&feature), paths.repo_root);
     }
 
     /// Arma `<parent>/harness_process` con marker subdir y senales de FUENTE

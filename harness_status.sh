@@ -28,7 +28,10 @@ if [ -z "$REPO_ROOT" ]; then
     fi
     harness_layout=""
     if [ -f "$harness_marker" ]; then
-        harness_layout="$(cat "$harness_marker" 2>/dev/null || true)"
+        # Sin el `tr`: un marker escrito en Windows llega como "subdir\r", no
+        # matchea, y la resolucion de raiz se va al camino equivocado SIN decir
+        # nada. La version Rust ya hacia trim(); estos cuatro scripts no.
+        harness_layout="$(tr -d '\r' < "$harness_marker" 2>/dev/null || true)"
     fi
     if [ "$harness_layout" = "subdir" ]; then
         REPO_ROOT="$harness_parent"

@@ -31,7 +31,10 @@ if [ -z "$REPO_ROOT" ]; then
     fi
     harness_layout=""
     if [ -f "$harness_marker" ]; then
-        harness_layout="$(cat "$harness_marker" 2>/dev/null || true)"
+        # Sin el `tr`: un marker escrito en Windows llega como "subdir\r", no
+        # matchea, y la resolucion de raiz se va al camino equivocado SIN decir
+        # nada. La version Rust ya hacia trim(); estos cuatro scripts no.
+        harness_layout="$(tr -d '\r' < "$harness_marker" 2>/dev/null || true)"
     fi
     if [ "$harness_layout" = "subdir" ]; then
         REPO_ROOT="$harness_parent"
@@ -98,8 +101,13 @@ for repo in */; do
     fi
     REPO_ABS="$(cd "$REPO_DIR" && pwd -P)"
     [ "$REPO_ABS" = "$HARNESS_DIR" ] && continue  # el propio arnes no es microservicio
-    GIT_TOP="$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
-    [ "$GIT_TOP" = "$REPO_ABS" ] || continue
+    # ¿Es este dir la RAIZ de un repo y no un subdirectorio de uno? Se le
+    # pregunta a git en vez de comparar rutas: en Git Bash `pwd -P` da
+    # /c/Users/... y `--show-toplevel` da C:/Users/..., asi que la igualdad
+    # NUNCA se cumplia y en Windows init.sh no conectaba un solo hook de git.
+    # Fallaba en silencio: recorria los repos y los descartaba a todos.
+    git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+    [ -z "$(git -C "$REPO_DIR" rev-parse --show-prefix 2>/dev/null)" ] || continue
 
     if [ -n "$DESIRED_AUTOCRLF" ]; then
         CURRENT_AUTOCRLF="$(git -C "$REPO_DIR" config --local --get core.autocrlf || true)"

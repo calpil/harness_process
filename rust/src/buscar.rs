@@ -148,6 +148,10 @@ pub struct Hallazgo {
     pub feature: String,
     pub fecha: String,
     pub score: i64,
+    /// Cuantas VECES MAS aparece esta misma linea en otros archivos
+    /// (feature #39). 0 = no se repite. Se cuenta en vez de descartarse en
+    /// silencio: que un encabezado este en tres documentos es informacion.
+    pub repetido: usize,
 }
 
 /// Resultado de una busqueda. `parcial` marca que ninguna linea tenia TODOS los
@@ -261,12 +265,102 @@ fn es_titulo(texto: &str) -> bool {
         || t.starts_with("triggers:")
 }
 
+/// Palabras comparables de un texto: minusculas, sin puntuacion, y sin las de
+/// una o dos letras, que no distinguen nada (`de`, `el`, `md`, `56`).
+fn palabras(texto: &str) -> Vec<String> {
+    texto
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .filter(|w| w.chars().count() > 2)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Cuanto puede sobrar y todavia considerarse "el nombre del archivo otra vez".
+const RESIDUO_MAXIMO: usize = 1;
+/// Cuantas palabras del nombre tiene que repetir para que sea el nombre y no
+/// una coincidencia de una palabra suelta.
+const COINCIDENCIAS_MINIMAS: usize = 2;
+
+/// Una linea que no dice nada que su propio nombre de archivo no dijera ya
+/// (feature #39).
+///
+/// `# Spec - Feature #56: paquete_de_contexto_para_implementar` encabeza TODA
+/// busqueda sobre esa feature y no contesta ninguna: repite el nombre del
+/// archivo, que el resultado ya muestra en la ruta. Con tres documentos por
+/// feature (spec, plan, estado) son tres lugares del tope gastados antes de la
+/// primera linea que dice algo.
+///
+/// La prueba NO es "matcheo por una palabra del nombre" —el cuerpo de un spec
+/// habla del tema del spec, y esas son justamente las lineas buenas— sino "no
+/// queda casi nada cuando se le sacan las palabras del nombre".
+fn solo_repite_el_nombre(texto: &str, archivo: &str) -> bool {
+    let del_archivo = palabras(archivo);
+    if del_archivo.is_empty() {
+        return false;
+    }
+    let del_texto = palabras(texto);
+    let coincidentes = del_texto.iter().filter(|w| del_archivo.contains(w)).count();
+    let residuo = del_texto.len() - coincidentes;
+    coincidentes >= COINCIDENCIAS_MINIMAS && residuo <= RESIDUO_MAXIMO
+}
+
+/// Campo de metadata cuyo valor ENTERO es una ruta: `Plan: docs/plan-...md`.
+/// Es un puntero al documento, no una linea sobre el tema; el que busca ya
+/// tiene la ruta en el resultado.
+fn es_puntero(texto: &str) -> bool {
+    let Some((campo, valor)) = texto.trim().split_once(':') else {
+        return false;
+    };
+    let valor = valor.trim();
+    !campo.is_empty()
+        && !campo.contains(char::is_whitespace)
+        && !valor.is_empty()
+        && !valor.contains(char::is_whitespace)
+        && valor.ends_with(".md")
+}
+
+/// Las dos formas de ocupar un lugar sin decir nada (feature #39): un puntero a
+/// otro archivo, y un encabezado que solo repite el nombre del suyo.
+///
+/// La regla se probo primero mas amplia —"todo H1 es el titulo del documento y
+/// no dice nada"— y estaba mal: en `docs/adr/ADR-0001-cliente-http.md`, el H1
+/// `# ADR-0001: cliente HTTP para el espejo` es la UNICA linea que nombra el
+/// tema, y el nombre del archivo no lo nombra. Un titulo que agrega algo al
+/// nombre de su archivo es contenido; el descuento es para el que no.
+fn identifica_en_vez_de_decir(texto: &str, archivo: &str) -> bool {
+    es_puntero(texto) || solo_repite_el_nombre(texto, archivo)
+}
+
+/// Lo que se le descuenta a una linea que no aporta contenido propio. Con el
+/// bonus de titulo ya negado, deja al titulo de un spec en 50 contra los 110
+/// del cuerpo de ese mismo spec, y todavia por encima de una linea de bitacora
+/// (20): no es basura, es un puntero, y como puntero se ordena.
+const SIN_CONTENIDO_PROPIO: i64 = 60;
+
 /// Score de una linea que ya matcheo. Funcion pura: todo el ranking se testea
 /// sin tocar el filesystem.
-pub fn score(fuente: Fuente, texto: &str, terminos: &[String], feature: &str, todos: bool) -> i64 {
+pub fn score(
+    fuente: Fuente,
+    texto: &str,
+    terminos: &[String],
+    feature: &str,
+    todos: bool,
+    archivo: &str,
+) -> i64 {
     let mut s = fuente.peso();
     let bajo = texto.to_lowercase();
-    if es_titulo(texto) {
+    // Feature #39: el bonus de titulo y el descuento por no decir nada se
+    // estaban peleando. El bonus premia al encabezado que NOMBRA el tema
+    // (`## ureq como cliente`); darselo tambien al que solo se nombra a si
+    // mismo y despues quitarselo con el descuento dejaba a los titulos de
+    // documento empatando con lineas de cuerpo. Un titulo que identifica no
+    // cobra el bonus Y ademas paga el descuento.
+    let identifica = identifica_en_vez_de_decir(texto, archivo);
+    if es_titulo(texto) && !identifica {
         s += 30;
     }
     // Frase contigua: los terminos, en orden, separados por un solo espacio.
@@ -280,6 +374,14 @@ pub fn score(fuente: Fuente, texto: &str, terminos: &[String], feature: &str, to
     // completos, aunque en la practica no se mezclan.
     if !todos {
         s -= 40;
+    }
+    // Feature #39: lo ultimo, y despues del bonus de titulo a proposito. El
+    // bonus premia al encabezado que NOMBRA el tema; esto le saca el premio al
+    // que solo se nombra a si mismo. Sin este descuento, en una busqueda real
+    // sobre este repo los primeros doce resultados eran titulos de archivo y
+    // punteros: el tope se llenaba antes de la primera linea con contenido.
+    if identifica {
+        s -= SIN_CONTENIDO_PROPIO;
     }
     s
 }
@@ -323,11 +425,12 @@ pub fn buscar(paths: &HarnessPaths, consulta: &str) -> Resultado {
             let hallazgo = Hallazgo {
                 archivo: rel.clone(),
                 linea: i + 1,
-                score: score(fuente, texto, &terms, &feature, todos),
+                score: score(fuente, texto, &terms, &feature, todos, &base),
                 texto: texto.to_string(),
                 fuente,
                 feature,
                 fecha,
+                repetido: 0,
             };
             if todos {
                 completos.push(hallazgo);
@@ -350,7 +453,25 @@ pub fn buscar(paths: &HarnessPaths, consulta: &str) -> Resultado {
             .then_with(|| a.archivo.cmp(&b.archivo))
             .then_with(|| a.linea.cmp(&b.linea))
     });
-    res.hallazgos = elegidos;
+    // Dedup por TEXTO (feature #39). En un repo donde el mismo encabezado vive
+    // en el spec, en el prd-diff y en architecture.md, doce resultados podian
+    // ser doce copias de la misma linea: el tope se llenaba sin agregar nada.
+    // Se queda la mejor —la lista ya viene ordenada— y se dice cuantas mas
+    // habia. Descartarlas calladas escondria que el tema esta en varios
+    // documentos, que es justo lo que uno quiere saber.
+    let mut donde: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut unicos: Vec<Hallazgo> = Vec::with_capacity(elegidos.len());
+    for hallazgo in elegidos {
+        let clave = hallazgo.texto.to_lowercase();
+        match donde.get(&clave) {
+            Some(&i) => unicos[i].repetido += 1,
+            None => {
+                donde.insert(clave, unicos.len());
+                unicos.push(hallazgo);
+            }
+        }
+    }
+    res.hallazgos = unicos;
     res
 }
 
@@ -446,32 +567,105 @@ mod tests {
     #[test]
     fn score_should_reward_headings() {
         let t = terminos("ureq");
-        let cuerpo = score(Fuente::Spec, "usamos ureq aca", &t, "", true);
-        let titulo = score(Fuente::Spec, "## ureq como cliente", &t, "", true);
+        let cuerpo = score(Fuente::Spec, "usamos ureq aca", &t, "", true, "");
+        let titulo = score(Fuente::Spec, "## ureq como cliente", &t, "", true, "");
         assert!(titulo > cuerpo);
     }
 
     #[test]
     fn score_should_reward_frontmatter_fields() {
         let t = terminos("espejo");
-        let cuerpo = score(Fuente::Leccion, "hablamos del espejo", &t, "", true);
-        let campo = score(Fuente::Leccion, "triggers: [espejo, roles]", &t, "", true);
+        let cuerpo = score(Fuente::Leccion, "hablamos del espejo", &t, "", true, "");
+        let campo = score(Fuente::Leccion, "triggers: [espejo, roles]", &t, "", true, "");
         assert!(campo > cuerpo);
     }
 
     #[test]
     fn score_should_reward_a_contiguous_phrase() {
         let t = terminos("opcion segura");
-        let disperso = score(Fuente::Plan, "la opcion mas segura", &t, "", true);
-        let contiguo = score(Fuente::Plan, "elige la opcion segura", &t, "", true);
+        let disperso = score(Fuente::Plan, "la opcion mas segura", &t, "", true, "");
+        let contiguo = score(Fuente::Plan, "elige la opcion segura", &t, "", true, "");
         assert!(contiguo > disperso);
+    }
+
+    // Feature #39: relevancia. Los tres casos salieron de una busqueda real
+    // sobre este repo, donde los primeros doce resultados no contestaban nada.
+
+    #[test]
+    fn score_should_sink_the_title_of_the_document() {
+        // `# Spec - Feature #56: paquete_de_contexto_para_implementar` era el
+        // primer resultado de toda busqueda sobre esa feature. No dice nada que
+        // la ruta del resultado no diga ya.
+        let t = terminos("paquete contexto");
+        let archivo = "spec-feature-56-paquete-de-contexto-para-implementar.md";
+        let titulo = score(Fuente::Spec, "# Spec - Feature #56: paquete_de_contexto_para_implementar", &t, "56", true, archivo);
+        let cuerpo = score(Fuente::Spec, "el paquete de contexto sigue los punteros del mapa", &t, "56", true, archivo);
+        assert!(cuerpo > titulo, "cuerpo {cuerpo} deberia ganarle al titulo {titulo}");
+    }
+
+    #[test]
+    fn score_should_sink_a_pointer_to_another_file() {
+        // `Plan: docs/plan-feature-56-....md` es metadata, no una linea sobre
+        // el tema.
+        let t = terminos("contexto");
+        let puntero = score(Fuente::Spec, "Plan: docs/plan-feature-56-paquete-de-contexto.md", &t, "56", true, "spec-feature-56-x.md");
+        let cuerpo = score(Fuente::Spec, "decidimos armar el contexto antes de explorar", &t, "56", true, "spec-feature-56-x.md");
+        assert!(cuerpo > puntero, "cuerpo {cuerpo} deberia ganarle al puntero {puntero}");
+    }
+
+    #[test]
+    fn score_should_keep_rewarding_a_section_heading_that_says_something() {
+        // La contracara, y el limite del arreglo: un `##` que NOMBRA el tema
+        // sigue valiendo mas que el cuerpo. Sin este test, la forma facil de
+        // hacer pasar a los dos de arriba seria matar el bonus de titulo.
+        let t = terminos("ureq");
+        let cuerpo = score(Fuente::Spec, "usamos ureq aca", &t, "", true, "spec-feature-3-http.md");
+        let seccion = score(Fuente::Spec, "## ureq como cliente", &t, "", true, "spec-feature-3-http.md");
+        assert!(seccion > cuerpo, "seccion {seccion} deberia ganarle al cuerpo {cuerpo}");
+    }
+
+    #[test]
+    fn buscar_should_collapse_the_same_line_repeated_across_files() {
+        // El mismo encabezado vive en tres documentos: doce resultados podian
+        // ser doce copias. Se muestra una y se dice cuantas mas habia.
+        let (_d, paths) = sandbox(&[
+            ("docs/architecture.md", "## Paquete de contexto (feature #56)
+"),
+            ("docs/prd-diff-56.md", "## Paquete de contexto (feature #56)
+"),
+            ("docs/prd-diff-58.md", "## Paquete de contexto (feature #56)
+"),
+        ]);
+        let res = buscar(&paths, "paquete contexto");
+        assert_eq!(res.hallazgos.len(), 1, "no se colapsaron las copias: {:?}", res.hallazgos);
+        assert_eq!(res.hallazgos[0].repetido, 2, "no dice cuantas copias mas habia");
+    }
+
+    #[test]
+    fn buscar_should_put_content_above_titles_and_pointers() {
+        // El caso completo, de punta a punta: el documento entero como esta en
+        // el repo, y lo que tiene que salir primero.
+        let (_d, paths) = sandbox(&[(
+            "docs/spec-feature-56-paquete-de-contexto.md",
+            "# Spec - Feature #56: paquete_de_contexto
+             Plan: docs/plan-feature-56-paquete-de-contexto.md
+             El paquete de contexto se arma antes de explorar el repo.
+",
+        )]);
+        let res = buscar(&paths, "paquete contexto");
+        assert_eq!(res.hallazgos.len(), 3);
+        assert_eq!(
+            res.hallazgos[0].linea, 3,
+            "primero tiene que ir la linea con contenido, no el titulo ni el puntero: {:?}",
+            res.hallazgos.iter().map(|h| (h.linea, h.score)).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn score_should_prefer_recent_features() {
         let t = terminos("gate");
-        let vieja = score(Fuente::Spec, "el gate", &t, "3", true);
-        let nueva = score(Fuente::Spec, "el gate", &t, "19", true);
+        let vieja = score(Fuente::Spec, "el gate", &t, "3", true, "");
+        let nueva = score(Fuente::Spec, "el gate", &t, "19", true, "");
         assert!(nueva > vieja);
     }
 
@@ -479,8 +673,8 @@ mod tests {
     fn score_freshness_should_never_beat_the_source_weight() {
         // Una leccion vieja tiene que seguir ganandole a una bitacora nueva.
         let t = terminos("x");
-        let leccion_vieja = score(Fuente::Leccion, "x", &t, "1", true);
-        let historia_nueva = score(Fuente::Historia, "x", &t, "99", true);
+        let leccion_vieja = score(Fuente::Leccion, "x", &t, "1", true, "");
+        let historia_nueva = score(Fuente::Historia, "x", &t, "99", true, "");
         assert!(leccion_vieja > historia_nueva);
     }
 

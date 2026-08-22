@@ -214,7 +214,7 @@ function Import-HarnessEnvFile {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return
     }
-    foreach ($rawLine in Get-Content -LiteralPath $Path) {
+    foreach ($rawLine in Read-HarnessLines -Path $Path) {
         $line = $rawLine.Trim()
         if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
             continue
@@ -314,14 +314,14 @@ function Write-McpAtlassian {
 
     foreach ($rel in @(".mcp.json", ".kimi-code/mcp.json")) {
         $target = Join-Path $script:SurfaceDir $rel
-        if ((Test-Path -LiteralPath $target -PathType Leaf) -and ((Get-Content -LiteralPath $target -Raw) -match '"atlassian"')) {
+        if ((Test-Path -LiteralPath $target -PathType Leaf) -and ((Read-HarnessText -Path $target) -match '"atlassian"')) {
             Write-HarnessLog INFO "MCP Atlassian: $rel ya lo declara (respetado)."
             continue
         }
         $dir = Split-Path -Parent $target
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         $data = if (Test-Path -LiteralPath $target -PathType Leaf) {
-            try { Get-Content -LiteralPath $target -Raw | ConvertFrom-Json -AsHashtable } catch { @{} }
+            try { Read-HarnessText -Path $target | ConvertFrom-Json -AsHashtable } catch { @{} }
         } else { @{} }
         if (-not $data.ContainsKey("mcpServers")) { $data["mcpServers"] = @{} }
         $data["mcpServers"]["atlassian"] = @{ url = $url }
@@ -330,7 +330,7 @@ function Write-McpAtlassian {
     }
 
     $grok = Join-Path $script:SurfaceDir ".grok/config.toml"
-    $yaEsta = (Test-Path -LiteralPath $grok -PathType Leaf) -and ((Get-Content -LiteralPath $grok -Raw) -match "mcp_servers.atlassian")
+    $yaEsta = (Test-Path -LiteralPath $grok -PathType Leaf) -and ((Read-HarnessText -Path $grok) -match "mcp_servers.atlassian")
     if ($yaEsta) {
         Write-HarnessLog INFO "MCP Atlassian: .grok/config.toml ya lo declara (respetado)."
     }
@@ -552,6 +552,24 @@ function Move-HarnessDocsToRoot {
     }
 }
 
+# Windows PowerShell 5.1 lee con la CODEPAGE ANSI del sistema cuando no se le
+# dice otra cosa. Los templates son UTF-8: cada `—` y cada `ñ` entraba como
+# bytes sueltos y se escribia de vuelta como `â€”` y `Ã±`. O sea que TODA
+# instalacion hecha desde Windows dejaba los roles y las superficies con la
+# acentuacion rota, y el gate de espejo del propio arnes fallaba en una
+# instalacion recien hecha. En PowerShell 7 el default ya es UTF-8, que es por
+# lo que nunca se vio: el .ps1 solo se corria ahi, y su smoke no se corria en
+# ningun lado.
+function Read-HarnessText {
+    param([string]$Path)
+    return [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false))
+}
+
+function Read-HarnessLines {
+    param([string]$Path)
+    return [IO.File]::ReadAllLines($Path, [Text.UTF8Encoding]::new($false))
+}
+
 function Write-HarnessText {
     param(
         [string]$Path,
@@ -589,7 +607,7 @@ function Ensure-HarnessGitIgnore {
     $gitIgnore = Join-Path $script:RepoRoot ".gitignore"
     $existing = @()
     if (Test-Path -LiteralPath $gitIgnore) {
-        $existing = Get-Content -LiteralPath $gitIgnore
+        $existing = Read-HarnessLines -Path $gitIgnore
     }
     # Feature #15 / Articulo 4: `.harness.env` puede llevar el email y el API
     # token de Atlassian; se ignora SIEMPRE y aparte, para que tambien lo gane
@@ -1052,7 +1070,7 @@ function Inject-PerfilBlock {
         return
     }
     if ([string]::IsNullOrWhiteSpace($bloque)) { return }
-    $lineas = @(Get-Content -LiteralPath $Target)
+    $lineas = @(Read-HarnessLines -Path $Target)
     $limpias = New-Object System.Collections.Generic.List[string]
     $skip = $false
     foreach ($linea in $lineas) {
@@ -1072,7 +1090,7 @@ function Write-AgentDefinitions {
         return
     }
     $rolesReadme = Join-Path $script:HarnessDir "roles/README.md"
-    $rolesReadmeBody = (Get-Content -LiteralPath $rolesReadme -Raw).Replace("__HREL__", $script:Hrel)
+    $rolesReadmeBody = (Read-HarnessText -Path $rolesReadme).Replace("__HREL__", $script:Hrel)
     Write-HarnessText -Path $rolesReadme -Content $rolesReadmeBody
 
     $descriptions = @{
@@ -1096,7 +1114,7 @@ function Write-AgentDefinitions {
 
     foreach ($role in @("leader", "implementer", "reviewer")) {
         $rolePath = Join-Path $script:HarnessDir "roles/$role.md"
-        $body = (Get-Content -LiteralPath $rolePath -Raw).Replace("__HREL__", $script:Hrel)
+        $body = (Read-HarnessText -Path $rolePath).Replace("__HREL__", $script:Hrel)
         Write-HarnessText -Path $rolePath -Content $body
 
         $tools = if ($role -eq "implementer") {

@@ -8,6 +8,63 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("harness-setup-ps-" + [Guid]::NewGuid().ToString("N"))
 
+# El binario real, compilado UNA vez y sembrado en las fixtures que despues le
+# piden trabajo de verdad al CLI (paridad con PREBUILT_BIN del smoke de sh).
+# Sin esto el smoke sembraba un harness.exe FALSO —un archivo de texto que
+# escribe el cargo de mentira— y mas adelante le pedia `prd add`: Windows
+# contestaba "no es una aplicacion valida para esta plataforma" y el smoke moria
+# ahi. Es la segunda mitad de por que nunca se lo vio pasar.
+function Get-CargoPath {
+    $command = Get-Command cargo.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $candidatos = @()
+    if ($env:CARGO_HOME) { $candidatos += (Join-Path $env:CARGO_HOME "bin/cargo.exe") }
+    $candidatos += (Join-Path $HOME ".cargo/bin/cargo.exe")
+    foreach ($c in $candidatos) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { return $c }
+    }
+    return $null
+}
+
+function Get-PrebuiltBinary {
+    $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot "rust/target" }
+    $bin = Join-Path $targetDir "release/harness.exe"
+    if (Test-Path -LiteralPath $bin -PathType Leaf) { return $bin }
+    $cargo = Get-CargoPath
+    if (-not $cargo) {
+        throw "cargo es requerido para el smoke (harness Rust-only) y no esta en PATH ni en ~/.cargo/bin."
+    }
+    Push-Location (Join-Path $repoRoot "rust")
+    try { & $cargo build --release --quiet } finally { Pop-Location }
+    if (-not (Test-Path -LiteralPath $bin -PathType Leaf)) {
+        throw "cargo build no dejo el binario en $bin"
+    }
+    return $bin
+}
+
+# Mismo motivo que en el instalador: `Get-Content` en Windows PowerShell 5.1 lee
+# con la codepage ANSI y devuelve `â€”` donde el archivo dice `—`. Como
+# `[IO.File]::ReadAllLines` SI lee UTF-8, el smoke comparaba un texto contra su
+# version mojibake y reportaba espejos "desincronizados" que estaban bien.
+function Get-Utf8Text {
+    param([string]$Path)
+    return [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false))
+}
+
+# En Windows PowerShell 5.1, redirigir el stderr de un EJECUTABLE nativo con
+# `2>&1` envuelve cada linea en un ErrorRecord, y con $ErrorActionPreference =
+# "Stop" la primera de ellas LANZA. harness_check.sh escribe sus avisos por
+# stderr —incluso los informativos, incluso cuando sale 0—, asi que el smoke se
+# caia por leer la salida que venia a revisar. Se baja la preferencia solo
+# alrededor de la llamada.
+function Invoke-CapturandoStderr {
+    param([scriptblock]$Bloque)
+    $previo = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { return (& $Bloque | Out-String) }
+    finally { $ErrorActionPreference = $previo }
+}
+
 function Assert-True {
     param(
         [bool]$Condition,
@@ -42,6 +99,8 @@ function Copy-Fixture {
     Copy-Item -LiteralPath (Join-Path $repoRoot "templates") -Destination $Target -Recurse
 }
 
+$prebuilt = Get-PrebuiltBinary
+
 try {
     $env:DB_HOST = "postgres.example"
     $env:DB_USER = "harness"
@@ -69,12 +128,16 @@ try {
     New-Item -ItemType Directory -Path $fakeBin -Force | Out-Null
     $cargoTarget = Join-Path $fixture "cargo-target"
     New-Item -ItemType Directory -Path (Join-Path $fixture "rust") -Force | Out-Null
-    Set-TextUtf8NoBom -Path (Join-Path $fixture "rust/Cargo.toml") -Value @'
+    # El manifiesto de mentira vive en una variable y no en la fixture: mas
+    # abajo hay otra fixture que lo necesita, y leerlo de la primera ataba las
+    # dos (la primera lo borra cuando termina de usarlo).
+    $cargoTomlStub = @'
 [package]
 name = "harness-smoke"
 version = "0.0.0"
 edition = "2021"
 '@
+    Set-TextUtf8NoBom -Path (Join-Path $fixture "rust/Cargo.toml") -Value $cargoTomlStub
 
     $runningOnWindows = $env:OS -eq "Windows_NT"
     if ($runningOnWindows) {
@@ -116,7 +179,7 @@ exit 0
 
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "harness_cli.ps1")) "PowerShell CLI shim was not installed."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "harness.exe")) "Cargo output harness.exe was not installed."
-    $cargoArgs = Get-Content -LiteralPath (Join-Path $fixture "rust/cargo-args.txt") -Raw
+    $cargoArgs = Get-Utf8Text -Path (Join-Path $fixture "rust/cargo-args.txt")
     Assert-True ($cargoArgs -match "build --release --locked") "Cargo was not invoked with build --release --locked."
 
     # Feature #14 / AC-12 + AC-13 (paridad con el bloque del smoke sh): UPDATING
@@ -158,7 +221,7 @@ exit 0
         $env:PATH = $oldPath
         $env:CARGO_TARGET_DIR = $oldCargoTarget
     }
-    $reinstalled = (Get-Content -LiteralPath (Join-Path $fixture "harness.exe") -Raw)
+    $reinstalled = (Get-Utf8Text -Path (Join-Path $fixture "harness.exe"))
     Assert-True ($reinstalled -match "fake harness v2") "Re-running the installer did not replace harness.exe with the freshly built one."
     $leftovers = @(Get-ChildItem -LiteralPath $fixture -Force -Filter ".harness.exe.*" -ErrorAction SilentlyContinue)
     # El mensaje se arma SIEMPRE, incluso cuando la asercion pasa. En PowerShell
@@ -169,14 +232,26 @@ exit 0
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture ".codex/hooks.json")) "Codex hooks were not generated."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "bin/harness-hook.ps1")) "PowerShell hook runtime was not generated."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture ".gemini/commands/harness/check.toml")) "Gemini check command was not generated."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture ".harness_layout") -Raw).Trim() -eq "root") "Root layout marker is incorrect."
-    Get-Content -LiteralPath (Join-Path $fixture ".codex/hooks.json") -Raw | ConvertFrom-Json | Out-Null
-    Get-Content -LiteralPath (Join-Path $fixture ".gemini/settings.json") -Raw | ConvertFrom-Json | Out-Null
+    Assert-True ((Get-Utf8Text -Path (Join-Path $fixture ".harness_layout")).Trim() -eq "root") "Root layout marker is incorrect."
+    Get-Utf8Text -Path (Join-Path $fixture ".codex/hooks.json") | ConvertFrom-Json | Out-Null
+    Get-Utf8Text -Path (Join-Path $fixture ".gemini/settings.json") | ConvertFrom-Json | Out-Null
+
+    # Hasta aca el harness.exe de la fixture es el que escribio el cargo falso:
+    # eso es lo que hace verificable la instalacion atomica. De aca en adelante
+    # el smoke le pide trabajo REAL al CLI (`prd add`, `prd tree`, `start`), asi
+    # que se siembra el binario de verdad, igual que copy_fixture en el smoke sh.
+    Copy-Item -LiteralPath $prebuilt -Destination (Join-Path $fixture "harness.exe") -Force
+    # Y se va el `rust/` de mentira: existe solo para que el cargo falso tenga
+    # un manifiesto que "compilar". Si queda, la proxima corrida del instalador
+    # encuentra un cargo REAL en la maquina, intenta compilar un paquete sin
+    # fuentes y falla. Las fixtures del smoke de sh no llevan `rust/` por la
+    # misma razon: sin manifiesto, el instalador conserva el binario que ya esta.
+    Remove-Item -Recurse -Force -LiteralPath (Join-Path $fixture "rust")
 
     # SDD: la constitution es un required asset y el instalador la siembra en el
     # docs/ de la RAIZ (en root layout, RAIZ == fixture). Paridad con el smoke sh;
     # la ejecucion real en Windows queda pendiente de entorno (como en feature #1).
-    $installerText = Get-Content -LiteralPath (Join-Path $fixture "setup_harness.ps1") -Raw
+    $installerText = Get-Utf8Text -Path (Join-Path $fixture "setup_harness.ps1")
     Assert-True ($installerText -match '"docs/constitution\.md"') "Installer does not declare docs/constitution.md as a required asset."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "templates/docs/constitution.md")) "Constitution template asset is missing from the distribution."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/constitution.md")) "Constitution was not seeded by the installer."
@@ -184,12 +259,12 @@ exit 0
     # Feature #6 / AC-10 + AC-11: la superficie sembrada describe el ritual de
     # aprobacion (mostrar el spec + preguntar + approve-spec --yes) y ya no la
     # edicion manual de `Estado:`. Paridad con el bloque AC-10 del smoke sh.
-    $constitutionText = Get-Content -LiteralPath (Join-Path $fixture "docs/constitution.md") -Raw
+    $constitutionText = Get-Utf8Text -Path (Join-Path $fixture "docs/constitution.md")
     Assert-True ($constitutionText -match 'approve-spec --yes') "Seeded constitution does not describe the approve-spec flow."
     Assert-True (-not ($constitutionText -match 'auto-aprobar')) "Seeded constitution still carries the old manual-approval wording."
-    $checkText = Get-Content -LiteralPath (Join-Path $fixture "harness_check.sh") -Raw
+    $checkText = Get-Utf8Text -Path (Join-Path $fixture "harness_check.sh")
     Assert-True ($checkText -match 'approve-spec --yes') "Seeded harness_check.sh does not mention approve-spec."
-    $implementerText = Get-Content -LiteralPath (Join-Path $fixture "roles/implementer.md") -Raw
+    $implementerText = Get-Utf8Text -Path (Join-Path $fixture "roles/implementer.md")
     Assert-True ($implementerText -match 'approve-spec --yes') "Seeded implementer role does not describe the approval ritual."
 
     # Feature #4 / AC-2: en layout root los tres docs del arnes se siembran en el
@@ -201,11 +276,11 @@ exit 0
     # AC-12: sin entradas no se inyecta bloque en ninguna superficie.
     $perfilPath = Join-Path $fixture "docs/perfil-usuario.md"
     Assert-True (Test-Path -LiteralPath $perfilPath) "perfil-usuario.md was not seeded into the root docs/."
-    $perfilText = Get-Content -LiteralPath $perfilPath -Raw
+    $perfilText = Get-Utf8Text -Path $perfilPath
     Assert-True ($perfilText -match '^# Perfil de usuario') "The seeded profile is missing its header."
     Assert-True (-not ($perfilText -match '(?m)^- ')) "The installer seeded profile entries; it must start empty."
     foreach ($perfilSurface in @("CLAUDE.md", "AGENTS.md", "GEMINI.md", "LLM.md")) {
-        $surfaceText = Get-Content -LiteralPath (Join-Path $fixture $perfilSurface) -Raw
+        $surfaceText = Get-Utf8Text -Path (Join-Path $fixture $perfilSurface)
         Assert-True (-not ($surfaceText -match 'harness:perfil:inicio')) "$perfilSurface has a profile block while the profile is empty."
     }
 
@@ -214,7 +289,7 @@ exit 0
     $leccionFiles = @(Get-ChildItem -LiteralPath (Join-Path $fixture "docs/lecciones") -Filter "*.md" -File |
         Where-Object { $_.Name -ne "COMO-ESCRIBIR-UNA-LECCION.md" })
     Assert-True ($leccionFiles.Count -eq 0) "The installer seeded lessons; it must seed only the guide."
-    $leccionGuideText = Get-Content -LiteralPath (Join-Path $fixture "docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md") -Raw
+    $leccionGuideText = Get-Utf8Text -Path (Join-Path $fixture "docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md")
     Assert-True ($leccionGuideText -match 'primero patchear, crear al final') "The lessons guide is missing the preference order."
     Assert-True ($leccionGuideText -match '## El nombre tiene que ser de CLASE') "The lessons guide is missing the class-name rule."
     Assert-True ($leccionGuideText -match '## Que NO capturar') "The lessons guide is missing the do-not-capture list."
@@ -222,7 +297,7 @@ exit 0
         Assert-True ($leccionGuideText -match [regex]::Escape($regla)) "The lessons guide does not list '$regla'."
     }
     # Feature #17 / AC-17: la superficie instalada explica el comando y el gate.
-    $agentsSurface = Get-Content -LiteralPath (Join-Path $fixture "AGENTS.md") -Raw
+    $agentsSurface = Get-Utf8Text -Path (Join-Path $fixture "AGENTS.md")
     Assert-True ($agentsSurface -match 'docs/lecciones/') "The installed AGENTS.md does not link docs/lecciones/."
     Assert-True ($agentsSurface -match 'require_leccion') "The installed AGENTS.md does not mention the require_leccion rule."
     # Feature #11 (companion KimiDotfiles): .kimiignore/.kimirules se siembran en
@@ -236,18 +311,18 @@ exit 0
     # Feature #12 / AC-5: la guia del metodo PRD acompana a las planillas.
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/COMO-ESCRIBIR-UN-PRD.md")) "COMO-ESCRIBIR-UN-PRD.md was not seeded into docs/prd/."
     # Feature #12 / AC-4: la guia trae el metodo (historia, tamano, sin codigo final).
-    $prdGuideText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/COMO-ESCRIBIR-UN-PRD.md") -Raw
+    $prdGuideText = Get-Utf8Text -Path (Join-Path $fixture "docs/prd/COMO-ESCRIBIR-UN-PRD.md")
     Assert-True ($prdGuideText -match '## 2\. Todo empieza con una historia') "The PRD guide is missing the story section."
     Assert-True ($prdGuideText -match '## 3\. El tamano lo decide el cambio') "The PRD guide is missing the sizing table."
     Assert-True ($prdGuideText -match 'NUNCA CONTIENE') "The PRD guide does not state what a PRD never contains."
     # Feature #5 / AC-7 + AC-8 + Feature #12 / AC-1..AC-3: las planillas traen las
     # secciones que las hacen utiles, ya con la anatomia del metodo.
-    $prdText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw
+    $prdText = Get-Utf8Text -Path (Join-Path $fixture "docs/prd/PRD-master.md")
     Assert-True ($prdText -match '## 2\. La historia') "PRD-master.md is missing the story section."
     Assert-True ($prdText -match '## 8\. Pseudo-codigo \(el acuerdo\)') "PRD-master.md is missing the pseudo-code agreement section."
     Assert-True ($prdText -match '## 10\. Hitos -> features') "PRD-master.md is missing the milestones-to-features table."
     Assert-True ($prdText -match 'harness_cli add') "PRD-master.md does not link milestones to the backlog command."
-    $sddText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md") -Raw
+    $sddText = Get-Utf8Text -Path (Join-Path $fixture "docs/prd/SDD-master.md")
     Assert-True ($sddText -match '## 4\. Decisiones tecnicas') "SDD-master.md is missing the technical decisions section."
     Assert-True ($sddText -match 'docs/architecture\.md') "SDD-master.md does not distinguish itself from docs/architecture.md."
 
@@ -267,20 +342,20 @@ exit 0
     & (Join-Path $fixture "harness_cli.ps1") prd add --name mora --parent cobranza | Out-Null
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/cobranza/PRD-cobranza.md")) "prd add did not create the child PRD folder."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md")) "prd add did not nest the grandchild PRD."
-    $childText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md") -Raw
+    $childText = Get-Utf8Text -Path (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md")
     Assert-True ($childText -match '(?m)^Padre: cobranza') "The nested PRD does not declare its parent."
     Assert-True ($childText -match '## 10\. Hitos -> features') "The nested PRD is missing the milestones table."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match '\| cobranza \| \[cobranza/PRD-cobranza\.md\]') "The master PRD does not link its child."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $fixture "docs/prd/PRD-master.md")) -match '\| cobranza \| \[cobranza/PRD-cobranza\.md\]') "The master PRD does not link its child."
     $treeOut = (& (Join-Path $fixture "harness_cli.ps1") prd tree | Out-String)
     Assert-True ($treeOut -match 'PRD-cobranza-mora') "prd tree did not draw the nested PRD."
     # Feature #13 / AC-5 + AC-6: la cadena PRD hoja -> feature -> spec.
     & (Join-Path $fixture "harness_cli.ps1") add --name avisar_mora --service cobranza --acceptance "llega el aviso" --prd mora | Out-Null
     & (Join-Path $fixture "harness_cli.ps1") start --feature 1 | Out-Null
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/spec-feature-1-avisar-mora.md") -Raw) -match '(?m)^PRD: docs/prd/cobranza/mora/PRD-cobranza-mora\.md') "The generated spec does not cite its source PRD."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $fixture "docs/spec-feature-1-avisar-mora.md")) -match '(?m)^PRD: docs/prd/cobranza/mora/PRD-cobranza-mora\.md') "The generated spec does not cite its source PRD."
 
     # Feature #11 / AC-4: la superficie que genera el ps1 referencia la guia de
     # uso eficiente de Kimi CLI (paridad con el grep del smoke sh).
-    $agentsText = Get-Content -LiteralPath (Join-Path $fixture "AGENTS.md") -Raw
+    $agentsText = Get-Utf8Text -Path (Join-Path $fixture "AGENTS.md")
     Assert-True ($agentsText -match 'kimi-cli-uso-eficiente') "Seeded AGENTS.md does not reference the efficient Kimi CLI usage guide."
     # Feature #12 / AC-8: y tambien el metodo para escribir PRDs.
     Assert-True ($agentsText -match 'COMO-ESCRIBIR-UN-PRD') "Seeded AGENTS.md does not reference the PRD writing method."
@@ -296,8 +371,8 @@ exit 0
     Add-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Value "<!-- $prdSentinel -->"
     & (Join-Path $fixture "setup_harness.ps1") `
         -Root -NoGraphify -NoGraphifySkills -NoAntigravity -CargoTargetDir $cargoTarget
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/conventions.md") -Raw) -match $docsSentinel) "Reinstall overwrote a harness doc already present in the root docs/."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match $prdSentinel) "Reinstall overwrote the project's PRD."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $fixture "docs/conventions.md")) -match $docsSentinel) "Reinstall overwrote a harness doc already present in the root docs/."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $fixture "docs/prd/PRD-master.md")) -match $prdSentinel) "Reinstall overwrote the project's PRD."
 
     # Feature #4 / AC-6: los artefactos de feature comparten carpeta con los docs
     # generados y el reset NO puede llevarselos por delante.
@@ -321,7 +396,7 @@ exit 0
     }
     # Feature #5 / AC-4: las planillas maestras NO son superficie generada y
     # sobreviven al reset con el contenido que escribio el usuario.
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match $prdSentinel) "Reset removed or overwrote the project's PRD."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $fixture "docs/prd/PRD-master.md")) -match $prdSentinel) "Reset removed or overwrote the project's PRD."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/SDD-master.md")) "Reset removed the project's SDD master."
 
     # --- Feature #4 / AC-1 + AC-3 + AC-4: layout subdir y migracion -----------
@@ -355,13 +430,13 @@ exit 0
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $subdirHarness $kimiDotfile))) "Kimi dotfile $kimiDotfile was created inside the harness subfolder."
     }
     # AC-3: se movio el contenido viejo (no se regenero desde la plantilla).
-    Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/architecture.md") -Raw).Trim() -eq "VIEJO-ARCHITECTURE") "architecture.md was not migrated with its content."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/verification.md") -Raw).Trim() -eq "VIEJO-VERIFICATION") "verification.md was not migrated with its content."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $subdirRoot "docs/architecture.md")).Trim() -eq "VIEJO-ARCHITECTURE") "architecture.md was not migrated with its content."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $subdirRoot "docs/verification.md")).Trim() -eq "VIEJO-VERIFICATION") "verification.md was not migrated with its content."
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $subdirHarness "docs/architecture.md"))) "architecture.md is still in the harness subfolder."
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $subdirHarness "docs/verification.md"))) "verification.md is still in the harness subfolder."
     # AC-4: el doc del equipo queda intacto y la copia vieja se conserva.
-    Assert-True ((Get-Content -LiteralPath (Join-Path $subdirRoot "docs/conventions.md") -Raw) -match $teamSentinel) "Migration overwrote the team's conventions.md in the root docs/."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $subdirHarness "docs/conventions.md") -Raw).Trim() -eq "VIEJO-CONVENTIONS") "Migration removed the old copy instead of keeping it."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $subdirRoot "docs/conventions.md")) -match $teamSentinel) "Migration overwrote the team's conventions.md in the root docs/."
+    Assert-True ((Get-Utf8Text -Path (Join-Path $subdirHarness "docs/conventions.md")).Trim() -eq "VIEJO-CONVENTIONS") "Migration removed the old copy instead of keeping it."
 
     # --- Feature #7: gate de espejo de roles + resolucion robusta de raiz ------
     # Paridad con los bloques nuevos de tests/setup_smoke.sh. El gate vive en
@@ -375,7 +450,7 @@ exit 0
 
     function Get-AgentBody {
         param([string]$Path)
-        $lines = [IO.File]::ReadAllLines($Path)
+        $lines = [IO.File]::ReadAllLines($Path, [Text.UTF8Encoding]::new($false))
         $fm = 0
         $inBody = $false
         $body = New-Object System.Collections.Generic.List[string]
@@ -395,7 +470,7 @@ exit 0
 
     function Get-CodexBody {
         param([string]$Path)
-        $lines = [IO.File]::ReadAllLines($Path)
+        $lines = [IO.File]::ReadAllLines($Path, [Text.UTF8Encoding]::new($false))
         $inBlock = $false
         $body = New-Object System.Collections.Generic.List[string]
         foreach ($line in $lines) {
@@ -412,13 +487,13 @@ exit 0
 
     function Get-NormalizedText {
         param([string]$Path)
-        return ((Get-Content -LiteralPath $Path -Raw) -replace "`r`n", "`n").TrimEnd()
+        return ((Get-Utf8Text -Path $Path) -replace "`r`n", "`n").TrimEnd()
     }
 
     $checkRobust = Join-Path $tempRoot "check-robust-ps"
     Copy-Fixture -Target $checkRobust
     New-Item -ItemType Directory -Path (Join-Path $checkRobust "rust") -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $fixture "rust/Cargo.toml") -Destination (Join-Path $checkRobust "rust/Cargo.toml")
+    Set-TextUtf8NoBom -Path (Join-Path $checkRobust "rust/Cargo.toml") -Value $cargoTomlStub
     $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
     try {
         & (Join-Path $checkRobust "setup_harness.ps1") `
@@ -430,7 +505,7 @@ exit 0
     }
 
     # (1) El harness_check.sh sembrado trae el gate de espejo y el guardrail.
-    $seededCheck = Get-Content -LiteralPath (Join-Path $checkRobust "harness_check.sh") -Raw
+    $seededCheck = Get-Utf8Text -Path (Join-Path $checkRobust "harness_check.sh")
     Assert-True ($seededCheck -match 'Espejo desincronizado') "Seeded harness_check.sh does not carry the role-mirror gate."
     Assert-True ($seededCheck -match 'extract_agent_body') "Seeded harness_check.sh does not carry the frontmatter body extractor."
     Assert-True ($seededCheck -match 'Checkout fuente del arnes detectado') "Seeded harness_check.sh does not carry the source-checkout guardrail."
@@ -500,7 +575,7 @@ exit 0
         Push-Location $sourceClone
         try {
             # $null en el pipe cierra stdin (commit_guard.sh hace cat de stdin).
-            $checkOutput = $null | & $bashCmd.Source "harness_check.sh" 2>&1 | Out-String
+            $checkOutput = Invoke-CapturandoStderr { $null | & $bashCmd.Source "harness_check.sh" 2>&1 }
             $checkExit = $LASTEXITCODE
         }
         finally {
@@ -523,7 +598,7 @@ exit 0
 
     # (1) Los CUATRO scripts sembrados por el instalador traen la regla nueva.
     foreach ($seededScript in @("harness_check.sh", "harness_status.sh", "init.sh", "commit_guard.sh")) {
-        $seeded = Get-Content -LiteralPath (Join-Path $checkRobust $seededScript) -Raw
+        $seeded = Get-Utf8Text -Path (Join-Path $checkRobust $seededScript)
         Assert-True ($seeded -match '\.harness_layout ausente') "Seeded $seededScript does not carry the marker-inference notice."
         Assert-True ($seeded -match 'harness_parent_footprint') "Seeded $seededScript does not carry the parent-footprint probe."
         Assert-True ($seeded -match 'elif \[ ! -f "\$harness_marker" \]') "Seeded $seededScript does not gate the inference on the marker being ABSENT."
@@ -564,7 +639,7 @@ exit 0
             $env:CLAUDE_PROJECT_DIR = $null
             Push-Location $HarnessDir
             try {
-                return ($null | & $bashCmd.Source "harness_check.sh" 2>&1 | Out-String)
+                return (Invoke-CapturandoStderr { $null | & $bashCmd.Source "harness_check.sh" 2>&1 })
             }
             finally {
                 Pop-Location
@@ -613,7 +688,7 @@ exit 0
     $kimiImplTools = @([IO.File]::ReadAllLines((Join-Path $checkRobust ".kimi-code/agents/implementer.md")) | Where-Object { $_ -match '^tools: ' })[0]
     Assert-True ($kimiImplTools -match 'Edit' -and $kimiImplTools -match 'Write') "Kimi implementer allowlist must include Edit and Write."
     # El harness_check.sh sembrado trae el gate de espejo extendido a Kimi.
-    $seededCheckKimi = Get-Content -LiteralPath (Join-Path $checkRobust "harness_check.sh") -Raw
+    $seededCheckKimi = Get-Utf8Text -Path (Join-Path $checkRobust "harness_check.sh")
     Assert-True ($seededCheckKimi -match '\.kimi-code/agents') "Seeded harness_check.sh does not cover the Kimi mirrors."
     # Launcher generado como los demas.
     Assert-True (Test-Path -LiteralPath (Join-Path $checkRobust "bin/harness-kimi.ps1")) "Kimi launcher bin/harness-kimi.ps1 was not generated."
@@ -656,7 +731,7 @@ command = "echo hook-del-usuario"
         & (Join-Path $checkRobust "setup_harness.ps1") `
             -Root -NoGraphify -NoGraphifySkills -NoAntigravity `
             -CargoTargetDir (Join-Path $checkRobust "cargo-target")
-        $kimiConfigText = Get-Content -LiteralPath $kimiConfigPath -Raw
+        $kimiConfigText = Get-Utf8Text -Path $kimiConfigPath
         Assert-True ($kimiConfigText -match [regex]::Escape($kimiSentinel)) "User content in the global Kimi config did not survive."
         Assert-True ($kimiConfigText -match 'hook-del-usuario') "The user's own hook in the global Kimi config did not survive."
         Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape($kimiBeginMarker))).Count -eq 1) "The harness block marker count must be exactly 1."
@@ -670,7 +745,7 @@ command = "echo hook-del-usuario"
         & (Join-Path $checkRobust "setup_harness.ps1") `
             -Root -NoGraphify -NoGraphifySkills -NoAntigravity `
             -CargoTargetDir (Join-Path $checkRobust "cargo-target")
-        $kimiConfigText = Get-Content -LiteralPath $kimiConfigPath -Raw
+        $kimiConfigText = Get-Utf8Text -Path $kimiConfigPath
         Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape($kimiBeginMarker))).Count -eq 1) "Reinstall duplicated the harness block."
         Assert-True (([regex]::Matches($kimiConfigText, [regex]::Escape("[[hooks]]"))).Count -eq 4) "Reinstall changed the hook count."
 
@@ -679,7 +754,7 @@ command = "echo hook-del-usuario"
         & (Join-Path $checkRobust "setup_harness.ps1") `
             -Root -NoGraphify -NoGraphifySkills -NoAntigravity -Reset
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $checkRobust ".kimi-code/agents"))) "-Reset did not clean the project .kimi-code/agents."
-        $kimiConfigAfterReset = Get-Content -LiteralPath $kimiConfigPath -Raw
+        $kimiConfigAfterReset = Get-Utf8Text -Path $kimiConfigPath
         Assert-True ($kimiConfigAfterReset -eq $kimiConfigText) "-Reset must not touch the global Kimi hooks block."
 
         # -NoKimi: con Kimi detectable, el bloque global NO se escribe (los
@@ -719,7 +794,7 @@ command = "echo hook-del-usuario"
         -CargoTargetDir (Join-Path $atlassianOn "cargo-target")
     $bindingPath = Join-Path $atlassianOn "atlassian.json"
     Assert-True (Test-Path -LiteralPath $bindingPath) "The installer must write atlassian.json with the flags (AC-1)."
-    $binding = Get-Content -LiteralPath $bindingPath -Raw
+    $binding = Get-Utf8Text -Path $bindingPath
     Assert-True ($binding -match '"project_key": "ADR"') "atlassian.json must carry the Jira project (AC-1)."
     Assert-True ($binding -match '"space_key": "SD"') "atlassian.json must carry the Confluence space (AC-1)."
     Assert-True ($binding -match '"feature": "Story"') "Story is the default issue type for a feature (OBS-6)."

@@ -79,3 +79,10 @@ bash tests/cmd_installer_check.sh
 
 Los modos que necesitan `cmd.exe` se saltean **con un `[Ok]` explicito** fuera de
 Windows: un skip silencioso se lee igual que un verde, y no lo es.
+
+Actualizacion: los dos smokes pasan enteros en Windows (`bash tests/setup_smoke.sh`
+y `.\tests\setup_smoke.ps1`, los dos exit 0). El del `.ps1` no habia corrido nunca
+y encontro cuatro fallas reales del arnes en Windows: el instalador `.ps1`
+corrompia el UTF-8 de los templates, `.harness_layout` con CRLF no matcheaba,
+`init.sh` no conectaba hooks de git, y el binario y los scripts no coincidian
+sobre que es `$HOME`. Estan en el README, en la seccion de paridad.

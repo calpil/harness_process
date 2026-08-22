@@ -11,6 +11,52 @@ No existe un comando mágico `harness_cli upgrade` dentro de tus proyectos. La f
 - Los scripts (`harness_cli`, `harness_check.sh`, roles, etc.) se copian desde `templates/`, y el binario Rust `harness` se compila desde `rust/` durante el setup (cargo requerido).
 - Re-correr el instalador asegura que todos los proyectos y todos los agentes (Claude, Gemini, Antigravity, Grok, Codex...) usen la misma versión actualizada del flujo.
 
+## `verify` corre donde vive el codigo de la feature (#57)
+
+Con features en paralelo (#47) cada una tiene su worktree, pero `verify` leia el
+spec de ahi y corria los comandos en el checkout principal, donde el codigo de
+la feature todavia no existe. `cargo test <filtro>` salia 0 habiendo ejecutado
+CERO casos y el AC se reportaba verde: al cerrar la #56 fueron cinco AC verdes
+que no probaron nada. Ahora los comandos corren en el worktree de la feature, y
+tanto la consola como `docs/verify-<id>.md` declaran el directorio.
+
+## `buscar` ordena por lo que dice, no por lo que se llama (#39)
+
+Tres cosas ocupaban los primeros lugares sin contestar nada:
+
+- **el titulo del documento** (`# Spec - Feature #56: <slug>`), que repite el
+  nombre del archivo que el resultado ya muestra;
+- **los punteros** (`Plan: docs/plan-feature-56-....md`), que son metadata;
+- **la misma linea repetida** en el spec, el prd-diff y `architecture.md`.
+
+Los dos primeros bajan de posicion (y dejan de cobrar el bonus de encabezado);
+el tercero se colapsa en uno solo que dice `+N archivo(s)`. Un `##` que NOMBRA
+el tema sigue valiendo mas que el cuerpo: lo que se corrigio es el que solo se
+nombra a si mismo.
+
+## Windows deja de ser una superficie de segunda
+
+El smoke de PowerShell nunca se habia corrido. Al correrlo aparecieron cuatro
+fallas reales, todas silenciosas:
+
+- **El instalador `.ps1` corrompia el UTF-8.** `Get-Content` sin `-Encoding` usa
+  la codepage ANSI en Windows PowerShell 5.1: cada em dash quedaba como `â€”` y
+  cada `n` con tilde como `Ã±`. Toda instalacion hecha desde Windows dejaba
+  los roles y las superficies rotos, y el gate de espejo del propio arnes
+  fallaba en una instalacion recien hecha. En PowerShell 7 el default ya es
+  UTF-8, que es por lo que nadie lo veia.
+- **`.harness_layout` con CRLF no matcheaba.** Los cuatro scripts sh comparaban
+  contra `subdir` un valor que llegaba con un `\r` al final, y la resolucion de raiz
+  se iba al camino equivocado sin decir nada. La version Rust ya hacia `trim()`.
+- **`init.sh` no conectaba un solo hook de git en Windows**, por la misma
+  comparacion de rutas que tenia el commit_guard (`/c/...` contra `C:/...`).
+- **El binario y los scripts no coincidian sobre que es `$HOME`**: Rust miraba
+  `USERPROFILE` y los scripts `HOME`. La guarda que impide sembrar el arnes
+  sobre la carpeta del usuario ahora acepta las dos.
+
+Los dos smokes -`tests/setup_smoke.sh` y `tests/setup_smoke.ps1`- pasan enteros
+en Windows.
+
 ## Windows: instalador y comando desde cmd.exe
 
 Ya no hace falta abrir PowerShell a mano para instalar ni para usar el arnes:

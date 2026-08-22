@@ -28,7 +28,10 @@ if [ -z "$REPO_ROOT" ]; then
     fi
     harness_layout=""
     if [ -f "$harness_marker" ]; then
-        harness_layout="$(cat "$harness_marker" 2>/dev/null || true)"
+        # Sin el `tr`: un marker escrito en Windows llega como "subdir\r", no
+        # matchea, y la resolucion de raiz se va al camino equivocado SIN decir
+        # nada. La version Rust ya hacia trim(); estos cuatro scripts no.
+        harness_layout="$(tr -d '\r' < "$harness_marker" 2>/dev/null || true)"
     fi
     if [ "$harness_layout" = "subdir" ]; then
         REPO_ROOT="$harness_parent"
@@ -406,8 +409,11 @@ if [ -f "$REPO_ROOT/docs/perfil-usuario.md" ]; then
             # del lanzador como si fuera el veredicto de este gate lo unico que
             # logra es que el mismo remedio aparezca dos veces y que un gate que
             # no corrio se cuente como gate en rojo.
-            *"no encontrado"*)
-                echo "[i] Perfil sin validar: falta el binario del arnes (ver el remedio de arriba)." >&2
+            # Cuando el que contesta es el LANZADOR y no el chequeo, no hay
+            # veredicto sobre el perfil: reimprimir su error como si lo fuera
+            # repite el remedio y cuenta en rojo un gate que no corrio.
+            *"[harness_cli]"*)
+                echo "[i] Perfil sin validar: el arnes no pudo ejecutarse (ver el remedio de arriba)." >&2
                 ;;
             *)
                 printf '%s\n' "$perfil_out" >&2
@@ -489,19 +495,24 @@ rutas_out="$(sh "$HARNESS_DIR/harness_cli" rutas --violaciones 2>"$rutas_err")" 
 rutas_err_text="$(cat "$rutas_err" 2>/dev/null || true)"
 rm -f "$rutas_err"
 if [ "$rutas_rc" -ne 0 ]; then
+    # La regla, y no una lista de errores conocidos: un exit distinto de cero
+    # SIN rutas que nombrar no es un hallazgo, es un gate que no pudo correr.
+    # Acusar ahi es la peor forma de equivocarse —le dice al usuario que toco
+    # sus propios documentos y no nombra ni uno— y ademas esconde la falla real.
+    # Pasaba con el binario ausente y con un binario que no arranca; mirar el
+    # texto del error solo cubria el caso que alguien ya habia visto.
     case "$rutas_err_text" in
         *"unrecognized subcommand"*|*"invalid value"*)
             echo "[i] El binario instalado no conoce 'rutas' (es anterior a la feature #26): re-corre el instalador para activar las rutas protegidas." >&2
             ;;
-        # Sin binario no hay veredicto sobre las rutas, y decir "modificadas y
-        # sin commitear" cuando NO se pudo mirar ninguna es la peor forma de
-        # equivocarse: acusa al usuario de tocar sus propios documentos y no
-        # nombra ni uno. El lanzador ya sale 127 con su remedio; aca solo se
-        # aclara que este gate quedo sin correr.
-        *"no encontrado"*)
-            echo "[i] Rutas protegidas sin verificar: falta el binario del arnes (ver el remedio de arriba)." >&2
-            ;;
         *)
+        if [ -z "$rutas_out" ]; then
+            echo "[i] Rutas protegidas sin verificar: 'rutas --violaciones' salio $rutas_rc sin nombrar ninguna." >&2
+            if [ -n "$rutas_err_text" ]; then
+                printf '    %s
+' "$rutas_err_text" >&2
+            fi
+        else
             echo "[!] Rutas PROTEGIDAS modificadas y sin commitear:" >&2
             printf '%s\n' "$rutas_out" | while IFS="$(printf '\t')" read -r rp_ruta rp_remedio; do
                 # Solo las lineas con tab son hallazgos; cualquier otra cosa que
@@ -514,6 +525,7 @@ if [ "$rutas_rc" -ne 0 ]; then
             echo "    Son documentos del USUARIO (docs/rutas-protegidas.md). Si el cambio es tuyo y" >&2
             echo "    querias hacerlo, commitealo; si no, revertilo con el comando de arriba." >&2
             failures=$((failures + 1))
+        fi
             ;;
     esac
 fi

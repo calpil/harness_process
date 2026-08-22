@@ -26,6 +26,21 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     let Some(feature) = feature_at(&data, idx).as_object() else {
         anyhow::bail!("feature_list.json: feature invalida");
     };
+    // Feature #57. Dos resoluciones distintas, las dos por FEATURE y no por
+    // directorio actual:
+    //   - `para_feature`: donde viven sus documentos (el docs/ de su worktree,
+    //     porque el spec y el reporte viajan con la rama). Es lo que hace el
+    //     resto de los comandos desde la #47; `verify` era el unico que resolvia
+    //     por CWD, asi que el mismo `--feature 56` daba cosas distintas segun
+    //     desde donde se lo corriera.
+    //   - `raiz_de_ejecucion`: donde CORREN los comandos. Antes era siempre el
+    //     checkout principal, donde el codigo de la feature todavia no existe.
+    //     `cargo test <filtro>` salia 0 habiendo ejecutado CERO casos y el AC
+    //     se reportaba verde. Un gate que da verdes vacios es peor que no
+    //     tenerlo: da permiso para cerrar.
+    let paths = paths.para_feature(feature);
+    let cwd = paths.raiz_de_ejecucion(feature);
+    let paths = &paths;
     let spec = spec_path(paths, feature);
     let rel_spec = relpath(&spec, &paths.repo_root).unwrap_or_else(|| spec.clone());
 
@@ -52,7 +67,10 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
             verificaciones.len(),
             rel_spec.display()
         );
-        println!("Timeout por comando: {}s\n", timeout.as_secs());
+        println!("Timeout por comando: {}s", timeout.as_secs());
+        // El AC-4 de la #23 ("nada a ciegas") aplicado al otro dato que
+        // hacia falta: no alcanza con ver QUE se corre si no se ve DONDE.
+        println!("Directorio de ejecucion: {}\n", cwd.display());
     }
 
     let mut resultados: Vec<Resultado> = Vec::with_capacity(verificaciones.len());
@@ -72,7 +90,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
         if !as_json {
             println!("{}  $ {comando}", v.ac);
         }
-        let (estado, exit, ms, salida) = ejecutar(comando, &paths.repo_root, timeout);
+        let (estado, exit, ms, salida) = ejecutar(comando, &cwd, timeout);
         if !as_json {
             println!("       {} {} ({ms} ms)", estado.simbolo(), estado.etiqueta());
             if estado.bloquea() && !salida.is_empty() {
@@ -94,7 +112,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     }
 
     let stamp = now_stamp();
-    let reporte = render_reporte(fid, &stamp, &resultados);
+    let reporte = render_reporte(fid, &stamp, &cwd, &resultados);
     let destino = reporte_path(paths, fid);
     if let Some(padre) = destino.parent() {
         std::fs::create_dir_all(padre)?;

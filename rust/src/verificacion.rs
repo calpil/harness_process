@@ -428,7 +428,12 @@ pub fn reporte_rel(fid: &str) -> String {
 }
 
 /// Cuerpo del reporte. Se separa del comando para poder testear el formato.
-pub fn render_reporte(fid: &str, stamp: &str, resultados: &[Resultado]) -> String {
+/// `dir` es el directorio DONDE CORRIERON los comandos (feature #57). Va en el
+/// reporte y no solo en la consola: el reporte es la evidencia que sobrevive, y
+/// una corrida que no dice donde corrio no se puede auditar despues. La #56
+/// cerro con cinco AC en verde ejecutados en el arbol equivocado y nada en el
+/// archivo lo delataba.
+pub fn render_reporte(fid: &str, stamp: &str, dir: &Path, resultados: &[Resultado]) -> String {
     let cuenta = |e: Estado| resultados.iter().filter(|r| r.estado == e).count();
     let vacios = cuenta(Estado::Vacio);
     // Los vacios bloquean, pero contarlos dentro de "en rojo" volveria a
@@ -441,9 +446,11 @@ pub fn render_reporte(fid: &str, stamp: &str, resultados: &[Resultado]) -> Strin
     } else {
         String::new()
     };
+    let dir_txt = dir.display();
     let mut out = format!(
         "# Verificacion de AC - Feature #{fid}\n\n\
          Corrida: {stamp}\n\
+         Directorio: {dir_txt}\n\
          Resultado: {verdes} verde(s), {rojos} en rojo, {manuales} manual(es){sin_casos}.\n\n\
          | AC | Estado | Comando | Exit | ms |\n| --- | --- | --- | --- | --- |\n"
     );
@@ -863,7 +870,7 @@ mod tests {
             resultado("AC-2", Estado::Rojo, Some("false")),
             resultado("AC-3", Estado::Manual, None),
         ];
-        let texto = render_reporte("23", "2026-08-17T00:00:00Z", &r);
+        let texto = render_reporte("23", "2026-08-17T00:00:00Z", Path::new("/repo"), &r);
         assert!(texto.contains("1 verde(s), 1 en rojo, 1 manual(es)"), "{texto}");
         assert!(texto.contains("| AC-1 | verde | `cargo test` | 0 | 12 |"), "{texto}");
         assert!(texto.contains("(verificacion manual)"), "{texto}");
@@ -875,7 +882,7 @@ mod tests {
     #[test]
     fn render_should_not_add_a_failure_section_when_all_green() {
         let r = [resultado("AC-1", Estado::Verde, Some("true"))];
-        let texto = render_reporte("23", "ts", &r);
+        let texto = render_reporte("23", "ts", Path::new("/repo"), &r);
         assert!(!texto.contains("Salida de los que fallaron"));
     }
 
@@ -888,13 +895,13 @@ mod tests {
             resultado("AC-5", Estado::Timeout, Some("sleep 999")),
             resultado("AC-9", Estado::Manual, None),
         ];
-        let texto = render_reporte("23", "ts", &r);
+        let texto = render_reporte("23", "ts", Path::new("/repo"), &r);
         assert_eq!(rojos_del_reporte(&texto), ["AC-2", "AC-5"]);
     }
 
     #[test]
     fn rojos_del_reporte_should_be_empty_for_a_green_report() {
-        let texto = render_reporte("23", "ts", &[resultado("AC-1", Estado::Verde, Some("true"))]);
+        let texto = render_reporte("23", "ts", Path::new("/repo"), &[resultado("AC-1", Estado::Verde, Some("true"))]);
         assert!(rojos_del_reporte(&texto).is_empty());
     }
 
@@ -1141,6 +1148,7 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 158 filtered out; fi
         let texto = render_reporte(
             "44",
             "ts",
+            Path::new("/repo"),
             &[
                 r("AC-1", Estado::Verde),
                 r("AC-2", Estado::Vacio),
@@ -1179,6 +1187,7 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 158 filtered out; fi
         let texto = render_reporte(
             "44",
             "ts",
+            Path::new("/repo"),
             &[Resultado {
                 ac: "AC-7".to_string(),
                 comando: Some("cargo test no_existe".to_string()),

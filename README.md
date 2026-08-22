@@ -905,9 +905,25 @@ impl, review, estado ->  evidencia, lo que efectivamente paso
 history.md           ->  bitacora cruda
 ```
 
-Dentro de cada nivel pesan mas los encabezados, las frases contiguas y las
-features recientes. El `score` va en `--json` para que el ranking sea
+Dentro de cada nivel pesan mas los encabezados de seccion, las frases contiguas
+y las features recientes. El `score` va en `--json` para que el ranking sea
 **auditable** y no una caja negra.
+
+### Lo que NO cuenta como respuesta (feature #39)
+
+Con ese orden solo, una busqueda real sobre este repo devolvia doce resultados y
+ninguno contestaba nada: eran el titulo del spec, el del plan, el del estado, y
+el mismo encabezado copiado en tres documentos. Tres reglas mas:
+
+| Linea | Que le pasa | Por que |
+| --- | --- | --- |
+| `# Spec - Feature #56: <slug>` | baja, y no cobra el bonus de encabezado | repite el nombre del archivo, que el resultado ya muestra |
+| `Plan: docs/plan-feature-56-....md` | baja igual | es un puntero, no una linea sobre el tema |
+| la misma linea en 3 archivos | se muestra una, con `+2 archivo(s)` | doce copias llenaban el tope sin agregar nada |
+
+La contracara esta en un test, para que la forma facil de "arreglar" esto no sea
+matar el bonus: un `## ureq como cliente` **sigue** valiendo mas que el cuerpo.
+Lo que se corrigio es el encabezado que solo se nombra a si mismo.
 
 Tres garantias:
 
@@ -1179,25 +1195,51 @@ silencian:
 `harness_check.sh` lo corre y **avisa** sin bloquear: una opcion desincronizada
 no te impide trabajar hoy, pero tiene que verse.
 
-### Lo que aparecio al correr el smoke de PowerShell por primera vez
+### Lo que aparecio al correr los smokes en Windows por primera vez
 
-La deuda no duro once features solo por falta de maquinas: `tests/setup_smoke.ps1`
+La deuda no duro once features solo por falta de maquinas. `tests/setup_smoke.ps1`
 usaba `-Encoding utf8NoBOM`, **un valor que solo existe en PowerShell 7**, y en
 el Windows PowerShell 5.1 que trae el sistema moria antes de la primera
-asercion, aunque el archivo declare `#requires -Version 5.1`. Corregido, junto
-con un `.Name` sobre un array vacio que `Set-StrictMode -Version Latest` rechaza
-en 5.1.
+asercion. Con eso corregido, el smoke empezo a correr y encontro cuatro fallas
+reales del arnes, todas silenciosas:
 
-Con eso, lo verificado en 5.1 es que **`setup_harness.ps1` completa una
-instalacion root de punta a punta**. El smoke todavia **no pasa entero**: siembra
-un `harness.exe` falso (un archivo de texto) y mas adelante le pide al CLI que
-ejecute `prd add` de verdad. Necesita sembrar el binario real, como hace el smoke
-de sh. Queda dicho para que nadie lea "el smoke ps1 ya corre" como "el smoke ps1
-ya pasa".
+| Falla | Consecuencia |
+| --- | --- |
+| `setup_harness.ps1` leia los templates con la codepage ANSI (`Get-Content` sin `-Encoding`) | toda instalacion desde Windows dejaba roles y superficies con la acentuacion rota, y el gate de espejo fallaba en una instalacion recien hecha |
+| `.harness_layout` con CRLF no matcheaba `subdir` en los cuatro scripts sh | la resolucion de raiz se iba al camino equivocado, sin avisar |
+| `init.sh` comparaba `pwd -P` contra `git rev-parse --show-toplevel` | en Windows no conectaba **ningun** hook de git |
+| el binario miraba `USERPROFILE` y los scripts `HOME` | la guarda que impide sembrar el arnes sobre la carpeta del usuario no aplicaba parejo |
 
-**Lo que esto NO hace**: no ejecuta el instalador de Windows. Un `.ps1`
-estructuralmente paritario puede fallar igual al correr. Verificar eso exige una
-maquina con PowerShell, y esta dicho asi en vez de dejarlo creer.
+Hoy los dos smokes pasan enteros en Windows:
+
+```powershell
+.\tests\setup_smoke.ps1     # exit 0
+```
+
+```bash
+bash tests/setup_smoke.sh   # exit 0
+```
+
+## `verify` corre donde vive el codigo de la feature (feature #57)
+
+`verify` ejecuta los comandos que el spec declara en sus AC. Con features en
+paralelo cada una tiene su worktree, y hasta la #57 el comando leia el spec de
+ahi pero corria en el checkout principal, donde el codigo de la feature todavia
+no existe.
+
+Eso no fallaba: `cargo test <filtro>` salia 0 **habiendo ejecutado cero casos** y
+el AC quedaba verde. Al cerrar la #56 fueron cinco AC asi. Un gate que devuelve
+verdes vacios es peor que no tener gate: da permiso para cerrar.
+
+Ahora los comandos corren en el worktree de la feature, y el directorio se
+declara en los dos lados —la consola y `docs/verify-<id>.md`—, porque una
+corrida que no dice donde corrio no se puede auditar despues.
+
+```
+Verificando 5 AC con comando declarado (16 en total) de docs/spec-feature-56-....md
+Timeout por comando: 600s
+Directorio de ejecucion: /Users/alan/harness_process-wt/56-paquete-de-contexto
+```
 
 ## Features en paralelo: una rama y un worktree por feature (feature #47)
 

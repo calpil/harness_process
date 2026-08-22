@@ -43,6 +43,7 @@ fn emitir_json(res: &Resultado, todos: bool) -> anyhow::Result<()> {
                 "fuente": h.fuente.etiqueta(),
                 "texto": h.texto,
                 "score": h.score,
+                "repetido": h.repetido,
             })
         })
         .collect();
@@ -89,6 +90,12 @@ fn emitir_humano(res: &Resultado, todos: bool, consulta: &str) -> anyhow::Result
         }
         if !h.fecha.is_empty() {
             meta.push_str(&format!(" {}", h.fecha));
+        }
+        // Feature #39: la linea aparecia identica en varios documentos y se
+        // mostro una sola vez. Se dice cuantas, porque "esto esta en cuatro
+        // lugares" es un dato sobre el tema, y un dedup callado lo perderia.
+        if h.repetido > 0 {
+            meta.push_str(&format!(" +{} archivo(s)", h.repetido));
         }
         println!("\n  {}:{}  [{meta}]", h.archivo, h.linea);
         println!("    {}", buscar::recorta(&h.texto));
