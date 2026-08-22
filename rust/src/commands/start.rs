@@ -190,5 +190,32 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
     println!(
         "  Con la regla require_spec_approved activa, advance y close --status done bloquean sin esa aprobacion."
     );
+    if let Ok(feature) = feature_mut(&mut data, idx) {
+        imprimir_contexto(paths, &feature.clone());
+    }
     Ok(())
+}
+
+/// El resumen del contexto, SIEMPRE (feature #56, OBS-3 del spec).
+///
+/// Sale aca y no detras de un flag porque el caso en que mas importa —el
+/// paquete vacio, el mapa que no cubre el tema— es justo el que nadie pediria.
+/// La leccion `promesas-estructurales-vs-disciplina` lo dice completo: si
+/// depende de acordarse, no es un invariante.
+///
+/// Nunca falla el `start`: el resumen es informacion, no un gate.
+fn imprimir_contexto(paths: &HarnessPaths, feature: &serde_json::Map<String, serde_json::Value>) {
+    // `paths` ya viene resuelto contra la feature (arriba en `run`).
+    let tema = crate::commands::contexto::tema_de_feature(feature);
+    let paquete = crate::contexto::armar(
+        paths,
+        Some(feature),
+        &tema,
+        crate::contexto::MAX_LINEAS_DEFAULT,
+    );
+    println!();
+    print!("{}", paquete.resumen());
+    if let Some(aviso) = paquete.aviso_de_cobertura() {
+        println!("\n{aviso}");
+    }
 }

@@ -176,6 +176,22 @@ pub enum Command {
         #[command(subcommand)]
         command: PerfilCommand,
     },
+    /// Paquete de contexto para EMPEZAR a implementar (solo lectura)
+    Contexto {
+        #[arg(long)]
+        feature: Option<String>,
+        /// Tema a mapear cuando todavia no hay feature
+        #[arg(long)]
+        tema: Option<String>,
+        /// Presupuesto de lineas del mapa (default 300)
+        #[arg(long = "max-lineas")]
+        max_lineas: Option<usize>,
+        /// Ademas del paquete, corre `graphify query` (cuesta: por eso no es el default)
+        #[arg(long = "con-grafo")]
+        con_grafo: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Paquete minimo de revision de una feature (solo lectura)
     Revision {
         #[arg(long)]
@@ -661,6 +677,22 @@ pub fn run() -> anyhow::Result<()> {
                 AtlassianCommand::Publish => commands::atlassian::publish(&paths),
             }
         }
+        Command::Contexto {
+            feature,
+            tema,
+            max_lineas,
+            con_grafo,
+            json,
+        } => commands::contexto::run(
+            &HarnessPaths::resolve()?,
+            commands::contexto::Opts {
+                feature: feature.as_deref(),
+                tema: tema.as_deref(),
+                max_lineas,
+                con_grafo,
+                json,
+            },
+        ),
         Command::Revision {
             feature,
             max_lineas,

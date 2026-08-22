@@ -25,6 +25,15 @@ Implementas UNA unidad concreta del plan del lider.
      `sh "harness_process/harness_cli" advance --nota "Re-sincronizado con plan actualizado por otro agente"`
    - Solo entonces continua con la implementacion.
 
+0.5. **Pedi el contexto antes de leer el repo** (feature #56):
+   ```bash
+   sh "harness_process/harness_cli" contexto --feature <id>
+   ```
+   Es el material ya juntado: mapa, cobertura del tema, impacto, grafo,
+   historia, lecciones y features relacionadas, con el tamaño declarado. Si
+   avisa que **el mapa no cubre el tema**, no compenses explorando por tu
+   cuenta: decilo y que el USUARIO decida si se mapea primero.
+
 0.2. Verifica que el spec de la feature este APROBADO y fresco antes de tocar
    codigo:
    ```bash

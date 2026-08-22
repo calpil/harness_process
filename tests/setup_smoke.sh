@@ -311,6 +311,16 @@ grep -q 'primero patchear, crear al final' "$SUBDIR_HARNESS/roles/implementer.md
     || { echo "[FALLO] el rol implementer no lleva el orden de preferencia"; exit 1; }
 grep -q 'leccion-motivo' "$SUBDIR_HARNESS/roles/reviewer.md" \
     || { echo "[FALLO] el rol reviewer no verifica la declaracion del cierre"; exit 1; }
+# Feature #56 / AC-13 + AC-14: los roles instalados piden el PAQUETE antes de
+# leer el repo, y la sustitucion de __HREL__ llego bien al proyecto destino.
+grep -q 'PEDI EL PAQUETE ANTES DE LEER NADA' "$SUBDIR_HARNESS/roles/leader.md" \
+    || { echo "[FALLO] el rol lider instalado no pide el paquete de contexto"; exit 1; }
+grep -Fq 'harness_process/harness_cli" contexto --feature' "$SUBDIR_HARNESS/roles/leader.md" \
+    || { echo "[FALLO] el rol lider instalado no trae el comando contexto con __HREL__ resuelto"; exit 1; }
+grep -q 'contexto --feature' "$SUBDIR_HARNESS/roles/implementer.md" \
+    || { echo "[FALLO] el rol implementer instalado no pide el contexto"; exit 1; }
+grep -q 'EL MAPA NO CUBRE ESTE TEMA' "$SUBDIR_HARNESS/roles/leader.md" \
+    || { echo "[FALLO] el rol lider no dice que hacer cuando el mapa no cubre el tema"; exit 1; }
 # Feature #17 / AC-17: la superficie instalada explica el comando y el gate.
 grep -q 'docs/lecciones/' "$SUBDIR_ROOT/AGENTS.md" \
     || { echo "[FALLO] AGENTS.md instalado no enlaza docs/lecciones/"; exit 1; }

@@ -7,6 +7,7 @@ mod buscar;
 mod cli;
 mod commands;
 mod consolidacion;
+mod contexto;
 mod curador;
 mod documentos;
 mod exit;
