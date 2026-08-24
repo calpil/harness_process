@@ -3946,7 +3946,41 @@ fn prd_propose_should_precompute_presence_signals() {
         texto.contains("Presente en: docs/prd/PRD-master.md:3"),
         "{texto}"
     );
-    assert!(texto.contains("no menciona 'demo'"), "{texto}");
+    assert!(
+        texto.contains("sin señales de nombre, spec o módulo"),
+        "{texto}"
+    );
+}
+
+#[test]
+fn prd_propose_should_find_a_document_by_terms_in_its_spec_not_only_its_name() {
+    // AC-1/AC-5: el PRD no dice "demo", pero sí el término específico que el
+    // spec declara; la señal nombra la línea literal y su procedencia.
+    let (dir, bin) = sandbox_con_documentos();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    let mut texto_spec = std::fs::read_to_string(&spec).unwrap();
+    texto_spec.push_str("\nFacturacion conciliada para pagos recurrentes.\n");
+    std::fs::write(&spec, texto_spec).unwrap();
+    std::fs::write(
+        dir.path().join("docs/prd/PRD-master.md"),
+        "# PRD\n\nLa facturacion conciliada evita cobros duplicados.\n",
+    )
+    .unwrap();
+
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let propuesta = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
+    assert!(
+        propuesta.contains("(spec `facturacion`)"),
+        "{propuesta}"
+    );
+    let bloque_prd = propuesta
+        .split("## Documento: docs/prd/SDD-master.md")
+        .next()
+        .unwrap();
+    assert!(
+        !bloque_prd.contains("sin señales de nombre, spec o módulo"),
+        "{propuesta}"
+    );
 }
 
 /// Contesta los tres bloques de una propuesta ya sembrada.

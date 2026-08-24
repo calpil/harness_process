@@ -144,7 +144,13 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         if ya.iter().any(|b| b.rel == doc.rel) {
             continue;
         }
-        texto.push_str(&bloque_sembrado(doc, nombre, candidato.as_deref()));
+        texto.push_str(&bloque_sembrado(
+            doc,
+            paths,
+            &feature,
+            nombre,
+            candidato.as_deref(),
+        ));
         agregados += 1;
     }
 
@@ -179,8 +185,14 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
 }
 
 /// El bloque que el binario siembra, con las senales ya calculadas.
-fn bloque_sembrado(doc: &Documento, nombre_feature: &str, candidato: Option<&str>) -> String {
-    let (presente, ausente) = senales(doc, nombre_feature);
+fn bloque_sembrado(
+    doc: &Documento,
+    paths: &HarnessPaths,
+    feature: &serde_json::Value,
+    nombre_feature: &str,
+    candidato: Option<&str>,
+) -> String {
+    let (presente, ausente) = senales(doc, paths, feature, nombre_feature);
     let candidato = candidato
         .unwrap_or("(sin candidato: el diff de la feature no contiene cambios atribuibles)");
     format!(
@@ -202,6 +214,12 @@ fn bloque_sembrado(doc: &Documento, nombre_feature: &str, candidato: Option<&str
 /// una actualización. Incluimos tanto commits de la rama como trabajo todavía
 /// sin commitear, porque `prd propose` suele correrse antes del cierre.
 fn candidato_del_diff(paths: &HarnessPaths, feature: &serde_json::Value) -> Option<String> {
+    candidato_desde_rutas(&rutas_del_diff(paths, feature))
+}
+
+/// Rutas de la rama más sus cambios sin commitear. Es la fuente compartida de
+/// candidatos y señales: ambas ayudas tienen que hablar del mismo cambio.
+fn rutas_del_diff(paths: &HarnessPaths, feature: &serde_json::Value) -> Vec<String> {
     let dir = feature
         .get("worktree")
         .and_then(serde_json::Value::as_str)
@@ -224,7 +242,7 @@ fn candidato_del_diff(paths: &HarnessPaths, feature: &serde_json::Value) -> Opti
     rutas.sort();
     rutas.dedup();
     rutas.retain(|ruta| !es_artefacto_del_arnes(ruta));
-    candidato_desde_rutas(&rutas)
+    rutas
 }
 
 fn git_lineas(dir: &std::path::Path, args: &[&str]) -> Vec<String> {
@@ -278,29 +296,131 @@ fn candidato_desde_rutas(rutas: &[String]) -> Option<String> {
     Some(out)
 }
 
-/// Busca las senales de la feature en el documento. Es una ayuda, no un
-/// veredicto: dice si el nombre de la feature aparece, no si el documento esta
-/// bien.
-fn senales(doc: &Documento, nombre_feature: &str) -> (String, String) {
+/// Busca evidencia textual del nombre, términos específicos del spec y módulos
+/// del diff. Sigue siendo una ayuda: encontrar una palabra no equivale a que el
+/// documento esté correcto ni permite resolver el veredicto.
+fn senales(
+    doc: &Documento,
+    paths: &HarnessPaths,
+    feature: &serde_json::Value,
+    nombre_feature: &str,
+) -> (String, String) {
     let Ok(texto) = std::fs::read_to_string(&doc.path) else {
         return ("(no se pudo leer)".to_string(), String::new());
     };
-    let aguja = nombre_feature.trim();
-    if aguja.is_empty() {
-        return ("(sin nombre de feature)".to_string(), String::new());
+    let mut terminos: Vec<(String, String)> = Vec::new();
+    let nombre = nombre_feature.trim().to_ascii_lowercase();
+    if !nombre.is_empty() {
+        terminos.push(("nombre".to_string(), nombre));
     }
-    let linea = texto
-        .lines()
-        .enumerate()
-        .find(|(_, l)| l.contains(aguja))
-        .map(|(i, _)| i + 1);
-    match linea {
-        Some(n) => (format!("{}:{n}", doc.rel), "-".to_string()),
-        None => (
+    terminos.extend(
+        terminos_del_spec(paths, feature)
+            .into_iter()
+            .map(|termino| ("spec".to_string(), termino)),
+    );
+    terminos.extend(
+        modulos_de_rutas(&rutas_del_diff(paths, feature))
+            .into_iter()
+            .map(|termino| ("módulo".to_string(), termino)),
+    );
+    terminos.sort();
+    terminos.dedup();
+
+    let mut hallazgos = Vec::new();
+    for (linea, texto_linea) in texto.lines().enumerate() {
+        let minuscula = texto_linea.to_ascii_lowercase();
+        for (origen, termino) in &terminos {
+            if minuscula.contains(termino) {
+                hallazgos.push(format!("{}:{} ({origen} `{termino}`)", doc.rel, linea + 1));
+            }
+        }
+    }
+    hallazgos.sort();
+    hallazgos.dedup();
+    const MAX_SENALES: usize = 3;
+    if hallazgos.is_empty() {
+        (
             "-".to_string(),
-            format!("{} (no menciona '{aguja}')", doc.rel),
-        ),
+            format!("{} (sin señales de nombre, spec o módulo)", doc.rel),
+        )
+    } else {
+        let mut presente = hallazgos
+            .iter()
+            .take(MAX_SENALES)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if hallazgos.len() > MAX_SENALES {
+            presente.push_str(&format!(" y {} más", hallazgos.len() - MAX_SENALES));
+        }
+        (presente, "-".to_string())
     }
+}
+
+fn terminos_del_spec(paths: &HarnessPaths, feature: &serde_json::Value) -> Vec<String> {
+    let Some(feature) = feature.as_object() else {
+        return Vec::new();
+    };
+    let Ok(texto) = std::fs::read_to_string(crate::spec::spec_path(paths, feature)) else {
+        return Vec::new();
+    };
+    palabras_significativas(&texto)
+}
+
+fn modulos_de_rutas(rutas: &[String]) -> Vec<String> {
+    rutas
+        .iter()
+        .flat_map(|ruta| palabras_significativas(ruta))
+        .collect()
+}
+
+fn palabras_significativas(texto: &str) -> Vec<String> {
+    const RUIDO: &[&str] = &[
+        "acuerdo",
+        "agente",
+        "alcance",
+        "arquitectura",
+        "archivo",
+        "cambio",
+        "cambios",
+        "candado",
+        "codigo",
+        "comando",
+        "como",
+        "constitucion",
+        "criterios",
+        "despues",
+        "documento",
+        "documentos",
+        "donde",
+        "entonces",
+        "escribe",
+        "estado",
+        "feature",
+        "harness",
+        "historia",
+        "implementacion",
+        "metodo",
+        "nunca",
+        "objetivo",
+        "observabilidad",
+        "plan",
+        "propuesta",
+        "pruebas",
+        "resultado",
+        "seguridad",
+        "siempre",
+        "usuario",
+        "veredicto",
+    ];
+    let mut palabras = texto
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|palabra| palabra.to_ascii_lowercase())
+        .filter(|palabra| palabra.len() >= 6 && !RUIDO.contains(&palabra.as_str()))
+        .collect::<Vec<_>>();
+    palabras.sort();
+    palabras.dedup();
+    palabras
 }
 
 /// `prd apply --feature <id> [--yes]`: valida, muestra y —solo con el SI del
