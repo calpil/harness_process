@@ -4071,6 +4071,48 @@ fn prd_apply_with_yes_should_write_seal_and_log() {
 }
 
 #[test]
+fn prd_propose_should_invalidate_a_seal_when_its_applied_text_is_removed() {
+    // AC-1/AC-2/AC-4: la vigencia se prueba contra el texto que se escribió,
+    // no contra una firma global ni una edición ajena del documento.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: no-aplica no toca el producto",
+            "Veredicto: no-aplica no toca el diseno",
+            "Veredicto: cambio\nAntes:\n- `viejo.rs`: lo de siempre\nDespues:\n- `nuevo.rs`: cambio aplicado",
+        ],
+    );
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+    let arch = dir.path().join("docs/architecture.md");
+    let con_aplicado = std::fs::read_to_string(&arch).unwrap();
+    std::fs::write(&arch, format!("{con_aplicado}\nnota ajena\n")).unwrap();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ya estaba aplicada"));
+
+    let sin_texto = std::fs::read_to_string(&arch)
+        .unwrap()
+        .replace("- `nuevo.rs`: cambio aplicado", "- `perdido.rs`: cambio manual");
+    std::fs::write(&arch, sin_texto).unwrap();
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sello Aplicado invalidado"));
+    let invalida = std::fs::read_to_string(&propuesta).unwrap();
+    assert!(!invalida.contains("Aplicado:"), "{invalida}");
+    assert!(invalida.contains("Veredicto: cambio"), "la respuesta se preserva: {invalida}");
+}
+
+#[test]
 fn prd_apply_should_refuse_a_citation_that_does_not_hold() {
     // AC-9: la mentira mas probable del agente, refutada por maquina.
     let (dir, bin) = sandbox_con_documentos();

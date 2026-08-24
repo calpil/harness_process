@@ -84,7 +84,9 @@ pub fn tree(paths: &HarnessPaths, reference: Option<&str>) -> anyhow::Result<()>
     print!("{}", prd::render_tree(paths, &data, &root));
     println!();
     println!("  hitos: filas de la tabla \"10. Hitos -> features\" de cada PRD.");
-    println!("  features: las que declaran ese PRD con --prd (las que no lo declaran cuentan para el maestro).");
+    println!(
+        "  features: las que declaran ese PRD con --prd (las que no lo declaran cuentan para el maestro)."
+    );
     Ok(())
 }
 
@@ -114,8 +116,12 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     let destino = documentos::propuesta_path(paths, fid);
-    let previo = std::fs::read_to_string(&destino).unwrap_or_default();
+    let mut previo = std::fs::read_to_string(&destino).unwrap_or_default();
     let ya = documentos::parsear(&previo);
+    if documentos::sellada(&previo) && !documentos::aplicada(&alcance, &ya, &previo) {
+        previo = documentos::invalidar_sello(&previo);
+        println!("[i] Sello Aplicado invalidado: el texto aplicado ya no esta en los documentos.");
+    }
 
     let nombre = feature
         .get("name")
@@ -433,7 +439,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     let destino = documentos::propuesta_path(paths, fid);
     let rel = documentos::propuesta_rel(fid);
 
-    let Ok(texto) = std::fs::read_to_string(&destino) else {
+    let Ok(mut texto) = std::fs::read_to_string(&destino) else {
         println!("[GATE] No existe la propuesta: {rel}");
         println!("    Sembrala con: sh harness_cli prd propose --feature {fid}");
         return Err(Exit {
@@ -444,6 +450,11 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     };
 
     let bloques = documentos::parsear(&texto);
+    if documentos::sellada(&texto) && !documentos::aplicada(&alcance, &bloques, &texto) {
+        texto = documentos::invalidar_sello(&texto);
+        std::fs::write(&destino, &texto)?;
+        println!("[i] Sello Aplicado invalidado: el texto aplicado ya no esta en los documentos.");
+    }
     let plan = documentos::planificar(&alcance, &bloques, &paths.repo_root);
     if !plan.aplicable() {
         println!("[GATE] La propuesta {rel} todavia no se puede aplicar:");
@@ -458,7 +469,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     }
 
     // Ya aplicada e idempotente: nada que hacer, y se dice.
-    if plan.escrituras.is_empty() && documentos::aplicada(&texto) {
+    if plan.escrituras.is_empty() && documentos::aplicada(&alcance, &bloques, &texto) {
         println!("La propuesta {rel} ya estaba aplicada. Nada que escribir.");
         return Ok(());
     }
@@ -493,7 +504,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
         "{} {stamp} por USUARIO (confirmacion explicita)",
         documentos::SELLO
     );
-    let sellado = if documentos::aplicada(&texto) {
+    let sellado = if documentos::sellada(&texto) {
         texto
     } else {
         format!("{sello}\n\n{texto}")
