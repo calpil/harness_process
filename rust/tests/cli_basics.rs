@@ -3660,6 +3660,50 @@ fn sembrar_leccion(dir: &Path, nombre: &str, triggers: &str, cuerpo: &str) {
     .unwrap();
 }
 
+fn declarar_relacion(dir: &Path, nombre: &str, relacionadas: &str) {
+    let ruta = dir.join(format!("docs/lecciones/{nombre}.md"));
+    let texto = std::fs::read_to_string(&ruta).unwrap();
+    let cambiado = texto.replace(
+        "relacionadas: []",
+        &format!("relacionadas: [{relacionadas}]"),
+    );
+    assert_ne!(texto, cambiado, "fixture sin frontmatter relacionadas: {texto}");
+    std::fs::write(ruta, cambiado).unwrap();
+}
+
+#[test]
+fn consolidar_should_report_mutual_relacionadas_without_a_backend() {
+    // AC-1/AC-5/AC-6: la señal es local. Dos triggers deliberadamente
+    // disjuntos no necesitan red, cuota ni una respuesta obediente de un LLM.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "procedimiento-a", "solo-a", "cuerpo A.");
+    sembrar_leccion(dir.path(), "procedimiento-b", "solo-b", "cuerpo B.");
+    declarar_relacion(dir.path(), "procedimiento-a", "procedimiento-b");
+    declarar_relacion(dir.path(), "procedimiento-b", "procedimiento-a");
+    std::fs::write(dir.path().join("hp/feature_list.json"), r#"{"features":[]}"#).unwrap();
+    let leccion_a = dir.path().join("docs/lecciones/procedimiento-a.md");
+    let leccion_b = dir.path().join("docs/lecciones/procedimiento-b.md");
+    let antes_a = std::fs::read(&leccion_a).unwrap();
+    let antes_b = std::fs::read(&leccion_b).unwrap();
+    let history = dir.path().join("hp/progress/history.md");
+
+    cmd(&bin)
+        .args(["lecciones", "consolidar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Consolidacion APAGADA"))
+        .stdout(predicate::str::contains("1 candidato(s) a consolidar"))
+        .stdout(predicate::str::contains("procedimiento-a + procedimiento-b"))
+        .stdout(predicate::str::contains("relacionadas mutuas"));
+    assert_eq!(antes_a, std::fs::read(&leccion_a).unwrap());
+    assert_eq!(antes_b, std::fs::read(&leccion_b).unwrap());
+    assert!(!history.exists(), "la deteccion local registro historia");
+    assert!(
+        !dir.path().join("hp/bkp/lecciones").exists(),
+        "la deteccion local creo un backup"
+    );
+}
+
 #[test]
 fn consolidar_aplicar_should_take_the_merge_from_argv() {
     // La fusion NO sale de lo que dijo el modelo: sale de argv. Por eso este
