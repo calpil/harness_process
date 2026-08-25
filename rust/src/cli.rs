@@ -370,6 +370,9 @@ pub enum LeccionesCommand {
     },
     /// Detecta lecciones solapadas con un LLM. Sin --aplicar solo INFORMA
     Consolidar {
+        /// Prepara un borrador de paraguas; no archiva ni fusiona miembros
+        #[arg(long)]
+        preparar: bool,
         /// Aplica la fusion (respalda antes y archiva las miembros)
         #[arg(long)]
         aplicar: bool,
@@ -580,40 +583,56 @@ pub fn run() -> anyhow::Result<()> {
                 LeccionCommand::Usar { nombre } => commands::leccion::usar(&paths, &nombre),
             }
         }
-        Command::Buscar { consulta, json, todos } => commands::buscar::run(
-            &HarnessPaths::resolve()?,
-            &consulta.join(" "),
+        Command::Buscar {
+            consulta,
             json,
             todos,
-        ),
-        Command::Rutas { check, violaciones, aceptar, json } => {
-            commands::rutas::run(&HarnessPaths::resolve()?, &check, violaciones, aceptar, json)
-        }
-        Command::Doctor { json } => commands::doctor::run(&HarnessPaths::resolve()?, json),
-        Command::Verify { feature, json, solo } => commands::verify::run(
-            &HarnessPaths::resolve()?,
-            &feature,
+        } => commands::buscar::run(&HarnessPaths::resolve()?, &consulta.join(" "), json, todos),
+        Command::Rutas {
+            check,
+            violaciones,
+            aceptar,
             json,
-            solo.as_deref(),
+        } => commands::rutas::run(
+            &HarnessPaths::resolve()?,
+            &check,
+            violaciones,
+            aceptar,
+            json,
         ),
+        Command::Doctor { json } => commands::doctor::run(&HarnessPaths::resolve()?, json),
+        Command::Verify {
+            feature,
+            json,
+            solo,
+        } => commands::verify::run(&HarnessPaths::resolve()?, &feature, json, solo.as_deref()),
         Command::Journey { json } => commands::journey::run(&HarnessPaths::resolve()?, json),
         Command::Lecciones { command } => {
             let paths = HarnessPaths::resolve()?;
             match command {
                 LeccionesCommand::Status { json } => commands::leccion::status(&paths, json),
                 LeccionesCommand::Curar { aplicar } => commands::leccion::curar(&paths, aplicar),
-                LeccionesCommand::Consolidar { aplicar, en, de, motivo } => {
-                    commands::leccion::consolidar(
-                        &paths,
-                        aplicar,
-                        en.as_deref(),
-                        de.as_deref(),
-                        motivo.as_deref(),
-                    )
-                }
+                LeccionesCommand::Consolidar {
+                    preparar,
+                    aplicar,
+                    en,
+                    de,
+                    motivo,
+                } => commands::leccion::consolidar(
+                    &paths,
+                    preparar,
+                    aplicar,
+                    en.as_deref(),
+                    de.as_deref(),
+                    motivo.as_deref(),
+                ),
                 LeccionesCommand::Pin { nombre } => commands::leccion::pin(&paths, &nombre, true),
-                LeccionesCommand::Unpin { nombre } => commands::leccion::pin(&paths, &nombre, false),
-                LeccionesCommand::Archivar { nombre } => commands::leccion::archivar(&paths, &nombre),
+                LeccionesCommand::Unpin { nombre } => {
+                    commands::leccion::pin(&paths, &nombre, false)
+                }
+                LeccionesCommand::Archivar { nombre } => {
+                    commands::leccion::archivar(&paths, &nombre)
+                }
                 LeccionesCommand::Restaurar { nombre } => {
                     commands::leccion::restaurar(&paths, &nombre)
                 }

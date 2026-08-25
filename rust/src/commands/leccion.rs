@@ -516,9 +516,10 @@ pub fn rollback(paths: &HarnessPaths, id: Option<&str>, list: bool) -> anyhow::R
 
 use crate::consolidacion::{self, Backend};
 
-/// `lecciones consolidar [--aplicar --en <p> --de a,b --motivo "..."]`
+/// `lecciones consolidar [--preparar|--aplicar --en <p> --de a,b --motivo "..."]`
 pub fn consolidar(
     paths: &HarnessPaths,
+    preparar: bool,
     aplicar: bool,
     en: Option<&str>,
     de: Option<&str>,
@@ -526,6 +527,19 @@ pub fn consolidar(
 ) -> anyhow::Result<()> {
     if exigir_biblioteca(paths).is_none() {
         return Ok(());
+    }
+    if preparar && aplicar {
+        return Err(Exit {
+            code: 2,
+            message: Some(
+                "--preparar crea solo un borrador y --aplicar archiva miembros: elegi una accion por vez."
+                    .to_string(),
+            ),
+        }
+        .into());
+    }
+    if preparar {
+        return preparar_paraguas(paths, en, de);
     }
     if aplicar {
         return aplicar_fusion(paths, en, de, motivo);
@@ -656,6 +670,100 @@ fn informar_candidatos(
     println!(
         "  sh harness_cli lecciones consolidar --aplicar --en <paraguas> --de {} --motivo \"<por que>\"",
         ok[0].miembros.join(",")
+    );
+    Ok(())
+}
+
+/// Prepara un archivo NUEVO para que la persona escriba el paraguas. Un
+/// existente es una frontera dura de no-escritura: podría contener prosa que
+/// ningún binario sabe conservar semánticamente.
+fn preparar_paraguas(
+    paths: &HarnessPaths,
+    en: Option<&str>,
+    de: Option<&str>,
+) -> anyhow::Result<()> {
+    let uso = "Uso: lecciones consolidar --preparar --en <paraguas> --de <a,b>";
+    let (Some(en), Some(de)) = (en, de) else {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!("Faltan --en y/o --de.\n    {uso}")),
+        }
+        .into());
+    };
+    let nombre = lecciones::validar_nombre_de_clase(en)?;
+    let archivo = lecciones::file_for(paths, &nombre);
+    if archivo.exists() {
+        println!(
+            "El borrador {} ya existe; se preserva sin reemplazar prosa ni campos confirmados.",
+            lecciones::rel_path(&nombre)
+        );
+        return Ok(());
+    }
+
+    let mut nombres: Vec<String> = de
+        .split(',')
+        .map(str::trim)
+        .filter(|nombre| !nombre.is_empty())
+        .map(str::to_string)
+        .collect();
+    nombres.sort();
+    nombres.dedup();
+    if nombres.len() < 2 {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "--de debe nombrar al menos dos lecciones distintas.\n    {uso}"
+            )),
+        }
+        .into());
+    }
+    let (activas, _) = lecciones::scan(paths);
+    let mut seleccion = Vec::new();
+    let mut faltantes = Vec::new();
+    for miembro in &nombres {
+        match activas.iter().find(|leccion| leccion.nombre == *miembro) {
+            Some(leccion) if !leccion.pinneada() => {
+                seleccion.push((leccion.nombre.clone(), leccion.fm.list("triggers")));
+            }
+            Some(_) => faltantes.push(format!("{miembro} (pinneada)")),
+            None => faltantes.push(miembro.clone()),
+        }
+    }
+    if !faltantes.is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "No se puede preparar con lecciones inexistentes o no elegibles: {}.\n    {uso}",
+                faltantes.join(", ")
+            )),
+        }
+        .into());
+    }
+
+    let estructura = consolidacion::preparar_paraguas(&seleccion);
+    let mut borrador = Leccion::parse(
+        &archivo,
+        &lecciones::plantilla(&nombre, origen_activo(paths).as_deref()),
+    )
+    .map_err(|motivo| Exit {
+        code: 1,
+        message: Some(format!("No se pudo construir el borrador: {motivo}")),
+    })?;
+    borrador
+        .fm
+        .set("descripcion", "Pendiente de redaccion humana.");
+    borrador
+        .fm
+        .set("triggers", &format!("[{}]", estructura.triggers.join(", ")));
+    borrador.body = estructura.cuerpo;
+    crate::features::write_text_atomic(&archivo, &borrador.render())?;
+    println!("Borrador preparado: {}", lecciones::rel_path(&nombre));
+    println!("  Miembros: {}", estructura.miembros.join(", "));
+    println!("  Triggers unidos: {}", estructura.triggers.join(", "));
+    println!("  Escribi la prosa humana y luego, si corresponde:");
+    println!(
+        "  sh harness_cli lecciones consolidar --aplicar --en {nombre} --de {} --motivo \"<por que>\"",
+        estructura.miembros.join(",")
     );
     Ok(())
 }

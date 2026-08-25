@@ -294,6 +294,52 @@ pub fn unir_candidatos(candidatos: Vec<Candidato>) -> Vec<Candidato> {
     unidos.into_values().collect()
 }
 
+/// Estructura local que un paraguas debe heredar antes de que una persona
+/// escriba su explicación. No crea archivos ni toma decisiones sobre prosa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BorradorParaguas {
+    pub miembros: Vec<String>,
+    pub triggers: Vec<String>,
+    pub cuerpo: String,
+}
+
+/// Une los datos mecánicos de una selección aceptada. Los triggers se
+/// normalizan a minúscula y se ordenan para que capitalización u orden de los
+/// miembros no cambien el borrador. Los punteros se originan exclusivamente en
+/// los nombres ya validados de las lecciones seleccionadas.
+pub fn preparar_paraguas(miembros: &[(String, Vec<String>)]) -> BorradorParaguas {
+    let mut nombres: Vec<String> = miembros.iter().map(|(nombre, _)| nombre.clone()).collect();
+    nombres.sort();
+    nombres.dedup();
+
+    let mut triggers: Vec<String> = miembros
+        .iter()
+        .flat_map(|(_, triggers)| triggers)
+        .map(|trigger| trigger.trim().to_lowercase())
+        .filter(|trigger| !trigger.is_empty())
+        .collect();
+    triggers.sort();
+    triggers.dedup();
+
+    let punteros = nombres
+        .iter()
+        .map(|nombre| format!("- [[{nombre}]]"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let cuerpo = format!(
+        "## Cuando aplica\n\nPendiente de redaccion humana.\n\n\
+         ## Miembros a consolidar\n\n{punteros}\n\n\
+         ## Procedimiento\n\nPendiente de redaccion humana.\n\n\
+         ## Pitfalls\n\nPendiente de redaccion humana.\n\n\
+         ## Verificacion\n\nPendiente de redaccion humana.\n"
+    );
+    BorradorParaguas {
+        miembros: nombres,
+        triggers,
+        cuerpo,
+    }
+}
+
 /// Por que se descarto un candidato. Se imprime: una alucinacion descartada en
 /// silencio es indistinguible de un modelo que no encontro nada.
 #[derive(Debug, Clone, PartialEq)]
@@ -779,6 +825,31 @@ mod tests {
         assert!(
             unidos[0].motivo.contains("relacionadas mutuas"),
             "{unidos:?}"
+        );
+    }
+
+    #[test]
+    fn preparar_paraguas_should_union_triggers_and_satisfy_structural_review() {
+        // AC-1/AC-2/AC-3/AC-5: el orden y la capitalización de la selección no
+        // cambian el borrador; los únicos huecos que quedan son humanos.
+        let miembros = vec![
+            (
+                "b".to_string(),
+                vec!["Beta".to_string(), "alfa".to_string()],
+            ),
+            (
+                "a".to_string(),
+                vec!["ALFA".to_string(), "zeta".to_string()],
+            ),
+        ];
+        let borrador = preparar_paraguas(&miembros);
+        assert_eq!(borrador.miembros, ["a", "b"]);
+        assert_eq!(borrador.triggers, ["alfa", "beta", "zeta"]);
+        assert_eq!(borrador.cuerpo.matches("[[a]]").count(), 1);
+        assert_eq!(borrador.cuerpo.matches("[[b]]").count(), 1);
+        assert!(
+            revisar_paraguas(&borrador.cuerpo, &borrador.triggers, &miembros).is_empty(),
+            "el borrador no cumple la estructura"
         );
     }
 

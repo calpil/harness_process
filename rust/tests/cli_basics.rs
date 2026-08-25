@@ -3705,6 +3705,54 @@ fn consolidar_should_report_mutual_relacionadas_without_a_backend() {
 }
 
 #[test]
+fn consolidar_preparar_should_create_a_deterministic_umbrella_without_overwriting() {
+    // AC-1..AC-6: la preparación es una mutación chica y explícita; deja la
+    // estructura que después valida la fusión, sin archivar ni pedir backend.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "miembro-a", "Beta, alfa", "cuerpo A.");
+    sembrar_leccion(dir.path(), "miembro-b", "ALFA, zeta", "cuerpo B.");
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--preparar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro-b,miembro-a,miembro-a",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Borrador preparado"))
+        .stdout(predicate::str::contains("Triggers unidos: alfa, beta, zeta"));
+    let paraguas = dir.path().join("docs/lecciones/paraguas.md");
+    let preparado = std::fs::read_to_string(&paraguas).unwrap();
+    assert!(preparado.contains("triggers: [alfa, beta, zeta]"), "{preparado}");
+    assert_eq!(preparado.matches("[[miembro-a]]").count(), 1, "{preparado}");
+    assert_eq!(preparado.matches("[[miembro-b]]").count(), 1, "{preparado}");
+    assert!(dir.path().join("docs/lecciones/miembro-a.md").is_file());
+    assert!(dir.path().join("docs/lecciones/miembro-b.md").is_file());
+    assert!(!dir.path().join("hp/bkp/lecciones").exists());
+
+    let con_prosa = format!("{preparado}\nProsa humana que no se puede pisar.\n");
+    std::fs::write(&paraguas, &con_prosa).unwrap();
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--preparar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro-a,miembro-b",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("se preserva"));
+    assert_eq!(con_prosa, std::fs::read_to_string(paraguas).unwrap());
+}
+
+#[test]
 fn consolidar_aplicar_should_take_the_merge_from_argv() {
     // La fusion NO sale de lo que dijo el modelo: sale de argv. Por eso este
     // test corre sin backend y es determinista.
