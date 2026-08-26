@@ -52,3 +52,6 @@ contenido del bloque, no por firma global del PRD ni por feature.
 
 ### Avance 2026-08-24T12:26:51Z
 Plan #40 completado: sello vigente por contenido literal aplicado, sin firma global; unidades U1-U3 trazadas a AC-1..AC-6.
+
+---
+Cerrado: 2026-08-26T01:00:54Z - status=done - Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.
