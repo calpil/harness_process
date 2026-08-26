@@ -56,3 +56,6 @@ mutuas; U1-U3 trazan AC-1..AC-6.
 
 ### Avance 2026-08-24T12:38:38Z
 Plan #41 completado: relaciones mutuas elegibles, pares canónicos y evidencia local por AC-1..AC-6.
+
+---
+Cerrado: 2026-08-26T01:00:50Z - status=done - Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.
