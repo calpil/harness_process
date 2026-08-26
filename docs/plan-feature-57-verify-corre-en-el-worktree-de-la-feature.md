@@ -60,3 +60,6 @@ fixtures de aislamiento de código/evidencia.
 
 ### Avance 2026-08-26T00:29:31Z
 Plan completo: verify ejecuta y reporta desde un unico worktree por feature.
+
+---
+Cerrado: 2026-08-26T00:54:21Z - status=done - Integracion consolidada de las correcciones #38-43 y #53-57; pruebas, clippy, checks de scripts y smoke de instalacion en verde.
