@@ -228,3 +228,4 @@ con su fecha.>
 - #46 verify_no_se_cuelga_con_salida_grande -> done 2026-08-22 · spec: ../harness_process-wt/46-verify-no-se-cuelga-con-salida-grande/docs/spec-feature-46-verify-no-se-cuelga-con-salida-grande.md · impl: docs/impl-46.md
 - #57 verify_corre_en_el_worktree_de_la_feature -> done 2026-08-26 · spec: ../harness_process-wt/57-verify-corre-en-el-worktree-de-la-feature/docs/spec-feature-57-verify-corre-en-el-worktree-de-la-feature.md · impl: docs/impl-57.md
 - #38 prd_propose_texto_candidato -> done 2026-08-26 · spec: ../harness_process-wt/38-prd-propose-texto-candidato/docs/spec-feature-38-prd-propose-texto-candidato.md · impl: docs/impl-38.md
+- #39 prd_senales_mas_alla_del_nombre -> done 2026-08-26 · spec: ../harness_process-wt/39-prd-senales-mas-alla-del-nombre/docs/spec-feature-39-prd-senales-mas-alla-del-nombre.md · impl: docs/impl-39.md
