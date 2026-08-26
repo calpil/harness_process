@@ -226,3 +226,4 @@ con su fecha.>
 - #56 paquete_de_contexto_para_implementar -> done 2026-08-22 · spec: ../harness_process-wt/56-paquete-de-contexto-para-implementar/docs/spec-feature-56-paquete-de-contexto-para-implementar.md · impl: docs/impl-56.md
 - #58 el_guard_no_bloquea_por_lo_que_escribe_el_arnes -> done 2026-08-22 · spec: ../harness_process-wt/58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes/docs/spec-feature-58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes.md · impl: docs/impl-58.md
 - #46 verify_no_se_cuelga_con_salida_grande -> done 2026-08-22 · spec: ../harness_process-wt/46-verify-no-se-cuelga-con-salida-grande/docs/spec-feature-46-verify-no-se-cuelga-con-salida-grande.md · impl: docs/impl-46.md
+- #54 prd_apply_escribe_en_el_docs_de_la_feature -> done 2026-08-26 · spec: ../harness_process-wt/54-prd-apply-escribe-en-el-docs-de-la-feature/docs/spec-feature-54-prd-apply-escribe-en-el-docs-de-la-feature.md · impl: docs/impl-54.md

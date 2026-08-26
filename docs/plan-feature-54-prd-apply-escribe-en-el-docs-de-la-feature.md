@@ -63,3 +63,6 @@ por feature y fixtures de aislamiento principal/worktree.
 
 ### Avance 2026-08-26T00:20:05Z
 Plan completo: selector unico de docs por worktree y fixtures de aislamiento.
+
+---
+Cerrado: 2026-08-26T01:01:47Z - status=done - Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.
