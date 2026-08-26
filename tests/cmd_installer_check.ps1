@@ -51,13 +51,20 @@ function New-DelegationSandbox {
     New-Item -ItemType Directory -Path $path -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "setup_harness.cmd") -Destination $path
     @'
-param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
-$code = 0
-foreach ($argument in $Rest) {
-    if ($argument -eq "-Salir3") { $code = 3 }
-}
-"ARGS:" + ($Rest -join " ")
-exit $code
+param(
+    [switch]$DryRun,
+    [switch]$NoSubagents,
+    [switch]$Force,
+    [switch]$Salir3
+)
+
+$received = @()
+if ($DryRun) { $received += "-DryRun" }
+if ($NoSubagents) { $received += "-NoSubagents" }
+if ($Force) { $received += "-Force" }
+if ($Salir3) { $received += "-Salir3" }
+"ARGS:" + ($received -join " ")
+if ($Salir3) { exit 3 }
 '@ | Set-Content -LiteralPath (Join-Path $path "setup_harness.ps1") -Encoding Ascii
     return $path
 }
