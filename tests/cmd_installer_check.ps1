@@ -15,6 +15,13 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Las anotaciones de GitHub Actions exponen la causa aun cuando los logs del
+# runner requieren sesion. Localmente es solo una linea adicional al fallar.
+trap {
+    Write-Host "::error title=CMD installer runtime::$($_.Exception.Message)"
+    exit 1
+}
+
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("harness-cmd-" + [Guid]::NewGuid().ToString("N"))
 
