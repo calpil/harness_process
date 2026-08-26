@@ -34,11 +34,19 @@ sandbox() {
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/harness-cmd.XXXXXX")"
     cp "$CMD" "$tmp/setup_harness.cmd"
     printf '%s\n' \
-        'param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)' \
-        '$code = 0' \
-        'foreach ($a in $Rest) { if ($a -eq "-Salir3") { $code = 3 } }' \
-        '"ARGS:" + ($Rest -join " ")' \
-        'exit $code' \
+        'param(' \
+        '    [switch]$DryRun,' \
+        '    [switch]$NoSubagents,' \
+        '    [switch]$Force,' \
+        '    [switch]$Salir3' \
+        ')' \
+        '$received = @()' \
+        'if ($DryRun) { $received += "-DryRun" }' \
+        'if ($NoSubagents) { $received += "-NoSubagents" }' \
+        'if ($Force) { $received += "-Force" }' \
+        'if ($Salir3) { $received += "-Salir3" }' \
+        '"ARGS:" + ($received -join " ")' \
+        'if ($Salir3) { exit 3 }' \
         > "$tmp/setup_harness.ps1"
     echo "$tmp"
 }
@@ -61,6 +69,8 @@ modo_existe() {
         || fail "existe: no saltea la ExecutionPolicy; un .ps1 sin firmar no arranca"
     grep -q "bash setup_harness.sh" "$CMD" \
         || fail "existe: sin PowerShell no nombra el remedio alternativo (Git Bash)"
+    grep -Fq 'do (' "$CMD" \
+        || fail "existe: la conversion de flags debe mantener sus asignaciones dentro del for"
     ok "existe: el .cmd delega en el .ps1, saltea la policy y nombra el remedio"
 }
 

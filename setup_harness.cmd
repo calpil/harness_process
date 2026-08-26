@@ -63,7 +63,12 @@ rem --no-subagents -> NoSubagents: cada segmento entre guiones va con mayuscula.
 set "HARNESS_PASCAL="
 set "HARNESS_RESTO=%~1"
 :a_pascal_loop
-for /f "tokens=1* delims=-" %%a in ("!HARNESS_RESTO!") do set "HARNESS_SEG=%%a" & set "HARNESS_RESTO=%%b"
+rem Las dos asignaciones pertenecen al mismo `for`: sin el bloque, cmd.exe
+rem ejecuta la segunda fuera del cuerpo y deja HARNESS_RESTO sin avanzar.
+for /f "tokens=1* delims=-" %%a in ("!HARNESS_RESTO!") do (
+set "HARNESS_SEG=%%a"
+set "HARNESS_RESTO=%%b"
+)
 if not defined HARNESS_SEG goto a_pascal_sigue
 set "HARNESS_INICIAL=!HARNESS_SEG:~0,1!"
 set "HARNESS_COLA=!HARNESS_SEG:~1!"
