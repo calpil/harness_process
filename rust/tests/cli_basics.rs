@@ -17,7 +17,11 @@ fn sandbox_with_binary() -> (tempfile::TempDir, PathBuf) {
     std::fs::create_dir_all(&harness_dir).unwrap();
     std::fs::write(harness_dir.join(".harness_layout"), "subdir").unwrap();
     let built = assert_cmd::cargo::cargo_bin("harness");
-    let target = harness_dir.join(if cfg!(windows) { "harness.exe" } else { "harness" });
+    let target = harness_dir.join(if cfg!(windows) {
+        "harness.exe"
+    } else {
+        "harness"
+    });
     std::fs::copy(&built, &target).unwrap();
     (dir, target)
 }
@@ -25,7 +29,13 @@ fn sandbox_with_binary() -> (tempfile::TempDir, PathBuf) {
 fn cmd(bin: &Path) -> Command {
     let mut c = Command::new(bin);
     // DB_* fuera: el registro al hub debe degradar con el mensaje best-effort
-    for var in ["DB_HOST", "DB_USER", "DB_PASSWORD", "HARNESS_REPO_ROOT", "HARNESS_HUB"] {
+    for var in [
+        "DB_HOST",
+        "DB_USER",
+        "DB_PASSWORD",
+        "HARNESS_REPO_ROOT",
+        "HARNESS_HUB",
+    ] {
         c.env_remove(var);
     }
     c.env("HARNESS_HUB", bin.parent().unwrap().join("hub"));
@@ -53,7 +63,11 @@ fn sandbox_source_checkout() -> (tempfile::TempDir, PathBuf) {
     std::fs::write(harness_dir.join("templates/harness_cli"), "#!/bin/sh\n").unwrap();
     std::fs::write(harness_dir.join(".harness_layout"), "subdir").unwrap();
     let built = assert_cmd::cargo::cargo_bin("harness");
-    let target = harness_dir.join(if cfg!(windows) { "harness.exe" } else { "harness" });
+    let target = harness_dir.join(if cfg!(windows) {
+        "harness.exe"
+    } else {
+        "harness"
+    });
     std::fs::copy(&built, &target).unwrap();
     (dir, target)
 }
@@ -73,7 +87,11 @@ fn sandbox_lost_marker_install(with_footprint: bool) -> (tempfile::TempDir, Path
     }
     assert!(!harness_dir.join(".harness_layout").exists());
     let built = assert_cmd::cargo::cargo_bin("harness");
-    let target = harness_dir.join(if cfg!(windows) { "harness.exe" } else { "harness" });
+    let target = harness_dir.join(if cfg!(windows) {
+        "harness.exe"
+    } else {
+        "harness"
+    });
     std::fs::copy(&built, &target).unwrap();
     (dir, target)
 }
@@ -175,9 +193,11 @@ fn env_override_should_beat_marker_inference() {
 #[test]
 fn status_should_print_empty_backlog() {
     let (_dir, bin) = sandbox_with_binary();
-    cmd(&bin).arg("status").assert().success().stdout(
-        "Backlog: 0 feature(s) | active=0 pending=0 blocked=0 done=0\n",
-    );
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout("Backlog: 0 feature(s) | active=0 pending=0 blocked=0 done=0\n");
 }
 
 #[test]
@@ -194,7 +214,13 @@ fn next_should_report_no_pending_features() {
 fn add_should_create_feature_and_next_should_print_python_style_json() {
     let (_dir, bin) = sandbox_with_binary();
     cmd(&bin)
-        .args(["add", "--name", "Pago QR", "--service", "demo/ms-pagos-service"])
+        .args([
+            "add",
+            "--name",
+            "Pago QR",
+            "--service",
+            "demo/ms-pagos-service",
+        ])
         .assert()
         .success()
         .stdout("Feature #1 agregada.\n");
@@ -232,9 +258,15 @@ fn start_should_create_plan_and_spec_sign_both_and_check_plan_should_pass() {
         .args(["start", "--feature", "1"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Feature #1 iniciada. Plan: docs/plan-feature-1-pago-qr.md"))
-        .stdout(predicate::str::contains("Spec (draft) generado: docs/spec-feature-1-pago-qr.md"))
-        .stderr(predicate::str::contains("El Memory Hub PostgreSQL requiere: DB_HOST, DB_USER, DB_PASSWORD"));
+        .stdout(predicate::str::contains(
+            "Feature #1 iniciada. Plan: docs/plan-feature-1-pago-qr.md",
+        ))
+        .stdout(predicate::str::contains(
+            "Spec (draft) generado: docs/spec-feature-1-pago-qr.md",
+        ))
+        .stderr(predicate::str::contains(
+            "El Memory Hub PostgreSQL requiere: DB_HOST, DB_USER, DB_PASSWORD",
+        ));
     assert!(dir.path().join("docs/plan-feature-1-pago-qr.md").exists());
     // AC-1: el spec nace plano junto al plan y en draft
     let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-pago-qr.md")).unwrap();
@@ -243,9 +275,13 @@ fn start_should_create_plan_and_spec_sign_both_and_check_plan_should_pass() {
     // Feature #47 (AC-8/AC-9): el estado vivo es de la feature y current.md es
     // el indice de lo que hay abierto.
     let current = std::fs::read_to_string(dir.path().join("hp/progress/current-1.md")).unwrap();
-    assert!(current.contains("Plan: docs/plan-feature-1-pago-qr.md\nSpec: docs/spec-feature-1-pago-qr.md\n"));
+    assert!(current
+        .contains("Plan: docs/plan-feature-1-pago-qr.md\nSpec: docs/spec-feature-1-pago-qr.md\n"));
     let indice = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
-    assert!(indice.contains("#1 Pago QR"), "el indice lista la activa: {indice}");
+    assert!(
+        indice.contains("#1 Pago QR"),
+        "el indice lista la activa: {indice}"
+    );
     assert!(indice.contains("current-1.md"));
     cmd(&bin)
         .arg("check-plan")
@@ -258,7 +294,10 @@ fn start_should_create_plan_and_spec_sign_both_and_check_plan_should_pass() {
 fn check_plan_should_exit_two_when_plan_edited_by_another_agent() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let plan = dir.path().join("docs/plan-feature-1-demo.md");
     // Otro LLM edita el plan y el mtime queda claramente fuera de tolerancia
     let mut content = std::fs::read_to_string(&plan).unwrap();
@@ -281,7 +320,10 @@ fn start_should_allow_a_second_feature_in_parallel() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Uno"]).assert().success();
     cmd(&bin).args(["add", "--name", "Dos"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["start", "--feature", "2"])
         .assert()
@@ -304,7 +346,10 @@ fn start_should_allow_a_second_feature_in_parallel() {
     assert!(dir.path().join("hp/progress/current-1.md").is_file());
     assert!(dir.path().join("hp/progress/current-2.md").is_file());
     let indice = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
-    assert!(indice.contains("#1 Uno") && indice.contains("#2 Dos"), "{indice}");
+    assert!(
+        indice.contains("#1 Uno") && indice.contains("#2 Dos"),
+        "{indice}"
+    );
 }
 
 #[test]
@@ -314,14 +359,28 @@ fn close_should_not_touch_the_state_of_the_other_active_feature() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Uno"]).assert().success();
     cmd(&bin).args(["add", "--name", "Dos"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
 
     let vivo_2 = dir.path().join("hp/progress/current-2.md");
     let antes = std::fs::read_to_string(&vivo_2).unwrap();
 
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "aparcada"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "aparcada",
+        ])
         .assert()
         .success();
 
@@ -330,15 +389,19 @@ fn close_should_not_touch_the_state_of_the_other_active_feature() {
     // ...y su stamp de autocheck tampoco se borro (AC-10).
     assert!(dir.path().join("hp/progress/.last_autocheck-2").exists());
     // El archivado de la #1 se llevo SU estado, no el de la #2.
-    let archivado = std::fs::read_to_string(
-        dir.path().join("docs/estado-feature-1-uno.md"),
-    )
-    .unwrap();
+    let archivado =
+        std::fs::read_to_string(dir.path().join("docs/estado-feature-1-uno.md")).unwrap();
     assert!(archivado.contains("Feature #1"), "{archivado}");
-    assert!(!archivado.contains("Feature #2: Dos"), "no se llevo el estado ajeno");
+    assert!(
+        !archivado.contains("Feature #2: Dos"),
+        "no se llevo el estado ajeno"
+    );
     // Y el indice ya solo lista la que sigue viva.
     let indice = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
-    assert!(indice.contains("#2 Dos") && !indice.contains("#1 Uno"), "{indice}");
+    assert!(
+        indice.contains("#2 Dos") && !indice.contains("#1 Uno"),
+        "{indice}"
+    );
 }
 
 /// Activa la regla require_spec_approved en el feature_list.json del sandbox
@@ -368,13 +431,18 @@ fn check_spec_should_exit_one_without_active_feature() {
 fn check_spec_should_pass_informing_when_rule_is_off() {
     let (_dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     // Sin la regla (compat instalaciones previas): rc=0 pero informa el estado
     cmd(&bin)
         .arg("check-spec")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Regla require_spec_approved apagada"))
+        .stdout(predicate::str::contains(
+            "Regla require_spec_approved apagada",
+        ))
         .stdout(predicate::str::contains("draft"));
 }
 
@@ -382,7 +450,10 @@ fn check_spec_should_pass_informing_when_rule_is_off() {
 fn check_plan_should_exit_two_when_spec_edited_by_another_agent() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let spec = dir.path().join("docs/spec-feature-1-demo.md");
     // Otro LLM edita el spec; el plan sigue fresco: stdout distingue cual fue
     let mut content = std::fs::read_to_string(&spec).unwrap();
@@ -407,7 +478,10 @@ fn check_plan_should_exit_two_when_spec_edited_by_another_agent() {
 fn spec_gate_should_block_advance_and_close_done_until_user_approves() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_spec_rule(&dir.path().join("hp"));
     // Spec draft + regla activa: advance y close --status done bloquean con
     // exit 2. Salia 1 hasta la feature #36, que unifico los tres gates de
@@ -456,7 +530,10 @@ fn approve_spec_should_refuse_without_explicit_user_confirmation() {
     // y el spec queda intacto en draft.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_spec_rule(&dir.path().join("hp"));
     cmd(&bin)
         .arg("approve-spec")
@@ -479,7 +556,10 @@ fn approve_spec_should_register_approval_and_leave_check_spec_clean() {
     // approved con sello, y check-spec NO reporta la falsa alarma multi-LLM.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_spec_rule(&dir.path().join("hp"));
     cmd(&bin)
         .args(["approve-spec", "--yes", "--nota", "aprobado en chat"])
@@ -513,7 +593,10 @@ fn approve_spec_should_be_idempotent() {
     // AC-4: re-aprobar informa y no duplica el sello.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
     cmd(&bin)
         .args(["approve-spec", "--yes"])
@@ -536,7 +619,10 @@ fn approve_spec_should_exit_one_without_active_feature_and_two_without_spec() {
         .code(1)
         .stderr(predicate::str::contains("No hay feature in_progress"));
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     std::fs::remove_file(dir.path().join("docs/spec-feature-1-demo.md")).unwrap();
     cmd(&bin)
         .args(["approve-spec", "--yes"])
@@ -554,7 +640,10 @@ fn approve_spec_should_resign_a_spec_approved_by_hand() {
     // el spec queda stale; approve-spec --yes re-firma y limpia la falsa alarma.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_spec_rule(&dir.path().join("hp"));
     let spec = dir.path().join("docs/spec-feature-1-demo.md");
     let approved = std::fs::read_to_string(&spec)
@@ -584,11 +673,22 @@ fn approve_spec_should_resign_a_spec_approved_by_hand() {
 fn close_blocked_should_pass_without_approved_spec() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_spec_rule(&dir.path().join("hp"));
     // Valvula de escape: blocked/pending no exigen spec aprobado
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "aparcada"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "aparcada",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("Feature #1 cerrada como blocked."));
@@ -605,7 +705,9 @@ fn start_should_stay_inside_source_checkout_and_not_touch_parent() {
         .args(["start", "--feature", "1"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("[i] Checkout fuente del arnes detectado"));
+        .stderr(predicate::str::contains(
+            "[i] Checkout fuente del arnes detectado",
+        ));
     assert!(dir.path().join("hp/docs/plan-feature-1-demo.md").exists());
     assert!(dir.path().join("hp/docs/spec-feature-1-demo.md").exists());
     assert!(!dir.path().join("docs").exists());
@@ -644,7 +746,9 @@ fn home_parent_should_trigger_source_guardrail_even_with_footprint() {
         .arg("status")
         .assert()
         .success()
-        .stderr(predicate::str::contains("[i] Checkout fuente del arnes detectado"));
+        .stderr(predicate::str::contains(
+            "[i] Checkout fuente del arnes detectado",
+        ));
     // Con el escape explicito, la misma huella vuelve a mandar (padre = raiz).
     cmd(&bin)
         .env("HOME", dir.path())
@@ -660,9 +764,20 @@ fn home_parent_should_trigger_source_guardrail_even_with_footprint() {
 fn close_should_archive_current_state_and_reset_it() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "done", "--note", "ok"])
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--note",
+            "ok",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -813,10 +928,16 @@ fn flow_should_emit_intents_and_drain_should_plan_them_in_order() {
         .map(|p| p["what"].as_str().unwrap())
         .collect();
     assert_eq!(whats[0], "epic del PRD master");
-    let historia = whats.iter().position(|w| w.starts_with("historia")).unwrap();
+    let historia = whats
+        .iter()
+        .position(|w| w.starts_with("historia"))
+        .unwrap();
     let ac1 = whats.iter().position(|w| w.contains("AC-1")).unwrap();
     let ac2 = whats.iter().position(|w| w.contains("AC-2")).unwrap();
-    assert!(historia < ac1 && historia < ac2, "las subtasks van despues de su historia: {whats:?}");
+    assert!(
+        historia < ac1 && historia < ac2,
+        "las subtasks van despues de su historia: {whats:?}"
+    );
     assert_eq!(plan["project"].as_str().unwrap(), "ADR");
     // AC-9: drain NO muta (los intents siguen pendientes).
     let after = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
@@ -889,7 +1010,15 @@ fn close_should_emit_transition_and_comment() {
     write_binding(dir.path(), "ADR");
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "trabada"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "trabada",
+        ])
         .assert()
         .success();
 
@@ -916,9 +1045,12 @@ fn add_should_reject_an_invalid_kind_before_touching_the_backlog() {
         .stderr(predicate::str::contains("--kind invalido"))
         .stderr(predicate::str::contains("feature, bug, task"));
     // El backlog ni se crea: el rechazo ocurre antes de tocarlo.
-    let backlog = std::fs::read_to_string(dir.path().join("hp/feature_list.json"))
-        .unwrap_or_default();
-    assert!(!backlog.contains("Demo"), "una feature invalida no entra al backlog");
+    let backlog =
+        std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap_or_default();
+    assert!(
+        !backlog.contains("Demo"),
+        "una feature invalida no entra al backlog"
+    );
 }
 
 #[test]
@@ -927,17 +1059,24 @@ fn add_kind_should_be_optional_and_map_to_the_right_issue_type() {
     // sin --kind, el backlog queda exactamente como antes.
     let (dir, bin) = sandbox_with_binary();
     write_binding(dir.path(), "ADR");
-    cmd(&bin).args(["add", "--name", "Normal"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Normal"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["add", "--name", "Arreglo", "--kind", "bug"])
         .assert()
         .success();
 
-    let backlog: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap())
-            .unwrap();
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
     let features = backlog["features"].as_array().unwrap();
-    assert!(features[0].get("kind").is_none(), "sin --kind no se agrega el campo");
+    assert!(
+        features[0].get("kind").is_none(),
+        "sin --kind no se agrega el campo"
+    );
     assert_eq!(features[1]["kind"], "bug");
 
     let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
@@ -948,7 +1087,10 @@ fn add_kind_should_be_optional_and_map_to_the_right_issue_type() {
         .iter()
         .filter_map(|p| p["call"]["args"]["issueTypeName"].as_str())
         .collect();
-    assert!(tipos.contains(&"Story"), "la feature normal va como Story: {tipos:?}");
+    assert!(
+        tipos.contains(&"Story"),
+        "la feature normal va como Story: {tipos:?}"
+    );
     assert!(tipos.contains(&"Bug"), "el bug va como Bug: {tipos:?}");
 }
 
@@ -1037,7 +1179,15 @@ fn transitions_should_keep_their_exit_codes_with_auto_push_on() {
         .assert()
         .success();
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "x"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "x",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("cerrada como blocked"));
@@ -1058,8 +1208,14 @@ fn backfill_should_load_prds_and_backlog_without_touching_the_network() {
     .unwrap();
 
     // Backlog con historia: una cerrada y una en curso.
-    cmd(&bin).args(["add", "--name", "Vieja"]).assert().success();
-    cmd(&bin).args(["add", "--name", "Nueva"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Vieja"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["add", "--name", "Nueva"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["start", "--feature", "2"])
         .assert()
@@ -1082,7 +1238,10 @@ fn backfill_should_load_prds_and_backlog_without_touching_the_network() {
         .iter()
         .map(|p| p["what"].as_str().unwrap().to_string())
         .collect();
-    assert!(what.iter().any(|w| w.contains("epic del PRD master")), "{what:?}");
+    assert!(
+        what.iter().any(|w| w.contains("epic del PRD master")),
+        "{what:?}"
+    );
     assert!(what.iter().any(|w| w.contains("feature #1")), "{what:?}");
     assert!(what.iter().any(|w| w.contains("feature #2")), "{what:?}");
     assert!(
@@ -1121,7 +1280,10 @@ fn backfill_should_be_idempotent_and_respect_sin_acs() {
     let out = cmd(&bin).args(["atlassian", "drain"]).output().unwrap();
     let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let text_plan = plan.to_string();
-    assert!(!text_plan.contains("subtask AC-1"), "--sin-acs no baja los AC");
+    assert!(
+        !text_plan.contains("subtask AC-1"),
+        "--sin-acs no baja los AC"
+    );
 
     // ...y sin el flag si, sumandose a lo ya emitido sin duplicarlo.
     cmd(&bin).args(["atlassian", "backfill"]).assert().success();
@@ -1138,7 +1300,11 @@ fn backfill_should_be_idempotent_and_respect_sin_acs() {
     let mut unicas = claves.clone();
     unicas.sort_unstable();
     unicas.dedup();
-    assert_eq!(claves.len(), unicas.len(), "el backfill no duplica intents: {claves:?}");
+    assert_eq!(
+        claves.len(),
+        unicas.len(),
+        "el backfill no duplica intents: {claves:?}"
+    );
 }
 
 #[test]
@@ -1211,7 +1377,10 @@ fn leccion_nueva_should_reject_session_names_without_writing_anything() {
 fn leccion_should_create_list_use_and_refuse_duplicates() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     // AC-3: crea desde plantilla y siembra `origen` con la feature activa.
     cmd(&bin)
         .args(["leccion", "nueva", "espejo-de-roles"])
@@ -1225,7 +1394,12 @@ fn leccion_should_create_list_use_and_refuse_duplicates() {
     assert!(text.contains("nombre: espejo-de-roles"));
     assert!(text.contains("origen: [1]"));
     assert!(text.contains("usos: 0"));
-    for seccion in ["## Cuando aplica", "## Procedimiento", "## Pitfalls", "## Verificacion"] {
+    for seccion in [
+        "## Cuando aplica",
+        "## Procedimiento",
+        "## Pitfalls",
+        "## Verificacion",
+    ] {
         assert!(text.contains(seccion), "falta {seccion}");
     }
     // AC-5: crear otra vez empuja a patchear, no duplica.
@@ -1283,7 +1457,10 @@ fn close_should_stay_identical_without_the_leccion_rule() {
     // AC-10: sin la regla, cerrar como siempre no pide nada ni escribe campos.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
         .assert()
@@ -1299,7 +1476,10 @@ fn close_gate_should_demand_a_declaration_and_accept_both_exits() {
     let harness_dir = dir.path().join("hp");
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
     cmd(&bin).args(["add", "--name", "Otra"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_leccion_rule(&harness_dir);
     // AC-11: sin declaracion, el cierre bloquea y NO cierra.
     cmd(&bin)
@@ -1313,7 +1493,13 @@ fn close_gate_should_demand_a_declaration_and_accept_both_exits() {
     // AC-12: una clase inexistente falla y sugiere crearla.
     cmd(&bin)
         .args([
-            "close", "--feature", "1", "--status", "done", "--leccion", "espejo-de-roles",
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
         ])
         .assert()
         .code(2)
@@ -1321,7 +1507,15 @@ fn close_gate_should_demand_a_declaration_and_accept_both_exits() {
         .stderr(predicate::str::contains("leccion nueva espejo-de-roles"));
     // AC-13: 'ninguna' sin motivo se niega; con motivo, cierra.
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "done", "--leccion", "ninguna"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "ninguna",
+        ])
         .assert()
         .code(2)
         .stderr(predicate::str::contains("--leccion-motivo"));
@@ -1346,18 +1540,29 @@ fn close_gate_should_demand_a_declaration_and_accept_both_exits() {
     let history = std::fs::read_to_string(harness_dir.join("progress/history.md")).unwrap();
     assert!(history.contains("leccion=ninguna (trabajo mecanico)"));
     // AC-12 (rama feliz): con la clase creada, el cierre la registra.
-    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["leccion", "nueva", "espejo-de-roles"])
         .assert()
         .success();
     cmd(&bin)
         .args([
-            "close", "--feature", "2", "--status", "done", "--leccion", "espejo-de-roles",
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Leccion declarada: espejo-de-roles"));
+        .stdout(predicate::str::contains(
+            "Leccion declarada: espejo-de-roles",
+        ));
     let text = std::fs::read_to_string(harness_dir.join("feature_list.json")).unwrap();
     assert!(text.contains("\"leccion\": \"espejo-de-roles\""));
 }
@@ -1366,10 +1571,21 @@ fn close_gate_should_demand_a_declaration_and_accept_both_exits() {
 fn close_gate_should_not_ask_for_a_leccion_when_blocking_a_feature() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     enable_leccion_rule(&dir.path().join("hp"));
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "aparcada"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "aparcada",
+        ])
         .assert()
         .success();
 }
@@ -1412,7 +1628,10 @@ fn leccion_should_work_with_the_hub_unreachable() {
             "stderr distinto con el hub caido para {args:?}"
         );
     }
-    assert!(dir.path().join("docs/lecciones/espejo-de-roles.md").exists());
+    assert!(dir
+        .path()
+        .join("docs/lecciones/espejo-de-roles.md")
+        .exists());
 }
 
 // ---------------------------------------------------------------------------
@@ -1435,7 +1654,10 @@ fn close_should_emit_the_contract_read_from_the_real_guide() {
     let (dir, bin) = sandbox_with_binary();
     seed_guia_real(dir.path());
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let out = cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
         .output()
@@ -1459,16 +1681,25 @@ fn close_should_emit_the_contract_read_from_the_real_guide() {
         "Narrativas de una tarea unica",
         "Fracasos no resueltos",
     ] {
-        assert!(stderr.contains(regla), "el contrato no trae '{regla}': {stderr}");
+        assert!(
+            stderr.contains(regla),
+            "el contrato no trae '{regla}': {stderr}"
+        );
     }
     assert!(stderr.contains("leccion list"), "{stderr}");
     // Lo que NO tiene que colarse: otras secciones de la guia.
-    assert!(!stderr.contains("Sin secretos"), "se colo una seccion de mas");
+    assert!(
+        !stderr.contains("Sin secretos"),
+        "se colo una seccion de mas"
+    );
     // AC-10: el exit code y el stdout del cierre no cambian.
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Feature #1 cerrada como done"));
-    assert!(!stdout.contains("SIN declarar"), "el contrato no va a stdout");
+    assert!(
+        !stdout.contains("SIN declarar"),
+        "el contrato no va a stdout"
+    );
 }
 
 #[test]
@@ -1477,7 +1708,10 @@ fn close_should_not_emit_the_contract_when_the_lesson_was_declared() {
     seed_guia_real(dir.path());
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
     cmd(&bin).args(["add", "--name", "Otra"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["leccion", "nueva", "espejo-de-roles"])
         .assert()
@@ -1485,13 +1719,22 @@ fn close_should_not_emit_the_contract_when_the_lesson_was_declared() {
     // AC-7: con clase declarada, no hay contrato.
     let con_clase = cmd(&bin)
         .args([
-            "close", "--feature", "1", "--status", "done", "--leccion", "espejo-de-roles",
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
         ])
         .output()
         .unwrap();
     assert!(!String::from_utf8_lossy(&con_clase.stderr).contains("SIN declarar"));
     // AC-7: 'ninguna' con motivo tampoco lo dispara.
-    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
     let con_ninguna = cmd(&bin)
         .args([
             "close",
@@ -1515,9 +1758,20 @@ fn close_should_not_emit_the_contract_on_blocked_or_without_lecciones_dir() {
     let (dir, bin) = sandbox_with_binary();
     seed_guia_real(dir.path());
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let bloqueada = cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "aparcada"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "aparcada",
+        ])
         .output()
         .unwrap();
     assert!(!String::from_utf8_lossy(&bloqueada.stderr).contains("SIN declarar"));
@@ -1525,8 +1779,14 @@ fn close_should_not_emit_the_contract_on_blocked_or_without_lecciones_dir() {
     // AC-9: sin docs/lecciones/, un cierre done sin declaracion no emite nada.
     let (dir2, bin2) = sandbox_with_binary();
     assert!(!dir2.path().join("docs/lecciones").exists());
-    cmd(&bin2).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin2).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin2)
+        .args(["add", "--name", "Demo"])
+        .assert()
+        .success();
+    cmd(&bin2)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let sin_lecciones = cmd(&bin2)
         .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
         .output()
@@ -1540,7 +1800,10 @@ fn close_should_degrade_to_a_pointer_when_the_guide_is_missing() {
     let (dir, bin) = sandbox_with_binary();
     std::fs::create_dir_all(dir.path().join("docs/lecciones")).unwrap();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let out = cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
         .output()
@@ -1550,7 +1813,10 @@ fn close_should_degrade_to_a_pointer_when_the_guide_is_missing() {
     assert!(stderr.contains("COMO-ESCRIBIR-UNA-LECCION.md"), "{stderr}");
     // Degrada: no inventa el contenido del contrato.
     assert!(!stderr.contains("Que NO capturar"), "{stderr}");
-    assert!(out.status.success(), "el cierre no puede fallar por la guia");
+    assert!(
+        out.status.success(),
+        "el cierre no puede fallar por la guia"
+    );
 }
 
 #[test]
@@ -1558,7 +1824,10 @@ fn nudge_should_stay_silent_until_the_interval_and_never_fail() {
     let (dir, bin) = sandbox_with_binary();
     seed_guia_real(dir.path());
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     // Intervalo chico para no correr 25 veces.
     let features = dir.path().join("hp/feature_list.json");
     let text = std::fs::read_to_string(&features).unwrap();
@@ -1634,7 +1903,9 @@ fn perfil_writes_should_refuse_without_the_user_yes() {
             .args(&args)
             .assert()
             .code(2)
-            .stdout(predicate::str::contains("exige la confirmacion explicita del USUARIO"));
+            .stdout(predicate::str::contains(
+                "exige la confirmacion explicita del USUARIO",
+            ));
     }
     // Y no se creo nada.
     assert!(!dir.path().join("docs/perfil-usuario.md").exists());
@@ -1649,19 +1920,37 @@ fn perfil_should_add_show_replace_and_remove() {
         .success()
         .stdout(predicate::str::contains("Perfil vacio"));
     cmd(&bin)
-        .args(["perfil", "add", "--texto", "Elige la opcion segura. (#14)", "--yes"])
+        .args([
+            "perfil",
+            "add",
+            "--texto",
+            "Elige la opcion segura. (#14)",
+            "--yes",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("Entrada agregada"))
         .stdout(predicate::str::contains("se refrescan"));
     // AC-7: duplicado exacto no duplica.
     cmd(&bin)
-        .args(["perfil", "add", "--texto", "Elige la opcion segura. (#14)", "--yes"])
+        .args([
+            "perfil",
+            "add",
+            "--texto",
+            "Elige la opcion segura. (#14)",
+            "--yes",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("no se duplico"));
     cmd(&bin)
-        .args(["perfil", "add", "--texto", "Prefiere features amplias. (#15)", "--yes"])
+        .args([
+            "perfil",
+            "add",
+            "--texto",
+            "Prefiere features amplias. (#15)",
+            "--yes",
+        ])
         .assert()
         .success();
     cmd(&bin)
@@ -1669,7 +1958,9 @@ fn perfil_should_add_show_replace_and_remove() {
         .assert()
         .success()
         .stdout(predicate::str::contains("1. Elige la opcion segura. (#14)"))
-        .stdout(predicate::str::contains("2. Prefiere features amplias. (#15)"))
+        .stdout(predicate::str::contains(
+            "2. Prefiere features amplias. (#15)",
+        ))
         .stdout(predicate::str::contains("/1500 chars"));
     // AC-8: subcadena que no matachea y subcadena ambigua.
     cmd(&bin)
@@ -1684,12 +1975,19 @@ fn perfil_should_add_show_replace_and_remove() {
         .stderr(predicate::str::contains("usa un fragmento mas especifico"));
     cmd(&bin)
         .args([
-            "perfil", "replace", "--old", "amplias", "--texto", "Prefiere features completas. (#15)",
+            "perfil",
+            "replace",
+            "--old",
+            "amplias",
+            "--texto",
+            "Prefiere features completas. (#15)",
             "--yes",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Ahora: Prefiere features completas"));
+        .stdout(predicate::str::contains(
+            "Ahora: Prefiere features completas",
+        ));
     cmd(&bin)
         .args(["perfil", "remove", "--old", "opcion segura", "--yes"])
         .assert()
@@ -1697,11 +1995,17 @@ fn perfil_should_add_show_replace_and_remove() {
     let texto = std::fs::read_to_string(dir.path().join("docs/perfil-usuario.md")).unwrap();
     assert!(!texto.contains("opcion segura"));
     assert!(texto.contains("Prefiere features completas"));
-    assert!(texto.starts_with("# Perfil de usuario"), "se perdio el encabezado");
+    assert!(
+        texto.starts_with("# Perfil de usuario"),
+        "se perdio el encabezado"
+    );
     // AC-9: toda escritura queda en la bitacora.
     let history = std::fs::read_to_string(dir.path().join("hp/progress/history.md")).unwrap();
     for esperado in ["perfil add", "perfil replace", "perfil remove"] {
-        assert!(history.contains(esperado), "falta '{esperado}' en la bitacora");
+        assert!(
+            history.contains(esperado),
+            "falta '{esperado}' en la bitacora"
+        );
     }
 }
 
@@ -1711,7 +2015,11 @@ fn perfil_should_refuse_entries_that_look_like_secrets() {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin)
         .args([
-            "perfil", "add", "--texto", "el api_key: abc123 del hub", "--yes",
+            "perfil",
+            "add",
+            "--texto",
+            "el api_key: abc123 del hub",
+            "--yes",
         ])
         .assert()
         .code(2)
@@ -1754,7 +2062,13 @@ fn perfil_bloque_should_be_empty_without_entries_and_carry_them_after() {
         "sin entradas no hay bloque"
     );
     cmd(&bin)
-        .args(["perfil", "add", "--texto", "Una preferencia. (#14)", "--yes"])
+        .args([
+            "perfil",
+            "add",
+            "--texto",
+            "Una preferencia. (#14)",
+            "--yes",
+        ])
         .assert()
         .success();
     cmd(&bin)
@@ -1844,7 +2158,10 @@ fn buscar_should_refuse_an_empty_query() {
 fn buscar_should_rank_curated_knowledge_first() {
     let (dir, bin) = sandbox_with_binary();
     seed_corpus(dir.path());
-    let out = cmd(&bin).args(["buscar", "espejo", "--json"]).output().unwrap();
+    let out = cmd(&bin)
+        .args(["buscar", "espejo", "--json"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let filas = json["resultados"].as_array().unwrap();
@@ -1869,7 +2186,9 @@ fn buscar_should_report_a_partial_match_instead_of_pretending() {
         .args(["buscar", "espejo inexistente"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Ninguna linea tiene TODOS los terminos"));
+        .stdout(predicate::str::contains(
+            "Ninguna linea tiene TODOS los terminos",
+        ));
 }
 
 #[test]
@@ -1943,7 +2262,10 @@ fn buscar_should_write_nothing_and_ignore_the_hub() {
     let (dir, bin) = sandbox_with_binary();
     seed_corpus(dir.path());
     let antes = std::fs::read_dir(dir.path().join("docs")).unwrap().count();
-    let normal = cmd(&bin).args(["buscar", "espejo", "--json"]).output().unwrap();
+    let normal = cmd(&bin)
+        .args(["buscar", "espejo", "--json"])
+        .output()
+        .unwrap();
     let sin_hub = cmd(&bin)
         .env("DB_HOST", "127.0.0.1")
         .env("DB_PORT", "1")
@@ -1954,7 +2276,10 @@ fn buscar_should_write_nothing_and_ignore_the_hub() {
         .output()
         .unwrap();
     assert_eq!(normal.status.code(), sin_hub.status.code());
-    assert_eq!(normal.stdout, sin_hub.stdout, "el hub no puede cambiar el resultado");
+    assert_eq!(
+        normal.stdout, sin_hub.stdout,
+        "el hub no puede cambiar el resultado"
+    );
     let despues = std::fs::read_dir(dir.path().join("docs")).unwrap().count();
     assert_eq!(antes, despues, "buscar no puede crear archivos");
     // Y no aparecio ningun indice.
@@ -1967,8 +2292,15 @@ fn buscar_should_skip_backup_directories() {
     let (dir, bin) = sandbox_with_binary();
     seed_corpus(dir.path());
     std::fs::create_dir_all(dir.path().join("bkp")).unwrap();
-    std::fs::write(dir.path().join("bkp/viejo.md"), "espejo de una version vieja\n").unwrap();
-    let out = cmd(&bin).args(["buscar", "espejo", "--json"]).output().unwrap();
+    std::fs::write(
+        dir.path().join("bkp/viejo.md"),
+        "espejo de una version vieja\n",
+    )
+    .unwrap();
+    let out = cmd(&bin)
+        .args(["buscar", "espejo", "--json"])
+        .output()
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let archivos: Vec<&str> = json["resultados"]
         .as_array()
@@ -2032,7 +2364,10 @@ fn lecciones_curar_should_not_touch_anything_without_aplicar() {
         .stdout(predicate::str::contains("ARCHIVAR"))
         .stdout(predicate::str::contains("no se toco ningun archivo"));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), antes);
-    assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), mtime_antes);
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().modified().unwrap(),
+        mtime_antes
+    );
     assert!(!dir.path().join("docs/lecciones/archivo").exists());
 }
 
@@ -2053,7 +2388,9 @@ fn lecciones_curar_aplicar_should_move_backup_and_report() {
     assert!(!dir.path().join("docs/lecciones/vencida.md").exists());
     let archivada = dir.path().join("docs/lecciones/archivo/vencida.md");
     assert!(archivada.exists(), "archivar tiene que MOVER");
-    assert!(std::fs::read_to_string(&archivada).unwrap().contains("cuerpo de vencida"));
+    assert!(std::fs::read_to_string(&archivada)
+        .unwrap()
+        .contains("cuerpo de vencida"));
     // Backup y reporte existen.
     let backups = dir.path().join("hp/bkp/lecciones");
     assert!(backups.is_dir(), "falta el backup previo");
@@ -2077,7 +2414,10 @@ fn lecciones_rollback_should_restore_exactly_and_stay_reversible() {
     seed_leccion(dir.path(), "vencida", "2020-01-01", "stale", false);
     let file = dir.path().join("docs/lecciones/vencida.md");
     let original = std::fs::read_to_string(&file).unwrap();
-    cmd(&bin).args(["lecciones", "curar", "--aplicar"]).assert().success();
+    cmd(&bin)
+        .args(["lecciones", "curar", "--aplicar"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["lecciones", "rollback"])
         .assert()
@@ -2104,7 +2444,10 @@ fn lecciones_pin_should_survive_a_pass() {
         .success()
         .stdout(predicate::str::contains("Salteadas por pin: protegida"));
     let texto = std::fs::read_to_string(dir.path().join("docs/lecciones/protegida.md")).unwrap();
-    assert!(texto.contains("estado: activa"), "el pin no protegio: {texto}");
+    assert!(
+        texto.contains("estado: activa"),
+        "el pin no protegio: {texto}"
+    );
     assert!(dir.path().join("docs/lecciones/protegida.md").exists());
 }
 
@@ -2115,8 +2458,13 @@ fn lecciones_pin_and_unpin_should_toggle_without_touching_the_body() {
     seed_leccion(dir.path(), "x", "2026-08-01", "activa", false);
     let file = dir.path().join("docs/lecciones/x.md");
     cmd(&bin).args(["lecciones", "pin", "x"]).assert().success();
-    assert!(std::fs::read_to_string(&file).unwrap().contains("pinneada: true"));
-    cmd(&bin).args(["lecciones", "unpin", "x"]).assert().success();
+    assert!(std::fs::read_to_string(&file)
+        .unwrap()
+        .contains("pinneada: true"));
+    cmd(&bin)
+        .args(["lecciones", "unpin", "x"])
+        .assert()
+        .success();
     let texto = std::fs::read_to_string(&file).unwrap();
     assert!(texto.contains("pinneada: false"));
     assert!(texto.contains("cuerpo de x"), "se toco el cuerpo");
@@ -2141,7 +2489,10 @@ fn lecciones_manual_archive_and_restore_should_round_trip() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("ya esta archivada"));
-    cmd(&bin).args(["lecciones", "restaurar", "x"]).assert().success();
+    cmd(&bin)
+        .args(["lecciones", "restaurar", "x"])
+        .assert()
+        .success();
     let vuelto = std::fs::read_to_string(dir.path().join("docs/lecciones/x.md")).unwrap();
     assert_eq!(vuelto, original, "el round trip cambio el contenido");
     // Restaurar algo que no esta archivado falla.
@@ -2185,7 +2536,10 @@ fn an_archived_lesson_should_stay_searchable_below_an_active_one() {
             .replace("cuerpo de vieja", "el termino compartido"),
     )
     .unwrap();
-    cmd(&bin).args(["lecciones", "curar", "--aplicar"]).assert().success();
+    cmd(&bin)
+        .args(["lecciones", "curar", "--aplicar"])
+        .assert()
+        .success();
     assert!(dir.path().join("docs/lecciones/archivo/vieja.md").exists());
     let out = cmd(&bin)
         .args(["buscar", "termino compartido", "--json"])
@@ -2193,12 +2547,18 @@ fn an_archived_lesson_should_stay_searchable_below_an_active_one() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let filas = json["resultados"].as_array().unwrap();
-    let fuentes: Vec<&str> = filas.iter().map(|r| r["fuente"].as_str().unwrap()).collect();
+    let fuentes: Vec<&str> = filas
+        .iter()
+        .map(|r| r["fuente"].as_str().unwrap())
+        .collect();
     // Sigue apareciendo...
     assert!(fuentes.contains(&"leccion-archivada"), "{fuentes:?}");
     // ...pero por debajo de la activa.
     let pos_activa = fuentes.iter().position(|f| *f == "leccion").unwrap();
-    let pos_arch = fuentes.iter().position(|f| *f == "leccion-archivada").unwrap();
+    let pos_arch = fuentes
+        .iter()
+        .position(|f| *f == "leccion-archivada")
+        .unwrap();
     assert!(pos_activa < pos_arch, "{fuentes:?}");
     // Y el catalogo activo ya no la lista.
     cmd(&bin)
@@ -2224,8 +2584,13 @@ fn lecciones_status_should_report_days_to_the_next_transition() {
         .success()
         .stdout(predicate::str::contains("Umbrales: stale >= 30d"))
         .stdout(predicate::str::contains("-> stale en 30d"))
-        .stdout(predicate::str::contains("Candidatas HOY: 0 a stale, 0 a archivar"));
-    let out = cmd(&bin).args(["lecciones", "status", "--json"]).output().unwrap();
+        .stdout(predicate::str::contains(
+            "Candidatas HOY: 0 a stale, 0 a archivar",
+        ));
+    let out = cmd(&bin)
+        .args(["lecciones", "status", "--json"])
+        .output()
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let l = &json["lecciones"][0];
     assert_eq!(l["nombre"], "fresca");
@@ -2297,8 +2662,14 @@ fn journey_should_show_both_lessons_of_a_feature_without_duplicating() {
     seed_journey(dir.path(), &dir.path().join("hp"));
     let out = cmd(&bin).arg("journey").output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("[leccion declarada] docs-generados"), "{stdout}");
-    assert!(stdout.contains("[leccion (origen)] hitos-del-prd"), "{stdout}");
+    assert!(
+        stdout.contains("[leccion declarada] docs-generados"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("[leccion (origen)] hitos-del-prd"),
+        "{stdout}"
+    );
     // Cuenta las LINEAS de nodo hijo, no la subcadena (que tambien aparece en la
     // descripcion "Sobre docs-generados.").
     assert_eq!(
@@ -2384,7 +2755,9 @@ fn journey_should_write_nothing_and_ignore_the_hub() {
     // AC-11, AC-14.
     let (dir, bin) = sandbox_with_binary();
     seed_journey(dir.path(), &dir.path().join("hp"));
-    let antes = std::fs::read_dir(dir.path().join("docs/lecciones")).unwrap().count();
+    let antes = std::fs::read_dir(dir.path().join("docs/lecciones"))
+        .unwrap()
+        .count();
     let normal = cmd(&bin).args(["journey", "--json"]).output().unwrap();
     let sin_hub = cmd(&bin)
         .env("DB_HOST", "127.0.0.1")
@@ -2395,9 +2768,14 @@ fn journey_should_write_nothing_and_ignore_the_hub() {
         .args(["journey", "--json"])
         .output()
         .unwrap();
-    assert_eq!(normal.stdout, sin_hub.stdout, "el hub no puede cambiar el mapa");
     assert_eq!(
-        std::fs::read_dir(dir.path().join("docs/lecciones")).unwrap().count(),
+        normal.stdout, sin_hub.stdout,
+        "el hub no puede cambiar el mapa"
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("docs/lecciones"))
+            .unwrap()
+            .count(),
         antes,
         "journey no puede crear archivos"
     );
@@ -2459,7 +2837,10 @@ fn escribir_acs(spec: &Path, acs: &str) {
 fn feature_con_spec(acs: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let spec = dir.path().join("docs/spec-feature-1-demo.md");
     escribir_acs(&spec, acs);
     (dir, bin, spec)
@@ -2469,9 +2850,8 @@ fn feature_con_spec(acs: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
 fn verify_should_refuse_to_run_commands_from_a_draft_spec() {
     // AC-5, la barrera central: el comando escribiria `rastro.txt`. Si el
     // archivo no existe, es que verify no llego a ejecutarlo.
-    let (dir, bin, _spec) = feature_con_spec(
-        "- AC-1: Given algo, Then otra.\n  Comando: `touch rastro.txt`",
-    );
+    let (dir, bin, _spec) =
+        feature_con_spec("- AC-1: Given algo, Then otra.\n  Comando: `touch rastro.txt`");
     cmd(&bin)
         .args(["verify", "--feature", "1"])
         .assert()
@@ -2500,8 +2880,12 @@ fn verify_should_print_each_command_before_running_it() {
         .assert()
         .code(1)
         .stdout(predicate::str::contains("AC-1  $ true"))
-        .stdout(predicate::str::contains("AC-2  $ echo se-rompio-esto >&2; exit 4"))
-        .stdout(predicate::str::contains("1 verde(s), 1 en rojo, 1 manual(es)"))
+        .stdout(predicate::str::contains(
+            "AC-2  $ echo se-rompio-esto >&2; exit 4",
+        ))
+        .stdout(predicate::str::contains(
+            "1 verde(s), 1 en rojo, 1 manual(es)",
+        ))
         .stderr(predicate::str::contains("AC en rojo: AC-2"));
 }
 
@@ -2510,12 +2894,21 @@ fn verify_should_write_a_report_per_ac() {
     // AC-8: numero, comando, exit code, duracion y estado, por cada AC.
     let (dir, bin, _spec) = feature_con_spec(TRES_AC);
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
     let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
-    assert!(reporte.contains("| AC-1 | verde | `true` | 0 |"), "{reporte}");
+    assert!(
+        reporte.contains("| AC-1 | verde | `true` | 0 |"),
+        "{reporte}"
+    );
     assert!(reporte.contains("| AC-2 | rojo |"), "{reporte}");
     assert!(reporte.contains("| 4 |"), "falta el exit code: {reporte}");
-    assert!(reporte.contains("| AC-3 | manual | `(verificacion manual)`"), "{reporte}");
+    assert!(
+        reporte.contains("| AC-3 | manual | `(verificacion manual)`"),
+        "{reporte}"
+    );
 }
 
 #[test]
@@ -2543,7 +2936,10 @@ fn verify_should_keep_going_after_a_failure() {
          - AC-2: dos.\n  Comando: `touch corrio-el-segundo.txt`",
     );
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
     assert!(
         dir.path().join("corrio-el-segundo.txt").exists(),
         "el fallo del AC-1 corto la corrida"
@@ -2587,9 +2983,7 @@ fn verify_should_run_a_single_ac_on_demand() {
 #[test]
 fn verify_json_should_expose_the_result_per_ac() {
     // AC-10: JSON parseable con el estado de cada AC.
-    let (_dir, bin, _spec) = feature_con_spec(
-        "- AC-1: uno.\n  Comando: `exit 7`\n- AC-2: dos.",
-    );
+    let (_dir, bin, _spec) = feature_con_spec("- AC-1: uno.\n  Comando: `exit 7`\n- AC-2: dos.");
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
     let out = cmd(&bin)
         .args(["verify", "--feature", "1", "--json"])
@@ -2618,7 +3012,10 @@ fn verify_should_time_out_a_hung_command() {
     );
     std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
     let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
     assert!(reporte.contains("| AC-1 | timeout |"), "{reporte}");
 }
@@ -2665,11 +3062,13 @@ fn close_should_stay_identical_without_the_verify_rule() {
 #[test]
 fn close_should_block_on_a_red_report() {
     // AC-14: nombra CUALES fallaron, no solo que algo fallo.
-    let (dir, bin, _spec) = feature_con_spec(
-        "- AC-1: uno.\n  Comando: `false`\n- AC-2: dos.\n  Comando: `true`",
-    );
+    let (dir, bin, _spec) =
+        feature_con_spec("- AC-1: uno.\n  Comando: `false`\n- AC-2: dos.\n  Comando: `true`");
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
     enable_verify_rule(&dir.path().join("hp"));
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done"])
@@ -2683,11 +3082,13 @@ fn close_should_block_on_a_red_report() {
 fn close_should_never_execute_verify_commands() {
     // AC-16: el reporte esta VERDE, asi que el cierre pasa. Si en el camino
     // ejecutara los comandos del spec, el rastro volveria a aparecer.
-    let (dir, bin, _spec) = feature_con_spec(
-        "- AC-1: uno.\n  Comando: `touch rastro-del-cierre.txt`",
-    );
+    let (dir, bin, _spec) =
+        feature_con_spec("- AC-1: uno.\n  Comando: `touch rastro-del-cierre.txt`");
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success();
     std::fs::remove_file(dir.path().join("rastro-del-cierre.txt")).unwrap();
     enable_verify_rule(&dir.path().join("hp"));
     cmd(&bin)
@@ -2705,11 +3106,17 @@ fn start_should_document_the_command_line_in_the_spec_template() {
     // AC-17: el proximo spec ofrece la linea solo, sin que nadie la recuerde.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let spec = std::fs::read_to_string(dir.path().join("docs/spec-feature-1-demo.md")).unwrap();
     assert!(spec.contains("Comando: `<como se prueba"), "{spec}");
     assert!(spec.contains("harness_cli verify --feature"), "{spec}");
-    assert!(spec.contains("no declarar comando NO es un fallo"), "{spec}");
+    assert!(
+        spec.contains("no declarar comando NO es un fallo"),
+        "{spec}"
+    );
 }
 
 #[test]
@@ -2717,7 +3124,10 @@ fn close_should_block_on_a_stale_report() {
     // AC-15: el spec cambio despues de la corrida; lo verificado ya no aplica.
     let (dir, bin, spec) = feature_con_spec("- AC-1: uno.\n  Comando: `true`");
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success();
     let despues = filetime::FileTime::from_unix_time(
         filetime::FileTime::from_last_modification_time(
             &std::fs::metadata(dir.path().join("docs/verify-1.md")).unwrap(),
@@ -2739,7 +3149,10 @@ fn close_should_block_on_a_stale_report() {
 fn close_should_pass_with_a_fresh_green_report() {
     let (dir, bin, _spec) = feature_con_spec("- AC-1: uno.\n  Comando: `true`");
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success();
     enable_verify_rule(&dir.path().join("hp"));
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done"])
@@ -2766,9 +3179,15 @@ fn only_verify_should_execute_declared_commands() {
     // archivo aparece. Sobrevive a cualquier reescritura de la implementacion.
     let (dir, bin) = sandbox_with_binary();
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let spec = dir.path().join("docs/spec-feature-1-demo.md");
-    escribir_acs(&spec, "- AC-1: uno.\n  Comando: `touch rastro-de-ejecucion.txt`");
+    escribir_acs(
+        &spec,
+        "- AC-1: uno.\n  Comando: `touch rastro-de-ejecucion.txt`",
+    );
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
     let rastro = dir.path().join("rastro-de-ejecucion.txt");
 
@@ -2797,7 +3216,10 @@ fn only_verify_should_execute_declared_commands() {
 
     // Control positivo: sin esto, el test pasaria igual si el rastro fuera
     // imposible de crear, y no estaria probando nada.
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success();
     assert!(
         rastro.exists(),
         "verify no ejecuto el comando declarado: el test no prueba nada"
@@ -2842,7 +3264,10 @@ fn doctor_should_report_every_area_on_a_healthy_install() {
         "graphify",
         "rutas_protegidas",
     ] {
-        assert!(areas.contains(&esperada.to_string()), "falta {esperada}: {areas:?}");
+        assert!(
+            areas.contains(&esperada.to_string()),
+            "falta {esperada}: {areas:?}"
+        );
     }
 }
 
@@ -2855,7 +3280,10 @@ fn doctor_should_print_an_exact_remedy_for_every_problem() {
     std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
     std::fs::write(dir.path().join(".claude/settings.json"), "{}").unwrap();
     let v = doctor_json(&bin);
-    assert!(v["fallas"].as_u64().unwrap() > 0, "el test no sembro ninguna falla: {v}");
+    assert!(
+        v["fallas"].as_u64().unwrap() > 0,
+        "el test no sembro ninguna falla: {v}"
+    );
     for area in v["areas"].as_array().unwrap() {
         let estado = area["estado"].as_str().unwrap();
         if estado == "falla" || estado == "aviso" {
@@ -2892,7 +3320,10 @@ fn doctor_json_should_expose_area_state_and_remedy() {
     let v = doctor_json(&bin);
     let primera = &v["areas"][0];
     for campo in ["area", "estado", "detalle", "remedio"] {
-        assert!(primera.get(campo).is_some(), "falta el campo {campo}: {primera}");
+        assert!(
+            primera.get(campo).is_some(),
+            "falta el campo {campo}: {primera}"
+        );
     }
     assert!(v["sana"].is_boolean());
 }
@@ -2934,7 +3365,10 @@ fn doctor_should_detect_a_hook_pointing_nowhere() {
         .find(|a| a["area"] == "hooks")
         .unwrap();
     assert_eq!(hooks["estado"], "falla", "{hooks}");
-    assert!(hooks["detalle"].as_str().unwrap().contains("claude"), "{hooks}");
+    assert!(
+        hooks["detalle"].as_str().unwrap().contains("claude"),
+        "{hooks}"
+    );
 }
 
 #[test]
@@ -2952,7 +3386,10 @@ fn doctor_should_only_demand_surfaces_the_backend_uses() {
         .unwrap();
     let detalle = sup["detalle"].as_str().unwrap();
     assert!(detalle.contains("CLAUDE.md"), "{detalle}");
-    assert!(!detalle.contains("GEMINI.md"), "no debe pedir Gemini: {detalle}");
+    assert!(
+        !detalle.contains("GEMINI.md"),
+        "no debe pedir Gemini: {detalle}"
+    );
 }
 
 #[test]
@@ -2967,7 +3404,10 @@ fn doctor_should_explain_which_root_it_resolved_and_why() {
         .find(|a| a["area"] == "marker")
         .unwrap();
     assert!(
-        marker["detalle"].as_str().unwrap().contains("raiz resuelta"),
+        marker["detalle"]
+            .as_str()
+            .unwrap()
+            .contains("raiz resuelta"),
         "{marker}"
     );
 }
@@ -2997,7 +3437,10 @@ fn doctor_should_split_required_and_optional_tools() {
         .iter()
         .find(|a| a["area"] == "herramientas")
         .unwrap();
-    assert_ne!(herr["estado"], "falla", "git deberia estar presente: {herr}");
+    assert_ne!(
+        herr["estado"], "falla",
+        "git deberia estar presente: {herr}"
+    );
 }
 
 #[test]
@@ -3028,7 +3471,10 @@ fn doctor_should_not_demand_surfaces_in_a_source_checkout() {
             .unwrap();
         assert_eq!(a["estado"], "no_aplica", "{a}");
     }
-    assert_eq!(v["fallas"], 0, "un checkout fuente no puede tener fallas: {v}");
+    assert_eq!(
+        v["fallas"], 0,
+        "un checkout fuente no puede tener fallas: {v}"
+    );
 }
 
 #[test]
@@ -3081,7 +3527,11 @@ fn doctor_should_not_write_anything() {
     let antes = huella_del_arbol(dir.path());
     cmd(&bin).arg("doctor").output().unwrap();
     cmd(&bin).args(["doctor", "--json"]).output().unwrap();
-    assert_eq!(antes, huella_del_arbol(dir.path()), "doctor modifico el arbol");
+    assert_eq!(
+        antes,
+        huella_del_arbol(dir.path()),
+        "doctor modifico el arbol"
+    );
 }
 
 /// Ruta + mtime de cada archivo, ordenado: detecta creaciones, borrados y
@@ -3137,7 +3587,10 @@ fn close_should_still_write_the_prd_milestone_when_protected() {
     )
     .unwrap();
     cmd(&bin).args(["add", "--name", "demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done"])
         .assert()
@@ -3148,8 +3601,8 @@ fn close_should_still_write_the_prd_milestone_when_protected() {
         "el arnes no pudo marcar el hito en una ruta protegida: {texto}"
     );
     // Y la escritura quedo registrada como propia, asi que no es violacion.
-    let registro = std::fs::read_to_string(dir.path().join("hp/progress/.rutas_arnes"))
-        .unwrap_or_default();
+    let registro =
+        std::fs::read_to_string(dir.path().join("hp/progress/.rutas_arnes")).unwrap_or_default();
     assert!(
         registro.contains("docs/prd/PRD-master.md"),
         "close no registro su propia escritura: {registro}"
@@ -3195,7 +3648,10 @@ fn close_gates_should_share_one_exit_code() {
     let (dir, bin) = sandbox_with_binary();
     let hp = dir.path().join("hp");
     cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
 
     // Gate 1: spec sin aprobar.
     enable_spec_rule(&hp);
@@ -3233,7 +3689,10 @@ fn verify_solo_should_accept_several_acs() {
     let (dir, bin) = sandbox_with_binary();
     let spec = dir.path().join("docs/spec-feature-1-demo.md");
     cmd(&bin).args(["add", "--name", "demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     escribir_acs(
         &spec,
         "- AC-1: uno.\n  Comando: `touch uno.txt`\n\
@@ -3247,7 +3706,10 @@ fn verify_solo_should_accept_several_acs() {
         .success();
     assert!(dir.path().join("uno.txt").exists(), "no corrio AC-1");
     assert!(dir.path().join("tres.txt").exists(), "no corrio AC-3");
-    assert!(!dir.path().join("dos.txt").exists(), "corrio AC-2, que no se pidio");
+    assert!(
+        !dir.path().join("dos.txt").exists(),
+        "corrio AC-2, que no se pidio"
+    );
 }
 
 #[test]
@@ -3256,7 +3718,10 @@ fn verify_solo_should_name_the_missing_ac() {
     let (dir, bin) = sandbox_with_binary();
     let spec = dir.path().join("docs/spec-feature-1-demo.md");
     cmd(&bin).args(["add", "--name", "demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     escribir_acs(&spec, "- AC-1: uno.\n  Comando: `true`");
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
     cmd(&bin)
@@ -3321,7 +3786,10 @@ fn leccion_list_should_not_change_order_fields_or_json() {
     let pos_mas = texto.find("mas-usada").unwrap();
     let pos_menos = texto.find("menos-usada").unwrap();
     assert!(pos_mas < pos_menos, "cambio el orden por uso: {texto}");
-    let json_out = cmd(&bin).args(["leccion", "list", "--json"]).output().unwrap();
+    let json_out = cmd(&bin)
+        .args(["leccion", "list", "--json"])
+        .output()
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
     assert!(v["lecciones"].is_array(), "cambio la forma del --json: {v}");
     assert_eq!(v["lecciones"][0]["nombre"], "mas-usada");
@@ -3344,8 +3812,39 @@ fn sandbox_con_documentos() -> (tempfile::TempDir, PathBuf) {
     )
     .unwrap();
     cmd(&bin).args(["add", "--name", "demo"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     (dir, bin)
+}
+
+/// Principal y worktree tienen documentos diferentes: el binario se ejecuta
+/// desde el principal, pero la feature declara que sus documentos viven en
+/// `worktree`. No hace falta un Git real para verificar el contrato de rutas.
+fn sandbox_con_documentos_en_worktree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let (dir, bin) = sandbox_con_documentos();
+    let worktree = dir.path().join("feature-1");
+    let docs = worktree.join("docs");
+    let prd = docs.join("prd");
+    std::fs::create_dir_all(&prd).unwrap();
+
+    // El principal no puede sostener la cita de la propuesta de la feature.
+    std::fs::write(dir.path().join("docs/prd/PRD-master.md"), "# PRD principal\n").unwrap();
+    std::fs::write(prd.join("PRD-master.md"), "# PRD de la feature\ncita solo en worktree\n").unwrap();
+    std::fs::write(prd.join("SDD-master.md"), "# SDD de la feature\n").unwrap();
+    std::fs::write(
+        docs.join("architecture.md"),
+        "# Arquitectura de la feature\n\n- `viejo-worktree.rs`: solo la rama\n",
+    )
+    .unwrap();
+
+    let feature_list = dir.path().join("hp/feature_list.json");
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&feature_list).unwrap()).unwrap();
+    data["features"][0]["worktree"] = serde_json::Value::String(worktree.to_string_lossy().into());
+    std::fs::write(&feature_list, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+    (dir, bin, worktree)
 }
 
 fn enable_docs_rule(harness_dir: &Path) {
@@ -3353,7 +3852,9 @@ fn enable_docs_rule(harness_dir: &Path) {
     let mut data: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let obj = data.as_object_mut().unwrap();
-    let rules = obj.entry("rules".to_string()).or_insert_with(|| serde_json::json!({}));
+    let rules = obj
+        .entry("rules".to_string())
+        .or_insert_with(|| serde_json::json!({}));
     rules
         .as_object_mut()
         .unwrap()
@@ -3365,7 +3866,10 @@ fn enable_docs_rule(harness_dir: &Path) {
 fn prd_propose_should_seed_one_block_per_document() {
     // AC-4: un bloque por documento del alcance, todos PENDIENTE, exit 2.
     let (dir, bin) = sandbox_con_documentos();
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     let texto = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
     for esperado in [
         "## Documento: docs/prd/PRD-master.md",
@@ -3375,6 +3879,106 @@ fn prd_propose_should_seed_one_block_per_document() {
         assert!(texto.contains(esperado), "falta {esperado}: {texto}");
     }
     assert_eq!(texto.matches("Veredicto: PENDIENTE").count(), 3, "{texto}");
+    assert_eq!(texto.matches("Candidato despues:").count(), 3, "{texto}");
+    assert!(texto.contains("sin candidato"), "{texto}");
+}
+
+#[test]
+fn prd_propose_should_seed_an_editable_candidate_from_uncommitted_paths() {
+    // AC-1/AC-3: aunque aun no haya commit de la feature, el candidato se
+    // deriva de rutas reales; los artefactos del arnes no lo contaminan.
+    let (dir, bin) = sandbox_con_documentos();
+    Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "base"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::fs::create_dir_all(dir.path().join("rust/src")).unwrap();
+    std::fs::write(dir.path().join("rust/src/nuevo.rs"), "// cambio\n").unwrap();
+
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
+    let texto = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
+    assert!(texto.contains("`rust/src/nuevo.rs`"), "{texto}");
+    assert!(texto.contains("Veredicto: PENDIENTE"), "{texto}");
+    assert!(!texto.contains("docs/plan-feature-1-demo.md`"), "{texto}");
+}
+
+#[test]
+fn prd_propose_and_apply_should_use_the_registered_feature_worktree() {
+    // Feature #54 / AC-1..AC-3 + AC-5: aunque se llame desde el principal,
+    // propuesta, cita y escritura tienen que quedarse en la rama de la feature.
+    let (dir, bin, worktree) = sandbox_con_documentos_en_worktree();
+    let main_arch = dir.path().join("docs/architecture.md");
+    let main_before = std::fs::read_to_string(&main_arch).unwrap();
+    let propuesta = worktree.join("docs/prd-diff-1.md");
+
+    cmd(&bin)
+        .current_dir(dir.path())
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
+    assert!(propuesta.is_file(), "la propuesta debe vivir en el worktree");
+    assert!(
+        !dir.path().join("docs/prd-diff-1.md").exists(),
+        "el principal no recibe una copia de la propuesta"
+    );
+
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: ya-esta docs/prd/PRD-master.md:2-2",
+            "Veredicto: no-aplica el diseno no cambia",
+            "Veredicto: cambio\nAntes:\n- `viejo-worktree.rs`: solo la rama\nDespues:\n- `viejo-worktree.rs`: solo la rama\n- `nuevo-worktree.rs`: viaja con el merge",
+        ],
+    );
+    cmd(&bin)
+        .current_dir(dir.path())
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+
+    let arch_feature = std::fs::read_to_string(worktree.join("docs/architecture.md")).unwrap();
+    assert!(arch_feature.contains("nuevo-worktree.rs"), "{arch_feature}");
+    assert_eq!(std::fs::read_to_string(&main_arch).unwrap(), main_before);
+    assert!(std::fs::read_to_string(&propuesta).unwrap().contains("Aplicado:"));
+}
+
+#[test]
+fn prd_commands_should_announce_the_no_worktree_fallback() {
+    // Feature #54 / AC-4 + AC-6: sin worktree se conserva docs/ efectivo, pero
+    // el usuario puede ver que no se eligio un arbol alternativo en silencio.
+    let (dir, bin) = sandbox_con_documentos();
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains(
+            "Feature #1 sin worktree valido: uso el docs de la raiz efectiva.",
+        ));
+    assert!(dir.path().join("docs/prd-diff-1.md").is_file());
 }
 
 #[test]
@@ -3382,15 +3986,30 @@ fn prd_propose_should_not_clobber_existing_verdicts() {
     // AC-5: correr propose de nuevo no puede borrar lo ya contestado.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
-    let contestado = std::fs::read_to_string(&propuesta)
-        .unwrap()
-        .replacen("Veredicto: PENDIENTE", "Veredicto: no-aplica la feature no toca el producto", 1);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
+    let contestado = std::fs::read_to_string(&propuesta).unwrap().replacen(
+        "Veredicto: PENDIENTE",
+        "Veredicto: no-aplica la feature no toca el producto",
+        1,
+    );
     std::fs::write(&propuesta, &contestado).unwrap();
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     let despues = std::fs::read_to_string(&propuesta).unwrap();
-    assert!(despues.contains("no-aplica la feature no toca el producto"), "{despues}");
-    assert_eq!(despues.matches("## Documento:").count(), 3, "duplico bloques: {despues}");
+    assert!(
+        despues.contains("no-aplica la feature no toca el producto"),
+        "{despues}"
+    );
+    assert_eq!(
+        despues.matches("## Documento:").count(),
+        3,
+        "duplico bloques: {despues}"
+    );
 }
 
 #[test]
@@ -3401,10 +4020,50 @@ fn prd_propose_should_precompute_presence_signals() {
     // El PRD menciona la feature; el SDD no.
     let prd = dir.path().join("docs/prd/PRD-master.md");
     std::fs::write(&prd, "# PRD\n\nla feature demo ya esta contada aca\n").unwrap();
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     let texto = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
-    assert!(texto.contains("Presente en: docs/prd/PRD-master.md:3"), "{texto}");
-    assert!(texto.contains("no menciona 'demo'"), "{texto}");
+    assert!(
+        texto.contains("Presente en: docs/prd/PRD-master.md:3"),
+        "{texto}"
+    );
+    assert!(
+        texto.contains("sin señales de nombre, spec o módulo"),
+        "{texto}"
+    );
+}
+
+#[test]
+fn prd_propose_should_find_a_document_by_terms_in_its_spec_not_only_its_name() {
+    // AC-1/AC-5: el PRD no dice "demo", pero sí el término específico que el
+    // spec declara; la señal nombra la línea literal y su procedencia.
+    let (dir, bin) = sandbox_con_documentos();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    let mut texto_spec = std::fs::read_to_string(&spec).unwrap();
+    texto_spec.push_str("\nFacturacion conciliada para pagos recurrentes.\n");
+    std::fs::write(&spec, texto_spec).unwrap();
+    std::fs::write(
+        dir.path().join("docs/prd/PRD-master.md"),
+        "# PRD\n\nLa facturacion conciliada evita cobros duplicados.\n",
+    )
+    .unwrap();
+
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    let propuesta = std::fs::read_to_string(dir.path().join("docs/prd-diff-1.md")).unwrap();
+    assert!(
+        propuesta.contains("(spec `facturacion`)"),
+        "{propuesta}"
+    );
+    let bloque_prd = propuesta
+        .split("## Documento: docs/prd/SDD-master.md")
+        .next()
+        .unwrap();
+    assert!(
+        !bloque_prd.contains("sin señales de nombre, spec o módulo"),
+        "{propuesta}"
+    );
 }
 
 /// Contesta los tres bloques de una propuesta ya sembrada.
@@ -3432,7 +4091,10 @@ fn prd_apply_without_yes_should_show_and_refuse_to_write() {
     // AC-12: muestra lo que escribiria y NO escribe un byte.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     contestar(
         &propuesta,
         [
@@ -3447,9 +4109,15 @@ fn prd_apply_without_yes_should_show_and_refuse_to_write() {
         .args(["prd", "apply", "--feature", "1"])
         .assert()
         .code(2)
-        .stdout(predicate::str::contains("[GATE] prd apply exige la confirmacion explicita"))
+        .stdout(predicate::str::contains(
+            "[GATE] prd apply exige la confirmacion explicita",
+        ))
         .stdout(predicate::str::contains("docs/architecture.md"));
-    assert_eq!(std::fs::read_to_string(&arch).unwrap(), antes, "escribio sin --yes");
+    assert_eq!(
+        std::fs::read_to_string(&arch).unwrap(),
+        antes,
+        "escribio sin --yes"
+    );
 }
 
 #[test]
@@ -3457,7 +4125,10 @@ fn prd_apply_with_yes_should_write_seal_and_log() {
     // AC-13: escribe, sella y deja bitacora.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     contestar(
         &propuesta,
         [
@@ -3466,14 +4137,62 @@ fn prd_apply_with_yes_should_write_seal_and_log() {
             "Veredicto: cambio\nAntes:\n- `viejo.rs`: lo de siempre\nDespues:\n- `viejo.rs`: lo de siempre\n- `nuevo.rs`: novedad",
         ],
     );
-    cmd(&bin).args(["prd", "apply", "--feature", "1", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
     let arch = std::fs::read_to_string(dir.path().join("docs/architecture.md")).unwrap();
     assert!(arch.contains("nuevo.rs"), "{arch}");
     let sellada = std::fs::read_to_string(&propuesta).unwrap();
     assert!(sellada.contains("Aplicado:"), "{sellada}");
-    assert!(sellada.contains("por USUARIO (confirmacion explicita)"), "{sellada}");
+    assert!(
+        sellada.contains("por USUARIO (confirmacion explicita)"),
+        "{sellada}"
+    );
     let history = std::fs::read_to_string(dir.path().join("hp/progress/history.md")).unwrap();
     assert!(history.contains("prd apply feature #1"), "{history}");
+}
+
+#[test]
+fn prd_propose_should_invalidate_a_seal_when_its_applied_text_is_removed() {
+    // AC-1/AC-2/AC-4: la vigencia se prueba contra el texto que se escribió,
+    // no contra una firma global ni una edición ajena del documento.
+    let (dir, bin) = sandbox_con_documentos();
+    let propuesta = dir.path().join("docs/prd-diff-1.md");
+    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: no-aplica no toca el producto",
+            "Veredicto: no-aplica no toca el diseno",
+            "Veredicto: cambio\nAntes:\n- `viejo.rs`: lo de siempre\nDespues:\n- `nuevo.rs`: cambio aplicado",
+        ],
+    );
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+    let arch = dir.path().join("docs/architecture.md");
+    let con_aplicado = std::fs::read_to_string(&arch).unwrap();
+    std::fs::write(&arch, format!("{con_aplicado}\nnota ajena\n")).unwrap();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ya estaba aplicada"));
+
+    let sin_texto = std::fs::read_to_string(&arch)
+        .unwrap()
+        .replace("- `nuevo.rs`: cambio aplicado", "- `perdido.rs`: cambio manual");
+    std::fs::write(&arch, sin_texto).unwrap();
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sello Aplicado invalidado"));
+    let invalida = std::fs::read_to_string(&propuesta).unwrap();
+    assert!(!invalida.contains("Aplicado:"), "{invalida}");
+    assert!(invalida.contains("Veredicto: cambio"), "la respuesta se preserva: {invalida}");
 }
 
 #[test]
@@ -3481,7 +4200,10 @@ fn prd_apply_should_refuse_a_citation_that_does_not_hold() {
     // AC-9: la mentira mas probable del agente, refutada por maquina.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     contestar(
         &propuesta,
         [
@@ -3502,14 +4224,21 @@ fn prd_apply_should_reject_a_tampered_block_list() {
     // AC-7: el agente no puede colapsar N preguntas en una respuesta.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     let texto = std::fs::read_to_string(&propuesta).unwrap();
     let sin_uno: String = texto
         .split("## Documento: docs/architecture.md")
         .next()
         .unwrap()
         .to_string();
-    std::fs::write(&propuesta, sin_uno.replace("Veredicto: PENDIENTE", "Veredicto: no-aplica x")).unwrap();
+    std::fs::write(
+        &propuesta,
+        sin_uno.replace("Veredicto: PENDIENTE", "Veredicto: no-aplica x"),
+    )
+    .unwrap();
     cmd(&bin)
         .args(["prd", "apply", "--feature", "1"])
         .assert()
@@ -3522,7 +4251,10 @@ fn prd_apply_should_reject_a_tampered_block_list() {
 fn prd_diff_should_live_outside_the_protected_path() {
     // AC-15: la propuesta del agente NUNCA se escribe dentro de docs/prd/**.
     let (dir, bin) = sandbox_con_documentos();
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     assert!(dir.path().join("docs/prd-diff-1.md").is_file());
     assert!(!dir.path().join("docs/prd/prd-diff-1.md").exists());
     // Y el binario lo confirma: esa ruta no esta protegida.
@@ -3539,7 +4271,10 @@ fn prd_apply_should_register_its_own_writes() {
     // dispararse a si mismo la red de seguridad de la #26.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     contestar(
         &propuesta,
         [
@@ -3548,7 +4283,10 @@ fn prd_apply_should_register_its_own_writes() {
             "Veredicto: no-aplica z",
         ],
     );
-    cmd(&bin).args(["prd", "apply", "--feature", "1", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
     let registro =
         std::fs::read_to_string(dir.path().join("hp/progress/.rutas_arnes")).unwrap_or_default();
     assert!(
@@ -3583,10 +4321,17 @@ fn close_should_demand_the_user_seal_not_just_the_answers() {
     // AC-17 (OBS-1): contestada no alcanza; hace falta el SI del usuario.
     let (dir, bin) = sandbox_con_documentos();
     let propuesta = dir.path().join("docs/prd-diff-1.md");
-    cmd(&bin).args(["prd", "propose", "--feature", "1"]).assert().code(2);
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
     contestar(
         &propuesta,
-        ["Veredicto: no-aplica x", "Veredicto: no-aplica y", "Veredicto: no-aplica z"],
+        [
+            "Veredicto: no-aplica x",
+            "Veredicto: no-aplica y",
+            "Veredicto: no-aplica z",
+        ],
     );
     enable_docs_rule(&dir.path().join("hp"));
     cmd(&bin)
@@ -3594,7 +4339,10 @@ fn close_should_demand_the_user_seal_not_just_the_answers() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("todavia no la aprobo"));
-    cmd(&bin).args(["prd", "apply", "--feature", "1", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done"])
         .assert()
@@ -3637,7 +4385,10 @@ fn no_spec_command_should_invoke_prd_apply_yes() {
             );
         }
     }
-    assert!(revisados > 5, "esperaba varios specs reales, revise {revisados}");
+    assert!(
+        revisados > 5,
+        "esperaba varios specs reales, revise {revisados}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3660,31 +4411,139 @@ fn sembrar_leccion(dir: &Path, nombre: &str, triggers: &str, cuerpo: &str) {
     .unwrap();
 }
 
+fn declarar_relacion(dir: &Path, nombre: &str, relacionadas: &str) {
+    let ruta = dir.join(format!("docs/lecciones/{nombre}.md"));
+    let texto = std::fs::read_to_string(&ruta).unwrap();
+    let cambiado = texto.replace(
+        "relacionadas: []",
+        &format!("relacionadas: [{relacionadas}]"),
+    );
+    assert_ne!(texto, cambiado, "fixture sin frontmatter relacionadas: {texto}");
+    std::fs::write(ruta, cambiado).unwrap();
+}
+
+#[test]
+fn consolidar_should_report_mutual_relacionadas_without_a_backend() {
+    // AC-1/AC-5/AC-6: la señal es local. Dos triggers deliberadamente
+    // disjuntos no necesitan red, cuota ni una respuesta obediente de un LLM.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "procedimiento-a", "solo-a", "cuerpo A.");
+    sembrar_leccion(dir.path(), "procedimiento-b", "solo-b", "cuerpo B.");
+    declarar_relacion(dir.path(), "procedimiento-a", "procedimiento-b");
+    declarar_relacion(dir.path(), "procedimiento-b", "procedimiento-a");
+    std::fs::write(dir.path().join("hp/feature_list.json"), r#"{"features":[]}"#).unwrap();
+    let leccion_a = dir.path().join("docs/lecciones/procedimiento-a.md");
+    let leccion_b = dir.path().join("docs/lecciones/procedimiento-b.md");
+    let antes_a = std::fs::read(&leccion_a).unwrap();
+    let antes_b = std::fs::read(&leccion_b).unwrap();
+    let history = dir.path().join("hp/progress/history.md");
+
+    cmd(&bin)
+        .args(["lecciones", "consolidar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Consolidacion APAGADA"))
+        .stdout(predicate::str::contains("1 candidato(s) a consolidar"))
+        .stdout(predicate::str::contains("procedimiento-a + procedimiento-b"))
+        .stdout(predicate::str::contains("relacionadas mutuas"));
+    assert_eq!(antes_a, std::fs::read(&leccion_a).unwrap());
+    assert_eq!(antes_b, std::fs::read(&leccion_b).unwrap());
+    assert!(!history.exists(), "la deteccion local registro historia");
+    assert!(
+        !dir.path().join("hp/bkp/lecciones").exists(),
+        "la deteccion local creo un backup"
+    );
+}
+
+#[test]
+fn consolidar_preparar_should_create_a_deterministic_umbrella_without_overwriting() {
+    // AC-1..AC-6: la preparación es una mutación chica y explícita; deja la
+    // estructura que después valida la fusión, sin archivar ni pedir backend.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "miembro-a", "Beta, alfa", "cuerpo A.");
+    sembrar_leccion(dir.path(), "miembro-b", "ALFA, zeta", "cuerpo B.");
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--preparar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro-b,miembro-a,miembro-a",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Borrador preparado"))
+        .stdout(predicate::str::contains("Triggers unidos: alfa, beta, zeta"));
+    let paraguas = dir.path().join("docs/lecciones/paraguas.md");
+    let preparado = std::fs::read_to_string(&paraguas).unwrap();
+    assert!(preparado.contains("triggers: [alfa, beta, zeta]"), "{preparado}");
+    assert_eq!(preparado.matches("[[miembro-a]]").count(), 1, "{preparado}");
+    assert_eq!(preparado.matches("[[miembro-b]]").count(), 1, "{preparado}");
+    assert!(dir.path().join("docs/lecciones/miembro-a.md").is_file());
+    assert!(dir.path().join("docs/lecciones/miembro-b.md").is_file());
+    assert!(!dir.path().join("hp/bkp/lecciones").exists());
+
+    let con_prosa = format!("{preparado}\nProsa humana que no se puede pisar.\n");
+    std::fs::write(&paraguas, &con_prosa).unwrap();
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--preparar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro-a,miembro-b",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("se preserva"));
+    assert_eq!(con_prosa, std::fs::read_to_string(paraguas).unwrap());
+}
+
 #[test]
 fn consolidar_aplicar_should_take_the_merge_from_argv() {
     // La fusion NO sale de lo que dijo el modelo: sale de argv. Por eso este
     // test corre sin backend y es determinista.
     let (dir, bin) = sandbox_with_binary();
-    sembrar_leccion(dir.path(), "paraguas", "a, b", "cuerpo real del paraguas. Ver [[miembro]].");
+    sembrar_leccion(
+        dir.path(),
+        "paraguas",
+        "a, b",
+        "cuerpo real del paraguas. Ver [[miembro]].",
+    );
     sembrar_leccion(dir.path(), "miembro", "a, b", "cuerpo de la miembro.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar",
-            "--en", "paraguas", "--de", "miembro",
-            "--motivo", "cuentan lo mismo",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "cuentan lo mismo",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("Consolidacion aplicada"));
     assert!(
-        dir.path().join("docs/lecciones/archivo/miembro.md").is_file(),
+        dir.path()
+            .join("docs/lecciones/archivo/miembro.md")
+            .is_file(),
         "no archivo la miembro"
     );
     assert!(
         !dir.path().join("docs/lecciones/miembro.md").exists(),
         "la miembro sigue en el catalogo activo"
     );
-    assert!(dir.path().join("docs/lecciones/paraguas.md").is_file(), "borro el paraguas");
+    assert!(
+        dir.path().join("docs/lecciones/paraguas.md").is_file(),
+        "borro el paraguas"
+    );
 }
 
 #[test]
@@ -3694,23 +4553,44 @@ fn consolidar_aplicar_should_demand_a_motivo() {
     sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo. [[miembro]]");
     sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
     cmd(&bin)
-        .args(["lecciones", "consolidar", "--aplicar", "--en", "paraguas", "--de", "miembro"])
+        .args([
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+        ])
         .assert()
         .code(2)
         .stderr(predicate::str::contains("Falta --motivo"));
-    assert!(!dir.path().join("docs/lecciones/archivo").exists(), "archivo sin motivo");
+    assert!(
+        !dir.path().join("docs/lecciones/archivo").exists(),
+        "archivo sin motivo"
+    );
 }
 
 #[test]
 fn consolidar_should_refuse_a_skeleton_umbrella() {
     // Archivar contra un esqueleto perderia el conocimiento de forma estructural.
     let (dir, bin) = sandbox_with_binary();
-    cmd(&bin).args(["leccion", "nueva", "paraguas"]).assert().success();
+    cmd(&bin)
+        .args(["leccion", "nueva", "paraguas"])
+        .assert()
+        .success();
     sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "miembro", "--motivo", "x",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "x",
         ])
         .assert()
         .code(2)
@@ -3727,8 +4607,15 @@ fn consolidar_should_demand_the_union_of_triggers() {
     sembrar_leccion(dir.path(), "miembro", "comun, propio", "cuerpo.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "miembro", "--motivo", "x",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "x",
         ])
         .assert()
         .code(2)
@@ -3743,8 +4630,15 @@ fn consolidar_should_demand_a_pointer_to_each_member() {
     sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "miembro", "--motivo", "x",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "x",
         ])
         .assert()
         .code(2)
@@ -3760,13 +4654,26 @@ fn consolidar_should_allow_an_existing_member_as_the_umbrella() {
     sembrar_leccion(dir.path(), "miembro", "a, b", "cuerpo.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "paraguas,miembro", "--motivo", "el paraguas es una de las dos",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "paraguas,miembro",
+            "--motivo",
+            "el paraguas es una de las dos",
         ])
         .assert()
         .success();
-    assert!(dir.path().join("docs/lecciones/paraguas.md").is_file(), "archivo el paraguas");
-    assert!(dir.path().join("docs/lecciones/archivo/miembro.md").is_file());
+    assert!(
+        dir.path().join("docs/lecciones/paraguas.md").is_file(),
+        "archivo el paraguas"
+    );
+    assert!(dir
+        .path()
+        .join("docs/lecciones/archivo/miembro.md")
+        .is_file());
 }
 
 #[test]
@@ -3774,13 +4681,25 @@ fn consolidar_should_archive_byte_for_byte_with_backup() {
     // Nunca borra, y se puede comprobar byte a byte.
     let (dir, bin) = sandbox_with_binary();
     sembrar_leccion(dir.path(), "paraguas", "a", "cuerpo real. [[miembro]]");
-    sembrar_leccion(dir.path(), "miembro", "a", "cuerpo con un PITFALL que no se puede perder.");
+    sembrar_leccion(
+        dir.path(),
+        "miembro",
+        "a",
+        "cuerpo con un PITFALL que no se puede perder.",
+    );
     let antes = std::fs::read_to_string(dir.path().join("docs/lecciones/miembro.md")).unwrap();
     let cuerpo_antes = antes.split("---\n").nth(2).unwrap().to_string();
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "miembro", "--motivo", "x",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "x",
         ])
         .assert()
         .success();
@@ -3798,8 +4717,15 @@ fn consolidar_report_should_list_each_merge_with_its_reason() {
     sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "miembro", "--motivo", "este es el motivo exacto",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "este es el motivo exacto",
         ])
         .assert()
         .success()
@@ -3816,8 +4742,15 @@ fn consolidar_should_be_undoable_with_rollback() {
     sembrar_leccion(dir.path(), "miembro", "a", "cuerpo.");
     cmd(&bin)
         .args([
-            "lecciones", "consolidar", "--aplicar", "--en", "paraguas",
-            "--de", "miembro", "--motivo", "x",
+            "lecciones",
+            "consolidar",
+            "--aplicar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro",
+            "--motivo",
+            "x",
         ])
         .assert()
         .success();
@@ -3838,8 +4771,14 @@ fn consolidar_should_be_undoable_with_rollback() {
 // ---------------------------------------------------------------------------
 
 fn dos_features(bin: &Path) {
-    cmd(bin).args(["add", "--name", "absorbida"]).assert().success();
-    cmd(bin).args(["add", "--name", "absorbente"]).assert().success();
+    cmd(bin)
+        .args(["add", "--name", "absorbida"])
+        .assert()
+        .success();
+    cmd(bin)
+        .args(["add", "--name", "absorbente"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -3847,7 +4786,15 @@ fn close_should_accept_the_superseded_status() {
     let (dir, bin) = sandbox_with_binary();
     dos_features(&bin);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "2",
+        ])
         .assert()
         .success();
     let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
@@ -3873,13 +4820,29 @@ fn superseded_should_refuse_an_unknown_absorber() {
     let (_dir, bin) = sandbox_with_binary();
     dos_features(&bin);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "99"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "99",
+        ])
         .assert()
         .code(2)
         .stderr(predicate::str::contains("no existe"));
     // Y tampoco puede absorberse a si misma.
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "1"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "1",
+        ])
         .assert()
         .code(2)
         .stderr(predicate::str::contains("a si misma"));
@@ -3890,7 +4853,15 @@ fn superseded_should_record_the_absorbing_feature() {
     let (dir, bin) = sandbox_with_binary();
     dos_features(&bin);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "2",
+        ])
         .assert()
         .success();
     let v: serde_json::Value = serde_json::from_str(
@@ -3915,7 +4886,15 @@ fn superseded_should_not_trigger_the_done_gates() {
     enable_spec_rule(&hp);
     enable_leccion_rule(&hp);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "2",
+        ])
         .assert()
         .success();
 }
@@ -3933,7 +4912,15 @@ fn next_should_not_offer_a_superseded_feature() {
     let (_dir, bin) = sandbox_with_binary();
     dos_features(&bin);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "2",
+        ])
         .assert()
         .success();
     cmd(&bin)
@@ -3949,7 +4936,15 @@ fn status_should_show_who_absorbed_a_superseded_feature() {
     let (_dir, bin) = sandbox_with_binary();
     dos_features(&bin);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "superseded", "--absorbida-por", "2"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "superseded",
+            "--absorbida-por",
+            "2",
+        ])
         .assert()
         .success();
     cmd(&bin)
@@ -3966,7 +4961,15 @@ fn blocked_features_should_stay_blocked() {
     let (_dir, bin) = sandbox_with_binary();
     dos_features(&bin);
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "esperando a alguien"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "esperando a alguien",
+        ])
         .assert()
         .success();
     cmd(&bin)
@@ -3997,7 +5000,10 @@ fn verify_should_mark_an_ac_that_ran_nothing_as_vacio() {
     ));
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
     // Exit 1: `vacio` bloquea, igual que un rojo.
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
     let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
     assert!(reporte.contains("| AC-1 | vacio |"), "{reporte}");
     assert!(reporte.contains("| AC-2 | verde |"), "{reporte}");
@@ -4013,7 +5019,10 @@ fn close_should_block_on_an_empty_verification() {
         "- AC-1: el que no midio nada.\n  Comando: `{COMANDO_FILTRO_VACIO}`"
     ));
     cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
-    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
     enable_verify_rule(&dir.path().join("hp"));
     cmd(&bin)
         .args(["close", "--feature", "1", "--status", "done"])
@@ -4034,11 +5043,7 @@ fn close_should_block_on_an_empty_verification() {
 /// fusionar y aun asi no se toca el arbol.
 fn backend_falso(dir: &Path, candidato: &str) -> PathBuf {
     let script = dir.join("backend-falso.sh");
-    std::fs::write(
-        &script,
-        format!("#!/bin/sh\nprintf '%s' '{candidato}'\n"),
-    )
-    .unwrap();
+    std::fs::write(&script, format!("#!/bin/sh\nprintf '%s' '{candidato}'\n")).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -4066,7 +5071,9 @@ fn escribir_leccion(dir: &Path, nombre: &str, trigger: &str) {
 /// reescritura cambiarian.
 fn huella(dir: &Path) -> Vec<(String, String)> {
     fn recorrer(base: &Path, dir: &Path, out: &mut Vec<(String, String)>) {
-        let Ok(entradas) = std::fs::read_dir(dir) else { return };
+        let Ok(entradas) = std::fs::read_dir(dir) else {
+            return;
+        };
         for e in entradas.flatten() {
             let ruta = e.path();
             if ruta.is_dir() {
@@ -4177,12 +5184,20 @@ fn sandbox_git() -> (tempfile::TempDir, PathBuf) {
         vec!["config", "user.email", "test@example.com"],
         vec!["config", "user.name", "Test"],
     ] {
-        Command::new("git").args(&args).current_dir(raiz).output().unwrap();
+        Command::new("git")
+            .args(&args)
+            .current_dir(raiz)
+            .output()
+            .unwrap();
     }
     std::fs::write(raiz.join("README.md"), "# proyecto\n").unwrap();
     // El dir del arnes no entra al repo del proyecto (como en la vida real).
     std::fs::write(raiz.join(".gitignore"), "hp/\n").unwrap();
-    Command::new("git").args(["add", "-A"]).current_dir(raiz).output().unwrap();
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(raiz)
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["commit", "-q", "-m", "init"])
         .current_dir(raiz)
@@ -4192,7 +5207,11 @@ fn sandbox_git() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn git_en(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git").args(args).current_dir(dir).output().unwrap();
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -4200,7 +5219,10 @@ fn git_en(dir: &Path, args: &[&str]) -> String {
 fn start_should_create_branch_and_worktree_per_feature() {
     // AC-2, AC-3, AC-4: rama GitFlow + worktree hermano, reusables.
     let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["start", "--feature", "1"])
         .assert()
@@ -4208,17 +5230,26 @@ fn start_should_create_branch_and_worktree_per_feature() {
         .stdout(predicate::str::contains("feature/1-cobranza"))
         .stdout(predicate::str::contains("Trabaja ahi: cd"));
 
-    let ramas = git_en(dir.path(), &["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    let ramas = git_en(
+        dir.path(),
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+    );
     assert!(ramas.contains("feature/1-cobranza"), "{ramas}");
     // El checkout principal NO cambio de rama.
-    assert_eq!(git_en(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    assert_eq!(
+        git_en(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "main"
+    );
     // El worktree es hermano del repo y tiene el arbol.
     let backlog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
     )
     .unwrap();
     let wt = backlog["features"][0]["worktree"].as_str().unwrap();
-    assert!(Path::new(wt).join("README.md").is_file(), "worktree poblado: {wt}");
+    assert!(
+        Path::new(wt).join("README.md").is_file(),
+        "worktree poblado: {wt}"
+    );
     assert!(wt.contains("-wt/1-cobranza"), "hermano del repo: {wt}");
 }
 
@@ -4227,7 +5258,10 @@ fn start_should_keep_working_without_git_or_with_sin_worktree() {
     // AC-5 y AC-6: sin repo git, o pidiendo el modo clasico, no hay aislamiento
     // y el flujo sigue igual.
     let (_dir, bin) = sandbox_with_binary(); // sin git
-    cmd(&bin).args(["add", "--name", "Sin Git"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Sin Git"])
+        .assert()
+        .success();
     cmd(&bin)
         .args(["start", "--feature", "1"])
         .assert()
@@ -4235,7 +5269,10 @@ fn start_should_keep_working_without_git_or_with_sin_worktree() {
         .stdout(predicate::str::contains("sin aislamiento"));
 
     let (_dir2, bin2) = sandbox_git();
-    cmd(&bin2).args(["add", "--name", "Clasica"]).assert().success();
+    cmd(&bin2)
+        .args(["add", "--name", "Clasica"])
+        .assert()
+        .success();
     cmd(&bin2)
         .args(["start", "--feature", "1", "--sin-worktree"])
         .assert()
@@ -4244,12 +5281,187 @@ fn start_should_keep_working_without_git_or_with_sin_worktree() {
 }
 
 #[test]
+fn status_should_resolve_each_spec_from_its_registered_worktree() {
+    // Feature #55 / AC-1..AC-3 + AC-5 + AC-6: `status` es el resumen que
+    // invoca harness_check. Se lo corre desde el principal con dos features
+    // activas para que no pueda usar el docs del CWD para las dos.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+
+    // #1 aprobado y fresco, #2 draft: el mismo resultado que check-spec.
+    cmd(&bin)
+        .args(["check-spec", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["check-spec", "--feature", "2"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("Spec sin aprobar"));
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"))
+        .stdout(predicate::str::contains("[spec] #2 draft (fresco)"));
+
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let wt_2 = PathBuf::from(backlog["features"][1]["worktree"].as_str().unwrap());
+    let spec_2 = wt_2.join("docs/spec-feature-2-segunda.md");
+    // Cambiar solo el spec de #2 no puede volver stale ni ausente a #1.
+    std::fs::write(
+        &spec_2,
+        format!(
+            "{}\nedicion posterior\n",
+            std::fs::read_to_string(&spec_2).unwrap()
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"))
+        .stdout(predicate::str::contains("[spec] #2 draft (STALE)"));
+    cmd(&bin)
+        .args(["check-spec", "--feature", "2"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("SPEC ACTUALIZADO POR OTRO LLM"));
+
+    // La ausencia verdadera tambien coincide con el gate y no cruza a #1.
+    std::fs::remove_file(&spec_2).unwrap();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"))
+        .stdout(predicate::str::contains("[spec] #2 ausente (fresco)"));
+    cmd(&bin)
+        .args(["check-spec", "--feature", "2"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("Spec sin aprobar"));
+}
+
+#[test]
+fn status_should_keep_the_classic_docs_fallback_without_a_worktree() {
+    // Feature #55 / AC-4: en el modo sin Git la feature no registra worktree;
+    // el resumen conserva el docs efectivo y no intenta abrir rutas inexistentes.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Clasica"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 draft (fresco)"));
+    assert!(dir.path().join("docs/spec-feature-1-clasica.md").is_file());
+}
+
+#[test]
+fn verify_should_run_and_report_from_the_registered_feature_worktree() {
+    // Feature #57 / AC-1..AC-3 + AC-5 + AC-6: se invoca desde el principal,
+    // pero los comandos solo pueden pasar con el código de la feature.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Verificable"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let worktree = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
+    std::fs::write(dir.path().join("origen.txt"), "principal\n").unwrap();
+    std::fs::write(worktree.join("origen.txt"), "feature\n").unwrap();
+    std::fs::write(worktree.join("solo-worktree.txt"), "presente\n").unwrap();
+
+    let spec = worktree.join("docs/spec-feature-1-verificable.md");
+    escribir_acs(
+        &spec,
+        "- AC-1: usa el contenido de la feature.\n  Comando: `test \"$(cat origen.txt)\" = feature`\n\
+         - AC-2: encuentra el archivo de la feature.\n  Comando: `test -f solo-worktree.txt`\n\
+         - AC-3: conserva un rojo.\n  Comando: `false`\n\
+         - AC-4: conserva timeout.\n  Comando: `sleep 30`\n\
+         - AC-5: conserva corrida vacia.\n  Comando: `printf 'running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\\n'`",
+    );
+    let feature_list = dir.path().join("hp/feature_list.json");
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&feature_list).unwrap()).unwrap();
+    data["rules"] = serde_json::json!({"verify_timeout_segundos": 1});
+    std::fs::write(&feature_list, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+
+    cmd(&bin)
+        .current_dir(dir.path())
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(format!(
+            "Raiz de ejecucion: {}",
+            worktree.display()
+        )));
+
+    let reporte = std::fs::read_to_string(worktree.join("docs/verify-1.md")).unwrap();
+    assert!(reporte.contains(&format!("Raiz de ejecucion: {}", worktree.display())));
+    assert!(reporte.contains("| AC-1 | verde |"), "{reporte}");
+    assert!(reporte.contains("| AC-2 | verde |"), "{reporte}");
+    assert!(reporte.contains("| AC-3 | rojo |"), "{reporte}");
+    assert!(reporte.contains("| AC-4 | timeout |"), "{reporte}");
+    assert!(reporte.contains("| AC-5 | vacio |"), "{reporte}");
+    assert!(
+        !dir.path().join("docs/verify-1.md").exists(),
+        "el principal no recibe evidencia de la feature"
+    );
+}
+
+#[test]
+fn verify_should_keep_the_effective_root_when_the_feature_has_no_worktree() {
+    // Feature #57 / AC-4: sin Git no se registra worktree; el fallback se
+    // diagnostica y ejecuta donde viven el spec y el reporte clásicos.
+    let (dir, bin, spec) = feature_con_spec(
+        "- AC-1: deja evidencia local.\n  Comando: `touch evidencia-fallback.txt`",
+    );
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Feature #1 sin worktree valido: se verifica desde la raiz documental efectiva.",
+        ));
+    assert!(dir.path().join("evidencia-fallback.txt").is_file());
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    assert!(reporte.contains(&format!("Raiz de ejecucion: {}", dir.path().display())));
+    assert!(spec.is_file(), "el spec clásico no se mueve");
+}
+
+#[test]
 fn close_done_should_refuse_without_to_and_then_integrate() {
     // AC-14, AC-15, AC-16, AC-19: sin --to se niega; con --to mergea, el commit
     // no lleva trailers de IA y el worktree se borra conservando la rama.
     let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
 
     let backlog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
@@ -4258,7 +5470,11 @@ fn close_done_should_refuse_without_to_and_then_integrate() {
     let wt = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
     // Trabajo real dentro del worktree.
     std::fs::write(wt.join("cobranza.txt"), "hecho\n").unwrap();
-    Command::new("git").args(["add", "-A"]).current_dir(&wt).output().unwrap();
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&wt)
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["commit", "-q", "-m", "feat: cobranza"])
         .current_dir(&wt)
@@ -4267,7 +5483,15 @@ fn close_done_should_refuse_without_to_and_then_integrate() {
 
     // Sin --to: exit 2 y le pide al agente que pregunte al USUARIO.
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "done", "--note", "listo"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--note",
+            "listo",
+        ])
         .assert()
         .code(2)
         .stderr(predicate::str::contains("PREGUNTALE AL USUARIO"))
@@ -4276,43 +5500,86 @@ fn close_done_should_refuse_without_to_and_then_integrate() {
     // Con --to: integra.
     cmd(&bin)
         .args([
-            "close", "--feature", "1", "--status", "done", "--note", "listo", "--to", "main",
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--note",
+            "listo",
+            "--to",
+            "main",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("merge hecho"));
 
-    assert!(dir.path().join("cobranza.txt").is_file(), "el trabajo llego a main");
+    assert!(
+        dir.path().join("cobranza.txt").is_file(),
+        "el trabajo llego a main"
+    );
     let log = git_en(dir.path(), &["log", "-1", "--format=%B"]);
-    assert!(!log.to_lowercase().contains("co-authored-by"), "sin trailers: {log}");
+    assert!(
+        !log.to_lowercase().contains("co-authored-by"),
+        "sin trailers: {log}"
+    );
     // AC-19: worktree borrado, rama conservada.
     assert!(!wt.exists(), "el worktree se borro");
-    let ramas = git_en(dir.path(), &["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
-    assert!(ramas.contains("feature/1-cobranza"), "la rama se conserva: {ramas}");
+    let ramas = git_en(
+        dir.path(),
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+    );
+    assert!(
+        ramas.contains("feature/1-cobranza"),
+        "la rama se conserva: {ramas}"
+    );
 }
 
 #[test]
 fn close_should_refuse_an_unknown_target_branch() {
     // AC-20: falla antes de tocar nada y lista las validas.
     let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     cmd(&bin)
         .args([
-            "close", "--feature", "1", "--status", "done", "--note", "x", "--to", "no-existe",
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--note",
+            "x",
+            "--to",
+            "no-existe",
         ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("no existe"));
-    assert_eq!(git_en(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    assert_eq!(
+        git_en(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "main"
+    );
 }
 
 #[test]
 fn close_blocked_should_keep_branch_and_worktree() {
     // AC-21: solo `done` integra; lo demas conserva todo para retomar.
     let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let backlog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
     )
@@ -4320,7 +5587,15 @@ fn close_blocked_should_keep_branch_and_worktree() {
     let wt = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
 
     cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "blocked", "--note", "trabada"])
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "blocked",
+            "--note",
+            "trabada",
+        ])
         .assert()
         .success()
         // Feature #50: con la rama Y el worktree presentes, el mensaje lo dice
@@ -4338,8 +5613,14 @@ fn revision_should_gather_the_package_and_report_its_size() {
     // AC-11 + AC-12b + AC-13: junta lo que hay, nombra lo que falta y dice
     // cuanto cuesta leerlo.
     let (dir, bin) = sandbox_with_binary();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let spec = dir.path().join("docs/spec-feature-1-cobranza.md");
     let text = std::fs::read_to_string(&spec).unwrap();
     std::fs::write(
@@ -4351,7 +5632,10 @@ fn revision_should_gather_the_package_and_report_its_size() {
     )
     .unwrap();
 
-    let out = cmd(&bin).args(["revision", "--feature", "1"]).output().unwrap();
+    let out = cmd(&bin)
+        .args(["revision", "--feature", "1"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let texto = String::from_utf8_lossy(&out.stdout);
     assert!(texto.contains("Paquete de revision - Feature #1"));
@@ -4359,7 +5643,10 @@ fn revision_should_gather_the_package_and_report_its_size() {
     assert!(texto.contains("sin verificar"), "sin verify, el AC lo dice");
     // AC-13: lo que falta se nombra en vez de fallar.
     assert!(texto.contains("## Falta"));
-    assert!(texto.contains("la evidencia"), "impl-1.md no existe todavia");
+    assert!(
+        texto.contains("la evidencia"),
+        "impl-1.md no existe todavia"
+    );
     // AC-12b: el costo se ve.
     assert!(texto.contains("[paquete]") && texto.contains("tokens estimados"));
 }
@@ -4368,8 +5655,14 @@ fn revision_should_gather_the_package_and_report_its_size() {
 fn revision_should_cross_the_verify_state_and_expose_json() {
     // AC-11 (estado por AC) + AC-14 (JSON para agentes).
     let (dir, bin) = sandbox_with_binary();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let spec = dir.path().join("docs/spec-feature-1-cobranza.md");
     let text = std::fs::read_to_string(&spec).unwrap();
     std::fs::write(
@@ -4399,7 +5692,10 @@ fn revision_should_cross_the_verify_state_and_expose_json() {
     assert_eq!(j["feature"], "1");
     assert_eq!(j["acs"][0]["estado"], "verde");
     assert_eq!(j["acs"][1]["estado"], "rojo", "el rojo tambien viaja");
-    assert!(j["evidencia"][0].as_str().unwrap().contains("test de conciliacion"));
+    assert!(j["evidencia"][0]
+        .as_str()
+        .unwrap()
+        .contains("test de conciliacion"));
     assert!(j["tamano"]["tokens_estimados"].as_u64().unwrap() > 0);
 }
 
@@ -4407,8 +5703,14 @@ fn revision_should_cross_the_verify_state_and_expose_json() {
 fn revision_should_respect_the_budget_and_say_what_it_cut() {
     // AC-12: el recorte se declara, nunca es silencioso.
     let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Cobranza"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Cobranza"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
     let backlog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
     )
@@ -4426,7 +5728,10 @@ fn revision_should_respect_the_budget_and_say_what_it_cut() {
         .unwrap();
     let texto = String::from_utf8_lossy(&out.stdout);
     assert!(texto.contains("[recortado]"), "declara el recorte: {texto}");
-    assert!(texto.contains("se muestran 20 de"), "dice cuanto quedo afuera");
+    assert!(
+        texto.contains("se muestran 20 de"),
+        "dice cuanto quedo afuera"
+    );
     // Y el trabajo sin commitear del worktree SI aparece: el cambio sobre el
     // archivo versionado y el archivo nuevo que todavia no paso por `git add`.
     assert!(texto.contains("README.md"), "lo modificado se ve: {texto}");
@@ -4445,9 +5750,15 @@ fn contexto_should_deliver_the_package_and_say_what_is_missing() {
     // AC-1 + AC-10 + AC-15: entrega el paquete en orden, dice lo que falta y
     // cuanto cuesta leerlo. Sin mapa, sin grafo y sin hub: sale igual.
     let (dir, bin) = sandbox_with_binary();
-    cmd(&bin).args(["add", "--name", "Motor de reajuste"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Motor de reajuste"])
+        .assert()
+        .success();
 
-    let out = cmd(&bin).args(["contexto", "--feature", "1"]).output().unwrap();
+    let out = cmd(&bin)
+        .args(["contexto", "--feature", "1"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let texto = String::from_utf8_lossy(&out.stdout);
     assert!(texto.contains("Paquete de contexto - Feature #1"));
@@ -4460,9 +5771,15 @@ fn contexto_should_deliver_the_package_and_say_what_is_missing() {
         "## Lecciones que aplican",
         "## Features que tocaron lo mismo",
     ] {
-        assert!(texto.contains(seccion), "falta la seccion {seccion}: {texto}");
+        assert!(
+            texto.contains(seccion),
+            "falta la seccion {seccion}: {texto}"
+        );
     }
-    assert!(texto.contains("## Falta"), "sin material, los huecos se nombran");
+    assert!(
+        texto.contains("## Falta"),
+        "sin material, los huecos se nombran"
+    );
     assert!(texto.contains("[paquete]") && texto.contains("tokens estimados"));
     // No escribe NADA: es de solo lectura.
     assert!(!dir.path().join("docs/contexto-1.md").exists());
@@ -4504,7 +5821,10 @@ fn contexto_should_warn_when_the_map_does_not_cover_the_topic() {
         .unwrap();
     let texto = String::from_utf8_lossy(&out.stdout);
     assert!(!texto.contains("EL MAPA NO CUBRE"));
-    assert!(texto.contains("el motor corre mensual"), "entrega la seccion: {texto}");
+    assert!(
+        texto.contains("el motor corre mensual"),
+        "entrega la seccion: {texto}"
+    );
 }
 
 #[test]
@@ -4514,7 +5834,10 @@ fn contexto_should_refuse_without_feature_or_topic() {
     let out = cmd(&bin).args(["contexto"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("--feature"), "el remedio nombra --feature: {err}");
+    assert!(
+        err.contains("--feature"),
+        "el remedio nombra --feature: {err}"
+    );
     assert!(err.contains("--tema"), "y --tema: {err}");
 }
 
@@ -4529,12 +5852,27 @@ fn start_should_always_print_the_context_summary() {
         "# Arquitectura\n\n## Autenticacion\n\njwt y sesiones\n",
     )
     .unwrap();
-    cmd(&bin).args(["add", "--name", "Motor de reajuste"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Motor de reajuste"])
+        .assert()
+        .success();
 
-    let out = cmd(&bin).args(["start", "--feature", "1"]).output().unwrap();
+    let out = cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let texto = String::from_utf8_lossy(&out.stdout);
-    assert!(texto.contains("== Contexto =="), "start resume el contexto: {texto}");
-    assert!(texto.contains("NO cubre"), "y avisa del hueco en el acto: {texto}");
-    assert!(texto.contains("harness contexto"), "con como pedir el cuerpo");
+    assert!(
+        texto.contains("== Contexto =="),
+        "start resume el contexto: {texto}"
+    );
+    assert!(
+        texto.contains("NO cubre"),
+        "y avisa del hueco en el acto: {texto}"
+    );
+    assert!(
+        texto.contains("harness contexto"),
+        "con como pedir el cuerpo"
+    );
 }

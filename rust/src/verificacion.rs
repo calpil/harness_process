@@ -428,7 +428,20 @@ pub fn reporte_rel(fid: &str) -> String {
 }
 
 /// Cuerpo del reporte. Se separa del comando para poder testear el formato.
+#[cfg(test)]
 pub fn render_reporte(fid: &str, stamp: &str, resultados: &[Resultado]) -> String {
+    render_reporte_desde(fid, stamp, None, resultados)
+}
+
+/// Variante del reporte para una corrida real: declara el árbol que se midió.
+/// Los tests puros conservan `render_reporte` para no inventar una ruta de
+/// ejecución que no tuvieron.
+pub fn render_reporte_desde(
+    fid: &str,
+    stamp: &str,
+    raiz: Option<&Path>,
+    resultados: &[Resultado],
+) -> String {
     let cuenta = |e: Estado| resultados.iter().filter(|r| r.estado == e).count();
     let vacios = cuenta(Estado::Vacio);
     // Los vacios bloquean, pero contarlos dentro de "en rojo" volveria a
@@ -441,9 +454,13 @@ pub fn render_reporte(fid: &str, stamp: &str, resultados: &[Resultado]) -> Strin
     } else {
         String::new()
     };
+    let raiz = raiz
+        .map(|r| format!("Raiz de ejecucion: {}\n", r.display()))
+        .unwrap_or_default();
     let mut out = format!(
         "# Verificacion de AC - Feature #{fid}\n\n\
          Corrida: {stamp}\n\
+         {raiz}\
          Resultado: {verdes} verde(s), {rojos} en rojo, {manuales} manual(es){sin_casos}.\n\n\
          | AC | Estado | Comando | Exit | ms |\n| --- | --- | --- | --- | --- |\n"
     );

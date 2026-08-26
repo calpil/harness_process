@@ -69,8 +69,12 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
         let Some(f) = features[idx].as_object() else {
             continue;
         };
+        // El estado global vive en el principal, pero el spec y el plan son
+        // documentos de la feature. `check-spec` usa esta misma resolución:
+        // hacerlo dentro del loop impide que una feature vea el docs/ de otra.
+        let paths_feature = paths.para_feature(f);
         if get_plan_sig(f).is_some() {
-            if is_plan_stale(paths, f) {
+            if is_plan_stale(&paths_feature, f) {
                 println!(
                     "  [!] #{} PLAN STALE - actualizado por otro agente/LLM. Ejecuta: harness.py check-plan",
                     py_str(f.get("id"))
@@ -80,11 +84,11 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
             }
         }
         // Estado del spec SDD (draft/approved/ausente) + frescura multi-LLM.
-        let spec_fresh = if is_spec_stale(paths, f) { "STALE" } else { "fresco" };
+        let spec_fresh = if is_spec_stale(&paths_feature, f) { "STALE" } else { "fresco" };
         println!(
             "  [spec] #{} {} ({spec_fresh})",
             py_str(f.get("id")),
-            spec_state(paths, f).label()
+            spec_state(&paths_feature, f).label()
         );
     }
     Ok(())
