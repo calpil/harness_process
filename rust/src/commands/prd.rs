@@ -42,14 +42,20 @@ pub fn add(paths: &HarnessPaths, name: &str, parent: Option<&str>) -> anyhow::Re
     // las reporte como violacion.
     crate::commands::rutas::registrar_escritura_del_arnes(paths, &rel_child);
     crate::commands::rutas::registrar_escritura_del_arnes(paths, &rel_parent);
-    log(paths, &format!("prd add {slug} (padre: {})", parent_prd.reference()))?;
+    log(
+        paths,
+        &format!("prd add {slug} (padre: {})", parent_prd.reference()),
+    )?;
     // Feature #16 (AC-3): el PRD nuevo nace como epic sin esperar a que se le
     // cargue la primera feature, y el worker detached lo empuja solo.
     crate::atlassian::emit::on_prd_add(paths, &slug);
     crate::atlassian::push::push_bg(paths);
     println!("PRD anidado creado: {rel_child}");
     if linked {
-        println!("Enlazado en {rel_parent} (seccion \"{}\")", prd::CHILDREN_SECTION.trim_start_matches("## "));
+        println!(
+            "Enlazado en {rel_parent} (seccion \"{}\")",
+            prd::CHILDREN_SECTION.trim_start_matches("## ")
+        );
     } else {
         println!("Ya estaba enlazado en {rel_parent}.");
     }
@@ -64,7 +70,10 @@ pub fn add(paths: &HarnessPaths, name: &str, parent: Option<&str>) -> anyhow::Re
 pub fn tree(paths: &HarnessPaths, reference: Option<&str>) -> anyhow::Result<()> {
     let all = prd::scan(paths);
     if all.is_empty() {
-        println!("No hay PRDs todavia en {}.", prd::rel_path("").trim_end_matches("PRD-master.md"));
+        println!(
+            "No hay PRDs todavia en {}.",
+            prd::rel_path("").trim_end_matches("PRD-master.md")
+        );
         println!(
             "  Empeza por el maestro (docs/prd/PRD-master.md) y despues partilo: sh harness_cli prd add --name <parte>"
         );
@@ -75,7 +84,9 @@ pub fn tree(paths: &HarnessPaths, reference: Option<&str>) -> anyhow::Result<()>
     print!("{}", prd::render_tree(paths, &data, &root));
     println!();
     println!("  hitos: filas de la tabla \"10. Hitos -> features\" de cada PRD.");
-    println!("  features: las que declaran ese PRD con --prd (las que no lo declaran cuentan para el maestro).");
+    println!(
+        "  features: las que declaran ese PRD con --prd (las que no lo declaran cuentan para el maestro)."
+    );
     Ok(())
 }
 
@@ -106,10 +117,21 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     let destino = documentos::propuesta_path(&paths, fid);
-    let previo = std::fs::read_to_string(&destino).unwrap_or_default();
+    let mut previo = std::fs::read_to_string(&destino).unwrap_or_default();
     let ya = documentos::parsear(&previo);
+    if documentos::sellada(&previo) && !documentos::aplicada(&alcance, &ya, &previo) {
+        previo = documentos::invalidar_sello(&previo);
+        println!("[i] Sello Aplicado invalidado: el texto aplicado ya no esta en los documentos.");
+    }
 
-    let nombre = feature.get("name").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let nombre = feature
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    // El candidato se calcula una vez por propuesta: todos los documentos
+    // reciben la misma evidencia del cambio real, pero el usuario decide para
+    // cada uno si y como ese cambio amerita documentarse.
+    let candidato = candidato_del_diff(&paths, &feature);
     let mut texto = if previo.is_empty() {
         format!(
             "# Documentos al dia - Feature #{fid}: {nombre}\n\n\
@@ -129,7 +151,13 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         if ya.iter().any(|b| b.rel == doc.rel) {
             continue;
         }
-        texto.push_str(&bloque_sembrado(doc, nombre));
+        texto.push_str(&bloque_sembrado(
+            doc,
+            &paths,
+            &feature,
+            nombre,
+            candidato.as_deref(),
+        ));
         agregados += 1;
     }
 
@@ -144,7 +172,10 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         .filter(|b| !b.veredicto.resuelto())
         .count();
     if agregados > 0 {
-        println!("Propuesta {rel}: {agregados} bloque(s) sembrado(s) de {} documento(s).", alcance.len());
+        println!(
+            "Propuesta {rel}: {agregados} bloque(s) sembrado(s) de {} documento(s).",
+            alcance.len()
+        );
     } else {
         println!("Propuesta {rel}: ya tenia los {} bloques.", alcance.len());
     }
@@ -153,42 +184,250 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     println!("Quedan {pendientes} sin contestar. Abrí {rel} y resolvelos.");
-    Err(Exit { code: 2, message: None }.into())
+    Err(Exit {
+        code: 2,
+        message: None,
+    }
+    .into())
 }
 
 /// El bloque que el binario siembra, con las senales ya calculadas.
-fn bloque_sembrado(doc: &Documento, nombre_feature: &str) -> String {
-    let (presente, ausente) = senales(doc, nombre_feature);
+fn bloque_sembrado(
+    doc: &Documento,
+    paths: &HarnessPaths,
+    feature: &serde_json::Value,
+    nombre_feature: &str,
+    candidato: Option<&str>,
+) -> String {
+    let (presente, ausente) = senales(doc, paths, feature, nombre_feature);
+    let candidato = candidato
+        .unwrap_or("(sin candidato: el diff de la feature no contiene cambios atribuibles)");
     format!(
         "## Documento: {}\n\n\
          Que cuenta: {}\n\
          Presente en: {}\n\
          Ausente en: {}\n\
+         Candidato despues:\n{}\n\n\
          Veredicto: PENDIENTE\n\n",
-        doc.rel, doc.que_cuenta, presente, ausente
+        doc.rel, doc.que_cuenta, presente, ausente, candidato
     )
 }
 
-/// Busca las senales de la feature en el documento. Es una ayuda, no un
-/// veredicto: dice si el nombre de la feature aparece, no si el documento esta
-/// bien.
-fn senales(doc: &Documento, nombre_feature: &str) -> (String, String) {
+/// Resumen determinista y editable del cambio de la feature.
+///
+/// No lee el cuerpo del diff: un archivo de propuesta no debe convertirse en
+/// un segundo paquete de revisión ni exponer salida arbitraria. Las rutas ya
+/// bastan para que la persona sepa qué cambió y decida si el documento necesita
+/// una actualización. Incluimos tanto commits de la rama como trabajo todavía
+/// sin commitear, porque `prd propose` suele correrse antes del cierre.
+fn candidato_del_diff(paths: &HarnessPaths, feature: &serde_json::Value) -> Option<String> {
+    candidato_desde_rutas(&rutas_del_diff(paths, feature))
+}
+
+/// Rutas de la rama más sus cambios sin commitear. Es la fuente compartida de
+/// candidatos y señales: ambas ayudas tienen que hablar del mismo cambio.
+fn rutas_del_diff(paths: &HarnessPaths, feature: &serde_json::Value) -> Vec<String> {
+    let dir = feature
+        .get("worktree")
+        .and_then(serde_json::Value::as_str)
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| paths.worktree.clone())
+        .unwrap_or_else(|| paths.repo_root.clone());
+    let mut rutas: Vec<String> = Vec::new();
+    if let Some(base) = crate::git::rama_base(&dir, None) {
+        rutas.extend(git_lineas(
+            &dir,
+            &["diff", "--name-only", &format!("{base}...HEAD")],
+        ));
+    }
+    rutas.extend(git_lineas(&dir, &["diff", "--name-only"]));
+    rutas.extend(git_lineas(
+        &dir,
+        &["ls-files", "--others", "--exclude-standard"],
+    ));
+    rutas.sort();
+    rutas.dedup();
+    rutas.retain(|ruta| !es_artefacto_del_arnes(ruta));
+    rutas
+}
+
+fn git_lineas(dir: &std::path::Path, args: &[&str]) -> Vec<String> {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|ruta| !ruta.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn es_artefacto_del_arnes(ruta: &str) -> bool {
+    matches!(
+        ruta,
+        ruta if ruta.starts_with("docs/plan-feature-")
+            || ruta.starts_with("docs/spec-feature-")
+            || ruta.starts_with("docs/impl-")
+            || ruta.starts_with("docs/review-")
+            || ruta.starts_with("docs/verify-")
+            || ruta.starts_with("docs/prd-diff-")
+            || ruta.starts_with("progress/")
+    )
+}
+
+fn candidato_desde_rutas(rutas: &[String]) -> Option<String> {
+    if rutas.is_empty() {
+        return None;
+    }
+    const MAX_RUTAS: usize = 4;
+    let mut out = String::from("- Cambio de la feature en: ");
+    out.push_str(
+        &rutas
+            .iter()
+            .take(MAX_RUTAS)
+            .map(|ruta| format!("`{ruta}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    if rutas.len() > MAX_RUTAS {
+        out.push_str(&format!(" y {} ruta(s) más", rutas.len() - MAX_RUTAS));
+    }
+    out.push_str(". Revisa si este documento debe reflejarlo.");
+    Some(out)
+}
+
+/// Busca evidencia textual del nombre, términos específicos del spec y módulos
+/// del diff. Sigue siendo una ayuda: encontrar una palabra no equivale a que el
+/// documento esté correcto ni permite resolver el veredicto.
+fn senales(
+    doc: &Documento,
+    paths: &HarnessPaths,
+    feature: &serde_json::Value,
+    nombre_feature: &str,
+) -> (String, String) {
     let Ok(texto) = std::fs::read_to_string(&doc.path) else {
         return ("(no se pudo leer)".to_string(), String::new());
     };
-    let aguja = nombre_feature.trim();
-    if aguja.is_empty() {
-        return ("(sin nombre de feature)".to_string(), String::new());
+    let mut terminos: Vec<(String, String)> = Vec::new();
+    let nombre = nombre_feature.trim().to_ascii_lowercase();
+    if !nombre.is_empty() {
+        terminos.push(("nombre".to_string(), nombre));
     }
-    let linea = texto
-        .lines()
-        .enumerate()
-        .find(|(_, l)| l.contains(aguja))
-        .map(|(i, _)| i + 1);
-    match linea {
-        Some(n) => (format!("{}:{n}", doc.rel), "-".to_string()),
-        None => ("-".to_string(), format!("{} (no menciona '{aguja}')", doc.rel)),
+    terminos.extend(
+        terminos_del_spec(paths, feature)
+            .into_iter()
+            .map(|termino| ("spec".to_string(), termino)),
+    );
+    terminos.extend(
+        modulos_de_rutas(&rutas_del_diff(paths, feature))
+            .into_iter()
+            .map(|termino| ("módulo".to_string(), termino)),
+    );
+    terminos.sort();
+    terminos.dedup();
+
+    let mut hallazgos = Vec::new();
+    for (linea, texto_linea) in texto.lines().enumerate() {
+        let minuscula = texto_linea.to_ascii_lowercase();
+        for (origen, termino) in &terminos {
+            if minuscula.contains(termino) {
+                hallazgos.push(format!("{}:{} ({origen} `{termino}`)", doc.rel, linea + 1));
+            }
+        }
     }
+    hallazgos.sort();
+    hallazgos.dedup();
+    const MAX_SENALES: usize = 3;
+    if hallazgos.is_empty() {
+        (
+            "-".to_string(),
+            format!("{} (sin señales de nombre, spec o módulo)", doc.rel),
+        )
+    } else {
+        let mut presente = hallazgos
+            .iter()
+            .take(MAX_SENALES)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if hallazgos.len() > MAX_SENALES {
+            presente.push_str(&format!(" y {} más", hallazgos.len() - MAX_SENALES));
+        }
+        (presente, "-".to_string())
+    }
+}
+
+fn terminos_del_spec(paths: &HarnessPaths, feature: &serde_json::Value) -> Vec<String> {
+    let Some(feature) = feature.as_object() else {
+        return Vec::new();
+    };
+    let Ok(texto) = std::fs::read_to_string(crate::spec::spec_path(paths, feature)) else {
+        return Vec::new();
+    };
+    palabras_significativas(&texto)
+}
+
+fn modulos_de_rutas(rutas: &[String]) -> Vec<String> {
+    rutas
+        .iter()
+        .flat_map(|ruta| palabras_significativas(ruta))
+        .collect()
+}
+
+fn palabras_significativas(texto: &str) -> Vec<String> {
+    const RUIDO: &[&str] = &[
+        "acuerdo",
+        "agente",
+        "alcance",
+        "arquitectura",
+        "archivo",
+        "cambio",
+        "cambios",
+        "candado",
+        "codigo",
+        "comando",
+        "como",
+        "constitucion",
+        "criterios",
+        "despues",
+        "documento",
+        "documentos",
+        "donde",
+        "entonces",
+        "escribe",
+        "estado",
+        "feature",
+        "harness",
+        "historia",
+        "implementacion",
+        "metodo",
+        "nunca",
+        "objetivo",
+        "observabilidad",
+        "plan",
+        "propuesta",
+        "pruebas",
+        "resultado",
+        "seguridad",
+        "siempre",
+        "usuario",
+        "veredicto",
+    ];
+    let mut palabras = texto
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|palabra| palabra.to_ascii_lowercase())
+        .filter(|palabra| palabra.len() >= 6 && !RUIDO.contains(&palabra.as_str()))
+        .collect::<Vec<_>>();
+    palabras.sort();
+    palabras.dedup();
+    palabras
 }
 
 /// `prd apply --feature <id> [--yes]`: valida, muestra y —solo con el SI del
@@ -202,24 +441,37 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     let destino = documentos::propuesta_path(&paths, fid);
     let rel = documentos::propuesta_rel(fid);
 
-    let Ok(texto) = std::fs::read_to_string(&destino) else {
+    let Ok(mut texto) = std::fs::read_to_string(&destino) else {
         println!("[GATE] No existe la propuesta: {rel}");
         println!("    Sembrala con: sh harness_cli prd propose --feature {fid}");
-        return Err(Exit { code: 2, message: None }.into());
+        return Err(Exit {
+            code: 2,
+            message: None,
+        }
+        .into());
     };
 
     let bloques = documentos::parsear(&texto);
+    if documentos::sellada(&texto) && !documentos::aplicada(&alcance, &bloques, &texto) {
+        texto = documentos::invalidar_sello(&texto);
+        std::fs::write(&destino, &texto)?;
+        println!("[i] Sello Aplicado invalidado: el texto aplicado ya no esta en los documentos.");
+    }
     let plan = documentos::planificar(&alcance, &bloques, raiz_documental(&paths));
     if !plan.aplicable() {
         println!("[GATE] La propuesta {rel} todavia no se puede aplicar:");
         for p in &plan.problemas {
             println!("    {}", p.mensaje());
         }
-        return Err(Exit { code: 2, message: None }.into());
+        return Err(Exit {
+            code: 2,
+            message: None,
+        }
+        .into());
     }
 
     // Ya aplicada e idempotente: nada que hacer, y se dice.
-    if plan.escrituras.is_empty() && documentos::aplicada(&texto) {
+    if plan.escrituras.is_empty() && documentos::aplicada(&alcance, &bloques, &texto) {
         println!("La propuesta {rel} ya estaba aplicada. Nada que escribir.");
         return Ok(());
     }
@@ -233,7 +485,11 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
         println!("      1) Mostrale lo de arriba en el chat y abrile {rel} en su editor.");
         println!("      2) Preguntale si lo aprueba.");
         println!("      3) Solo con su SI: sh harness_cli prd apply --feature {fid} --yes");
-        return Err(Exit { code: 2, message: None }.into());
+        return Err(Exit {
+            code: 2,
+            message: None,
+        }
+        .into());
     }
 
     for e in &plan.escrituras {
@@ -250,7 +506,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
         "{} {stamp} por USUARIO (confirmacion explicita)",
         documentos::SELLO
     );
-    let sellado = if documentos::aplicada(&texto) {
+    let sellado = if documentos::sellada(&texto) {
         texto
     } else {
         format!("{sello}\n\n{texto}")
@@ -265,7 +521,10 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
         ),
     )?;
     println!("\n{sello}");
-    println!("Propuesta aplicada: {} documento(s) escrito(s).", plan.escrituras.len());
+    println!(
+        "Propuesta aplicada: {} documento(s) escrito(s).",
+        plan.escrituras.len()
+    );
     Ok(())
 }
 
@@ -313,18 +572,30 @@ fn mostrar(plan: &Plan, bloques: &[Bloque], rel: &str) {
                 let primera = despues.lines().next().unwrap_or("").trim();
                 format!("escribe: {}", recortar(primera, 70))
             }
-            Veredicto::YaEsta { archivo, desde, hasta } => {
+            Veredicto::YaEsta {
+                archivo,
+                desde,
+                hasta,
+            } => {
                 format!("ya documentado en {archivo}:{desde}-{hasta}")
             }
             Veredicto::NoAplica { razon } => format!("no aplica: {}", recortar(razon, 70)),
             Veredicto::Pendiente => "SIN CONTESTAR".to_string(),
         };
-        println!("  [{:<9}] {:<42} {}", b.veredicto.etiqueta(), b.rel, detalle);
+        println!(
+            "  [{:<9}] {:<42} {}",
+            b.veredicto.etiqueta(),
+            b.rel,
+            detalle
+        );
     }
     if plan.escrituras.is_empty() {
         println!("\nNingun documento cambia.");
     } else {
-        println!("\nSe va a escribir en {} documento(s):", plan.escrituras.len());
+        println!(
+            "\nSe va a escribir en {} documento(s):",
+            plan.escrituras.len()
+        );
         for e in &plan.escrituras {
             println!("  {}", e.rel);
         }
@@ -337,4 +608,36 @@ fn recortar(s: &str, n: usize) -> String {
     }
     let corto: String = s.chars().take(n.saturating_sub(3)).collect();
     format!("{corto}...")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn candidato_de_rutas_es_acotado_y_muestra_el_excedente() {
+        let rutas = (0..5)
+            .map(|i| format!("rust/src/modulo-{i}.rs"))
+            .collect::<Vec<_>>();
+        let candidato = candidato_desde_rutas(&rutas);
+        assert!(candidato.is_some(), "hay candidato");
+        let candidato = candidato.unwrap_or_default();
+        assert!(candidato.contains("`rust/src/modulo-0.rs`"), "{candidato}");
+        assert!(candidato.contains("1 ruta(s) más"), "{candidato}");
+        assert!(!candidato.contains("modulo-4.rs`"), "{candidato}");
+    }
+
+    #[test]
+    fn artefactos_del_arnes_no_entran_en_el_candidato() {
+        for ruta in [
+            "docs/plan-feature-38-x.md",
+            "docs/spec-feature-38-x.md",
+            "docs/prd-diff-38.md",
+            "progress/current-38.md",
+        ] {
+            assert!(es_artefacto_del_arnes(ruta), "{ruta}");
+        }
+        assert!(!es_artefacto_del_arnes("rust/src/commands/prd.rs"));
+        assert!(candidato_desde_rutas(&[]).is_none());
+    }
 }

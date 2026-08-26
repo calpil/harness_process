@@ -90,11 +90,9 @@ pub fn alcance(paths: &HarnessPaths, feature: &Value) -> Vec<Documento> {
     // que salen el PRD y el SDD — y no contra la raiz. Con worktree (feature
     // #47) eso hace que el cambio viaje con el merge de su rama; sin worktree,
     // `plans` ES el docs/ de la raiz y el comportamiento no cambia.
-    let arch = paths.plans.join(
-        ARCHITECTURE
-            .strip_prefix("docs/")
-            .unwrap_or(ARCHITECTURE),
-    );
+    let arch = paths
+        .plans
+        .join(ARCHITECTURE.strip_prefix("docs/").unwrap_or(ARCHITECTURE));
     if arch.is_file() {
         out.push(Documento {
             rel: ARCHITECTURE.to_string(),
@@ -113,7 +111,11 @@ pub enum Veredicto {
     /// Hay que escribir: reemplazar `antes` por `despues`, literal.
     Cambio { antes: String, despues: String },
     /// Ya esta documentado, y aca esta la cita que lo demuestra.
-    YaEsta { archivo: String, desde: usize, hasta: usize },
+    YaEsta {
+        archivo: String,
+        desde: usize,
+        hasta: usize,
+    },
     /// No aplica, y por que.
     NoAplica { razon: String },
 }
@@ -172,7 +174,10 @@ pub fn parsear(texto: &str) -> Vec<Bloque> {
             .map(|p| i + 1 + p)
             .unwrap_or(lineas.len());
         let cuerpo = &lineas[i + 1..fin];
-        out.push(Bloque { rel, veredicto: leer_veredicto(cuerpo) });
+        out.push(Bloque {
+            rel,
+            veredicto: leer_veredicto(cuerpo),
+        });
         i = fin;
     }
     out
@@ -255,11 +260,21 @@ fn leer_veredicto(cuerpo: &[&str]) -> Veredicto {
 pub enum Problema {
     SinResolver(String),
     /// El agente agrego, quito o renombro bloques.
-    ListaAlterada { esperados: Vec<String>, encontrados: Vec<String> },
+    ListaAlterada {
+        esperados: Vec<String>,
+        encontrados: Vec<String>,
+    },
     /// La cita no dice lo que el bloque afirma.
-    CitaFalsa { rel: String, cita: String, motivo: String },
+    CitaFalsa {
+        rel: String,
+        cita: String,
+        motivo: String,
+    },
     /// El `Antes:` no aparece en el documento (o aparece varias veces).
-    AnclaNoEncontrada { rel: String, veces: usize },
+    AnclaNoEncontrada {
+        rel: String,
+        veces: usize,
+    },
 }
 
 impl Problema {
@@ -268,7 +283,10 @@ impl Problema {
             Problema::SinResolver(rel) => {
                 format!("{rel}: sin resolver (Veredicto: PENDIENTE)")
             }
-            Problema::ListaAlterada { esperados, encontrados } => format!(
+            Problema::ListaAlterada {
+                esperados,
+                encontrados,
+            } => format!(
                 "la lista de documentos no coincide con el alcance real.\n      esperados: {}\n      encontrados: {}",
                 esperados.join(", "),
                 encontrados.join(", ")
@@ -322,14 +340,22 @@ pub fn planificar(alcance: &[Documento], bloques: &[Bloque], repo_root: &Path) -
             esperados: esperados.clone(),
             encontrados,
         });
-        return Plan { escrituras, problemas, ya_aplicados };
+        return Plan {
+            escrituras,
+            problemas,
+            ya_aplicados,
+        };
     }
 
     for (doc, bloque) in alcance.iter().zip(bloques.iter()) {
         match &bloque.veredicto {
             Veredicto::Pendiente => problemas.push(Problema::SinResolver(doc.rel.clone())),
             Veredicto::NoAplica { .. } => {}
-            Veredicto::YaEsta { archivo, desde, hasta } => {
+            Veredicto::YaEsta {
+                archivo,
+                desde,
+                hasta,
+            } => {
                 if let Some(p) = verificar_cita(repo_root, &doc.rel, archivo, *desde, *hasta) {
                     problemas.push(p);
                 }
@@ -373,7 +399,11 @@ pub fn planificar(alcance: &[Documento], bloques: &[Bloque], repo_root: &Path) -
             }
         }
     }
-    Plan { escrituras, problemas, ya_aplicados }
+    Plan {
+        escrituras,
+        problemas,
+        ya_aplicados,
+    }
 }
 
 /// La cita tiene que sostenerse contra el disco: el rango citado debe existir y
@@ -420,9 +450,48 @@ pub fn require_docs_al_dia(data: &Value) -> bool {
         .unwrap_or(false)
 }
 
-/// `true` si la propuesta ya fue aplicada por el usuario.
-pub fn aplicada(texto: &str) -> bool {
+/// `true` si el archivo conserva el sello de una aprobación explícita.
+pub fn sellada(texto: &str) -> bool {
     texto.lines().any(|l| l.trim_start().starts_with(SELLO))
+}
+
+/// `true` solo si el sello existe Y todos los textos que esta propuesta escribió
+/// siguen presentes. Un PRD es compartido por varias features, así que no se
+/// firma el archivo completo: se comprueba exactamente el `Despues:` de cada
+/// bloque `cambio`. Las ediciones ajenas no afectan esa evidencia.
+pub fn aplicada(alcance: &[Documento], bloques: &[Bloque], texto_propuesta: &str) -> bool {
+    if !sellada(texto_propuesta) || alcance.len() != bloques.len() {
+        return false;
+    }
+    alcance
+        .iter()
+        .zip(bloques)
+        .all(|(doc, bloque)| match &bloque.veredicto {
+            Veredicto::Cambio { despues, .. } => {
+                std::fs::read_to_string(&doc.path).is_ok_and(|texto| texto.contains(despues))
+            }
+            Veredicto::Pendiente => false,
+            Veredicto::NoAplica { .. } | Veredicto::YaEsta { .. } => true,
+        })
+}
+
+/// Quita únicamente el sello obsoleto. La propuesta y los documentos del
+/// usuario no se reescriben: la persona decide cómo resolverla y volver a
+/// aplicarla.
+pub fn invalidar_sello(texto: &str) -> String {
+    let conserva_salto = texto.ends_with('\n');
+    let mut limpio = texto
+        .lines()
+        .filter(|linea| !linea.trim_start().starts_with(SELLO))
+        .collect::<Vec<_>>()
+        .join("\n");
+    while limpio.starts_with('\n') {
+        limpio.remove(0);
+    }
+    if conserva_salto && !limpio.ends_with('\n') {
+        limpio.push('\n');
+    }
+    limpio
 }
 
 /// Gate de cierre (AC-17, AC-18). **Solo lee.**
@@ -472,16 +541,23 @@ pub fn gate(
             )),
         });
     }
-    // Decision del usuario 2026-08-18 (OBS-1): el gate exige la propuesta
-    // APLICADA, o sea con el SI del usuario. Que este contestada no alcanza.
-    if !aplicada(&texto) {
-        let _ = feature; // reservado: el alcance ya se valido al aplicar
+    let alcance = alcance(paths, feature);
+    // Decisión del usuario 2026-08-18 (OBS-1): el gate exige la propuesta
+    // APLICADA, o sea con el SI del usuario. Desde #40 también exige que el
+    // contenido concreto que esa aprobación escribió siga presente.
+    if !aplicada(&alcance, &bloques, &texto) {
+        let motivo = if sellada(&texto) {
+            format!(
+                "[GATE] La propuesta {rel} fue aplicada, pero su texto ya no esta vigente en los documentos.\n    Revisa los bloques y volve a aplicar solo con una nueva confirmacion del USUARIO: sh harness_cli prd apply --feature {fid} --yes"
+            )
+        } else {
+            format!(
+                "[GATE] La propuesta {rel} esta contestada pero el USUARIO todavia no la aprobo.\n    Mostrasela y, con su SI: sh harness_cli prd apply --feature {fid} --yes"
+            )
+        };
         return Err(Exit {
             code: 2,
-            message: Some(format!(
-                "[GATE] La propuesta {rel} esta contestada pero el USUARIO todavia no la aprobo.\n    \
-                 Mostrasela y, con su SI: sh harness_cli prd apply --feature {fid} --yes"
-            )),
+            message: Some(motivo),
         });
     }
     Ok(())
@@ -537,11 +613,7 @@ mod tests {
 
         // Y en la raiz hay un architecture.md VIEJO que no debe ganar.
         std::fs::create_dir_all(paths.repo_root.join("docs")).unwrap();
-        std::fs::write(
-            paths.repo_root.join(ARCHITECTURE),
-            "# Arquitectura vieja\n",
-        )
-        .unwrap();
+        std::fs::write(paths.repo_root.join(ARCHITECTURE), "# Arquitectura vieja\n").unwrap();
 
         let Some(arch) = alcance(&paths, &json!({"id": 49, "prd": "master"}))
             .into_iter()
@@ -641,7 +713,14 @@ mod tests {
         let b = parsear(&texto);
         assert_eq!(b.len(), 3);
         assert!(matches!(b[0].veredicto, Veredicto::NoAplica { .. }));
-        assert!(matches!(b[1].veredicto, Veredicto::YaEsta { desde: 3, hasta: 5, .. }));
+        assert!(matches!(
+            b[1].veredicto,
+            Veredicto::YaEsta {
+                desde: 3,
+                hasta: 5,
+                ..
+            }
+        ));
         match &b[2].veredicto {
             Veredicto::Cambio { antes, despues } => {
                 assert_eq!(antes, "linea dos");
@@ -667,19 +746,29 @@ mod tests {
             let texto = format!("{MARCA}docs/x.md\n{cuerpo}");
             let b = parsear(&texto);
             assert_eq!(b.len(), 1, "{cuerpo}");
-            assert!(!b[0].veredicto.resuelto(), "deberia quedar pendiente: {cuerpo}");
+            assert!(
+                !b[0].veredicto.resuelto(),
+                "deberia quedar pendiente: {cuerpo}"
+            );
         }
     }
 
     fn doc(rel: &str, path: PathBuf) -> Documento {
-        Documento { rel: rel.to_string(), path, que_cuenta: "x" }
+        Documento {
+            rel: rel.to_string(),
+            path,
+            que_cuenta: "x",
+        }
     }
 
     #[test]
     fn prd_apply_should_reject_a_tampered_block_list() {
         let dir = tempfile::tempdir().unwrap();
         let raiz = dir.path();
-        let alc = vec![doc("docs/a.md", raiz.join("docs/a.md")), doc("docs/b.md", raiz.join("docs/b.md"))];
+        let alc = vec![
+            doc("docs/a.md", raiz.join("docs/a.md")),
+            doc("docs/b.md", raiz.join("docs/b.md")),
+        ];
         let bloques = vec![Bloque {
             rel: "docs/a.md".to_string(),
             veredicto: Veredicto::NoAplica { razon: "x".into() },
@@ -697,7 +786,11 @@ mod tests {
         let raiz = dir.path();
         std::fs::create_dir_all(raiz.join("docs")).unwrap();
         let f = raiz.join("docs/arch.md");
-        std::fs::write(&f, "## Modulos\n\n- `viejo.rs`: hace algo\n\n### Sub\n\ncontenido de la subseccion\n").unwrap();
+        std::fs::write(
+            &f,
+            "## Modulos\n\n- `viejo.rs`: hace algo\n\n### Sub\n\ncontenido de la subseccion\n",
+        )
+        .unwrap();
         let alc = vec![doc("docs/arch.md", f.clone())];
         let bloques = vec![Bloque {
             rel: "docs/arch.md".to_string(),
@@ -757,7 +850,10 @@ mod tests {
         let alc = vec![doc("docs/arch.md", f.clone())];
         let bloques = vec![Bloque {
             rel: "docs/arch.md".to_string(),
-            veredicto: Veredicto::Cambio { antes: ancla.into(), despues: nuevo.clone() },
+            veredicto: Veredicto::Cambio {
+                antes: ancla.into(),
+                despues: nuevo.clone(),
+            },
         }];
 
         // Primera corrida: escribe.
@@ -765,7 +861,10 @@ mod tests {
         assert_eq!(plan.escrituras.len(), 1, "{:?}", plan.problemas);
         std::fs::write(&f, &plan.escrituras[0].contenido).unwrap();
         assert_eq!(
-            std::fs::read_to_string(&f).unwrap().matches("doctor.rs").count(),
+            std::fs::read_to_string(&f)
+                .unwrap()
+                .matches("doctor.rs")
+                .count(),
             1
         );
 
@@ -791,18 +890,30 @@ mod tests {
             &alc,
             &[Bloque {
                 rel: "docs/a.md".into(),
-                veredicto: Veredicto::YaEsta { archivo: "docs/a.md".into(), desde: 90, hasta: 99 },
+                veredicto: Veredicto::YaEsta {
+                    archivo: "docs/a.md".into(),
+                    desde: 90,
+                    hasta: 99,
+                },
             }],
             raiz,
         );
         assert!(!plan.aplicable());
-        assert!(plan.problemas[0].mensaje().contains("3 lineas"), "{}", plan.problemas[0].mensaje());
+        assert!(
+            plan.problemas[0].mensaje().contains("3 lineas"),
+            "{}",
+            plan.problemas[0].mensaje()
+        );
         // Archivo inexistente.
         let plan = planificar(
             &alc,
             &[Bloque {
                 rel: "docs/a.md".into(),
-                veredicto: Veredicto::YaEsta { archivo: "docs/no-existe.md".into(), desde: 1, hasta: 1 },
+                veredicto: Veredicto::YaEsta {
+                    archivo: "docs/no-existe.md".into(),
+                    desde: 1,
+                    hasta: 1,
+                },
             }],
             raiz,
         );
@@ -812,7 +923,11 @@ mod tests {
             &alc,
             &[Bloque {
                 rel: "docs/a.md".into(),
-                veredicto: Veredicto::YaEsta { archivo: "docs/a.md".into(), desde: 1, hasta: 2 },
+                veredicto: Veredicto::YaEsta {
+                    archivo: "docs/a.md".into(),
+                    desde: 1,
+                    hasta: 2,
+                },
             }],
             raiz,
         );
@@ -828,7 +943,9 @@ mod tests {
             &alc,
             &[Bloque {
                 rel: "docs/a.md".into(),
-                veredicto: Veredicto::NoAplica { razon: "la feature no toca el producto".into() },
+                veredicto: Veredicto::NoAplica {
+                    razon: "la feature no toca el producto".into(),
+                },
             }],
             raiz,
         );
@@ -843,7 +960,10 @@ mod tests {
         let alc = vec![doc("docs/a.md", raiz.join("docs/a.md"))];
         let plan = planificar(
             &alc,
-            &[Bloque { rel: "docs/a.md".into(), veredicto: Veredicto::Pendiente }],
+            &[Bloque {
+                rel: "docs/a.md".into(),
+                veredicto: Veredicto::Pendiente,
+            }],
             raiz,
         );
         assert!(!plan.aplicable());
@@ -864,7 +984,10 @@ mod tests {
             &[doc("docs/a.md", f)],
             &[Bloque {
                 rel: "docs/a.md".into(),
-                veredicto: Veredicto::Cambio { antes: "repetido".into(), despues: "unico".into() },
+                veredicto: Veredicto::Cambio {
+                    antes: "repetido".into(),
+                    despues: "unico".into(),
+                },
             }],
             raiz,
         );
@@ -881,10 +1004,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = paths_en(dir.path());
         std::fs::create_dir_all(&paths.plans).unwrap();
+        sembrar_docs(&paths, false, false);
         let propuesta = propuesta_path(&paths, "1");
         std::fs::write(
             &propuesta,
-            format!("{SELLO} 2026-08-18T00:00:00Z por USUARIO (confirmacion explicita)\n\n{MARCA}docs/a.md\nVeredicto: no-aplica x\n"),
+            format!("{SELLO} 2026-08-18T00:00:00Z por USUARIO (confirmacion explicita)\n\n{MARCA}docs/prd/PRD-master.md\nVeredicto: no-aplica x\n"),
         )
         .unwrap();
         // Un reporte de verify MAS NUEVO que la propuesta no puede bloquear.
@@ -906,6 +1030,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = paths_en(dir.path());
         std::fs::create_dir_all(&paths.plans).unwrap();
+        sembrar_docs(&paths, false, false);
         let f = json!({"id": 1});
         // Regla apagada: cerrar es lo de siempre aunque no haya propuesta.
         assert!(gate(&paths, &json!({}), "done", &f, "1").is_ok());
@@ -917,12 +1042,55 @@ mod tests {
         // Contestada pero SIN el si del usuario: bloquea (OBS-1).
         std::fs::write(
             propuesta_path(&paths, "1"),
-            format!("{MARCA}docs/a.md\nVeredicto: no-aplica x\n"),
+            format!("{MARCA}docs/prd/PRD-master.md\nVeredicto: no-aplica x\n"),
         )
         .unwrap();
         let err = gate(&paths, &data, "done", &f, "1").unwrap_err();
         assert!(err.message.unwrap().contains("todavia no la aprobo"));
         // blocked/pending no gatean: la valvula de escape sigue.
         assert!(gate(&paths, &data, "blocked", &f, "1").is_ok());
+    }
+
+    #[test]
+    fn gate_should_validate_only_the_text_applied_by_this_proposal() {
+        // AC-1/AC-2/AC-3/AC-4/AC-5: cada sello prueba sus propios
+        // `Despues:`, no el hash de un PRD compartido; un sello antiguo sin
+        // bloques comprobables falla cerrado.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_en(dir.path());
+        std::fs::create_dir_all(&paths.plans).unwrap();
+        sembrar_docs(&paths, false, false);
+        let master = crate::prd::prd_dir(&paths).join("PRD-master.md");
+        std::fs::write(&master, "# PRD\n\nbase\nfragmento de la feature uno\n").unwrap();
+        let data = json!({"rules": {"require_docs_al_dia": true}});
+        let f = json!({"id": 1});
+        let propuesta = propuesta_path(&paths, "1");
+        std::fs::write(
+            &propuesta,
+            format!(
+                "{SELLO} 2026-08-24T00:00:00Z por USUARIO (confirmacion explicita)\n\n{MARCA}docs/prd/PRD-master.md\nVeredicto: cambio\nAntes: base\nDespues: fragmento de la feature uno\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(gate(&paths, &data, "done", &f, "1").is_ok());
+        std::fs::write(
+            &master,
+            "# PRD\n\nbase\nfragmento de la feature uno\nnota ajena de otra feature\n",
+        )
+        .unwrap();
+        assert!(gate(&paths, &data, "done", &f, "1").is_ok());
+
+        std::fs::write(&master, "# PRD\n\nbase\nfragmento reemplazado\n").unwrap();
+        let err = gate(&paths, &data, "done", &f, "1").unwrap_err();
+        assert!(err.message.unwrap().contains("ya no esta vigente"));
+
+        std::fs::write(
+            &propuesta,
+            format!("{SELLO} 2026-08-24T00:00:00Z por USUARIO (confirmacion explicita)\n"),
+        )
+        .unwrap();
+        let err = gate(&paths, &data, "done", &f, "1").unwrap_err();
+        assert!(err.message.unwrap().contains("ya no esta vigente"));
     }
 }
