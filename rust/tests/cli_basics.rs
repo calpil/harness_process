@@ -3743,6 +3743,98 @@ fn sembrar_leccion(dir: &Path, nombre: &str, triggers: &str, cuerpo: &str) {
     .unwrap();
 }
 
+fn declarar_relacion(dir: &Path, nombre: &str, relacionadas: &str) {
+    let ruta = dir.join(format!("docs/lecciones/{nombre}.md"));
+    let texto = std::fs::read_to_string(&ruta).unwrap();
+    let cambiado = texto.replace(
+        "relacionadas: []",
+        &format!("relacionadas: [{relacionadas}]"),
+    );
+    assert_ne!(texto, cambiado, "fixture sin frontmatter relacionadas: {texto}");
+    std::fs::write(ruta, cambiado).unwrap();
+}
+
+#[test]
+fn consolidar_should_report_mutual_relacionadas_without_a_backend() {
+    // AC-1/AC-5/AC-6: la señal es local. Dos triggers deliberadamente
+    // disjuntos no necesitan red, cuota ni una respuesta obediente de un LLM.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "procedimiento-a", "solo-a", "cuerpo A.");
+    sembrar_leccion(dir.path(), "procedimiento-b", "solo-b", "cuerpo B.");
+    declarar_relacion(dir.path(), "procedimiento-a", "procedimiento-b");
+    declarar_relacion(dir.path(), "procedimiento-b", "procedimiento-a");
+    std::fs::write(dir.path().join("hp/feature_list.json"), r#"{"features":[]}"#).unwrap();
+    let leccion_a = dir.path().join("docs/lecciones/procedimiento-a.md");
+    let leccion_b = dir.path().join("docs/lecciones/procedimiento-b.md");
+    let antes_a = std::fs::read(&leccion_a).unwrap();
+    let antes_b = std::fs::read(&leccion_b).unwrap();
+    let history = dir.path().join("hp/progress/history.md");
+
+    cmd(&bin)
+        .args(["lecciones", "consolidar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Consolidacion APAGADA"))
+        .stdout(predicate::str::contains("1 candidato(s) a consolidar"))
+        .stdout(predicate::str::contains("procedimiento-a + procedimiento-b"))
+        .stdout(predicate::str::contains("relacionadas mutuas"));
+    assert_eq!(antes_a, std::fs::read(&leccion_a).unwrap());
+    assert_eq!(antes_b, std::fs::read(&leccion_b).unwrap());
+    assert!(!history.exists(), "la deteccion local registro historia");
+    assert!(
+        !dir.path().join("hp/bkp/lecciones").exists(),
+        "la deteccion local creo un backup"
+    );
+}
+
+#[test]
+fn consolidar_preparar_should_create_a_deterministic_umbrella_without_overwriting() {
+    // AC-1..AC-6: la preparación es una mutación chica y explícita; deja la
+    // estructura que después valida la fusión, sin archivar ni pedir backend.
+    let (dir, bin) = sandbox_with_binary();
+    sembrar_leccion(dir.path(), "miembro-a", "Beta, alfa", "cuerpo A.");
+    sembrar_leccion(dir.path(), "miembro-b", "ALFA, zeta", "cuerpo B.");
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--preparar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro-b,miembro-a,miembro-a",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Borrador preparado"))
+        .stdout(predicate::str::contains("Triggers unidos: alfa, beta, zeta"));
+    let paraguas = dir.path().join("docs/lecciones/paraguas.md");
+    let preparado = std::fs::read_to_string(&paraguas).unwrap();
+    assert!(preparado.contains("triggers: [alfa, beta, zeta]"), "{preparado}");
+    assert_eq!(preparado.matches("[[miembro-a]]").count(), 1, "{preparado}");
+    assert_eq!(preparado.matches("[[miembro-b]]").count(), 1, "{preparado}");
+    assert!(dir.path().join("docs/lecciones/miembro-a.md").is_file());
+    assert!(dir.path().join("docs/lecciones/miembro-b.md").is_file());
+    assert!(!dir.path().join("hp/bkp/lecciones").exists());
+
+    let con_prosa = format!("{preparado}\nProsa humana que no se puede pisar.\n");
+    std::fs::write(&paraguas, &con_prosa).unwrap();
+    cmd(&bin)
+        .args([
+            "lecciones",
+            "consolidar",
+            "--preparar",
+            "--en",
+            "paraguas",
+            "--de",
+            "miembro-a,miembro-b",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("se preserva"));
+    assert_eq!(con_prosa, std::fs::read_to_string(paraguas).unwrap());
+}
+
 #[test]
 fn consolidar_aplicar_should_take_the_merge_from_argv() {
     // La fusion NO sale de lo que dijo el modelo: sale de argv. Por eso este

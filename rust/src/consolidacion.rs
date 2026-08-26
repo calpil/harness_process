@@ -25,6 +25,7 @@
 //! esta en 0.050. No hay zona gris, asi que **no se puede calibrar un umbral**:
 //! la confianza se reporta sin filtrar y decide quien lee (OBS-3).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -134,7 +135,10 @@ pub fn resolver_backend(
         if existe(nombre) {
             let mut argv = vec![nombre.to_string()];
             argv.extend(flags.iter().map(|f| (*f).to_string()));
-            return Backend::Cli { nombre: nombre.to_string(), argv };
+            return Backend::Cli {
+                nombre: nombre.to_string(),
+                argv,
+            };
         }
     }
     let hay_api_key = API_KEYS
@@ -149,6 +153,17 @@ pub struct Resumen {
     pub nombre: String,
     pub descripcion: String,
     pub triggers: Vec<String>,
+    /// Referencias locales para detectar parejas candidatas. No forman parte
+    /// del prompt: el backend sigue viendo solo nombre, descripción y triggers.
+    pub relacionadas: Vec<String>,
+}
+
+/// Resultado local de interpretar `relacionadas`: los avisos explican por qué
+/// una referencia escrita no se elevó a candidato.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SenalesRelacionadas {
+    pub candidatos: Vec<Candidato>,
+    pub diagnosticos: Vec<String>,
 }
 
 /// Arma el prompt. Funcion **pura**: se puede inspeccionar en un test para
@@ -190,13 +205,156 @@ pub struct Candidato {
     pub confianza: f64,
 }
 
+/// Detecta parejas que se señalan mutuamente en `relacionadas`.
+///
+/// Es deliberadamente local y puro: no lee cuerpos, no interpreta una
+/// referencia como ruta y no depende de un backend. Una referencia unilateral
+/// o a algo que no pertenece al catálogo elegible deja un diagnóstico, pero no
+/// inventa una candidata.
+pub fn por_relacionadas(resumenes: &[Resumen]) -> SenalesRelacionadas {
+    let por_nombre: BTreeMap<&str, &Resumen> =
+        resumenes.iter().map(|r| (r.nombre.as_str(), r)).collect();
+    let mut pares: BTreeMap<(String, String), Candidato> = BTreeMap::new();
+    let mut diagnosticos = Vec::new();
+
+    for origen in resumenes {
+        for destino in &origen.relacionadas {
+            let destino = destino.trim();
+            if destino.is_empty() || destino == origen.nombre {
+                continue;
+            }
+            let Some(otra) = por_nombre.get(destino) else {
+                diagnosticos.push(format!(
+                    "relacionadas: '{}' declara '{}' pero no es una leccion activa y valida; se ignora",
+                    origen.nombre, destino
+                ));
+                continue;
+            };
+            if !otra.relacionadas.iter().any(|r| r.trim() == origen.nombre) {
+                diagnosticos.push(format!(
+                    "relacionadas: '{}' declara '{}' pero la referencia no es mutua; se ignora",
+                    origen.nombre, destino
+                ));
+                continue;
+            }
+            let (a, b) = if origen.nombre < otra.nombre {
+                (origen.nombre.clone(), otra.nombre.clone())
+            } else {
+                (otra.nombre.clone(), origen.nombre.clone())
+            };
+            pares.entry((a.clone(), b.clone())).or_insert(Candidato {
+                miembros: vec![a.clone(), b.clone()],
+                motivo: format!("relacionadas mutuas: '{a}' declara '{b}' y '{b}' declara '{a}'"),
+                confianza: 1.0,
+            });
+        }
+    }
+    diagnosticos.sort();
+    diagnosticos.dedup();
+    SenalesRelacionadas {
+        candidatos: pares.into_values().collect(),
+        diagnosticos,
+    }
+}
+
+/// El backend propone desde nombre/descripción/triggers. La razón se etiqueta
+/// antes de mezclarse con señales locales para que la salida mantenga su
+/// procedencia revisable.
+pub fn marcar_triggers(mut candidatos: Vec<Candidato>) -> Vec<Candidato> {
+    for candidato in &mut candidatos {
+        candidato.motivo = format!("triggers/LLM: {}", candidato.motivo);
+    }
+    candidatos
+}
+
+/// Une candidatas equivalentes por el conjunto canónico de miembros. Si una
+/// pareja llegó tanto por triggers/LLM como por `relacionadas`, conserva ambas
+/// razones en vez de listar A-B dos veces.
+pub fn unir_candidatos(candidatos: Vec<Candidato>) -> Vec<Candidato> {
+    let mut unidos: BTreeMap<Vec<String>, Candidato> = BTreeMap::new();
+    for candidato in candidatos {
+        // La llave es canónica para que A-B y B-A coincidan, pero la salida
+        // conserva el orden que propuso la primera fuente (compatibilidad de
+        // CLI y una instrucción de fusión más legible).
+        let mut llave = candidato.miembros.clone();
+        llave.sort();
+        llave.dedup();
+        match unidos.get_mut(&llave) {
+            Some(anterior) => {
+                if !anterior.motivo.contains(&candidato.motivo) {
+                    anterior.motivo = format!("{}; {}", anterior.motivo, candidato.motivo);
+                }
+                anterior.confianza = anterior.confianza.max(candidato.confianza);
+            }
+            None => {
+                unidos.insert(llave, candidato);
+            }
+        }
+    }
+    unidos.into_values().collect()
+}
+
+/// Estructura local que un paraguas debe heredar antes de que una persona
+/// escriba su explicación. No crea archivos ni toma decisiones sobre prosa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BorradorParaguas {
+    pub miembros: Vec<String>,
+    pub triggers: Vec<String>,
+    pub cuerpo: String,
+}
+
+/// Une los datos mecánicos de una selección aceptada. Los triggers se
+/// normalizan a minúscula y se ordenan para que capitalización u orden de los
+/// miembros no cambien el borrador. Los punteros se originan exclusivamente en
+/// los nombres ya validados de las lecciones seleccionadas.
+pub fn preparar_paraguas(miembros: &[(String, Vec<String>)]) -> BorradorParaguas {
+    let mut nombres: Vec<String> = miembros.iter().map(|(nombre, _)| nombre.clone()).collect();
+    nombres.sort();
+    nombres.dedup();
+
+    let mut triggers: Vec<String> = miembros
+        .iter()
+        .flat_map(|(_, triggers)| triggers)
+        .map(|trigger| trigger.trim().to_lowercase())
+        .filter(|trigger| !trigger.is_empty())
+        .collect();
+    triggers.sort();
+    triggers.dedup();
+
+    let punteros = nombres
+        .iter()
+        .map(|nombre| format!("- [[{nombre}]]"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let cuerpo = format!(
+        "## Cuando aplica\n\nPendiente de redaccion humana.\n\n\
+         ## Miembros a consolidar\n\n{punteros}\n\n\
+         ## Procedimiento\n\nPendiente de redaccion humana.\n\n\
+         ## Pitfalls\n\nPendiente de redaccion humana.\n\n\
+         ## Verificacion\n\nPendiente de redaccion humana.\n"
+    );
+    BorradorParaguas {
+        miembros: nombres,
+        triggers,
+        cuerpo,
+    }
+}
+
 /// Por que se descarto un candidato. Se imprime: una alucinacion descartada en
 /// silencio es indistinguible de un modelo que no encontro nada.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Descarte {
-    NoExiste { candidato: Candidato, nombre: String },
-    Pinneada { candidato: Candidato, nombre: String },
-    MuyChico { candidato: Candidato },
+    NoExiste {
+        candidato: Candidato,
+        nombre: String,
+    },
+    Pinneada {
+        candidato: Candidato,
+        nombre: String,
+    },
+    MuyChico {
+        candidato: Candidato,
+    },
 }
 
 impl Descarte {
@@ -292,12 +450,18 @@ pub fn validar(
         }
         if let Some(n) = c.miembros.iter().find(|m| !existentes.contains(m)) {
             let nombre = n.clone();
-            fuera.push(Descarte::NoExiste { candidato: c, nombre });
+            fuera.push(Descarte::NoExiste {
+                candidato: c,
+                nombre,
+            });
             continue;
         }
         if let Some(n) = c.miembros.iter().find(|m| pinneadas.contains(m)) {
             let nombre = n.clone();
-            fuera.push(Descarte::Pinneada { candidato: c, nombre });
+            fuera.push(Descarte::Pinneada {
+                candidato: c,
+                nombre,
+            });
             continue;
         }
         ok.push(c);
@@ -309,7 +473,12 @@ pub fn validar(
 ///
 /// Deliberadamente NO reusa `verificacion::ejecutar`: esa corre con `sh -c`, y
 /// aca el texto de las lecciones no puede pasar por un shell.
-pub fn preguntar(argv: &[String], prompt: &str, cwd: &Path, timeout: Duration) -> Result<String, String> {
+pub fn preguntar(
+    argv: &[String],
+    prompt: &str,
+    cwd: &Path,
+    timeout: Duration,
+) -> Result<String, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     use wait_timeout::ChildExt;
@@ -392,7 +561,10 @@ pub fn revisar_paraguas(
 ) -> Vec<Falta> {
     let mut faltas = Vec::new();
     let bajo = paraguas_texto.to_lowercase();
-    if PLACEHOLDERS.iter().any(|p| bajo.contains(&p.to_lowercase())) {
+    if PLACEHOLDERS
+        .iter()
+        .any(|p| bajo.contains(&p.to_lowercase()))
+    {
         faltas.push(Falta::Esqueleto);
     }
     for (nombre, triggers) in miembros {
@@ -405,7 +577,9 @@ pub fn revisar_paraguas(
             }
         }
         if !paraguas_texto.contains(&format!("[[{nombre}]]")) {
-            faltas.push(Falta::Puntero { miembro: nombre.clone() });
+            faltas.push(Falta::Puntero {
+                miembro: nombre.clone(),
+            });
         }
     }
     faltas
@@ -435,18 +609,30 @@ mod tests {
     #[test]
     fn consolidar_should_be_off_without_the_rule() {
         // Apagada de forma ESTRUCTURAL: ni siquiera se mira el entorno.
-        assert_eq!(resolver_backend(&json!({}), None, |_| true), Backend::Apagada);
+        assert_eq!(
+            resolver_backend(&json!({}), None, |_| true),
+            Backend::Apagada
+        );
         assert_eq!(
             resolver_backend(&json!({"rules": {}}), None, |_| true),
             Backend::Apagada
         );
         assert_eq!(
-            resolver_backend(&json!({"rules": {"consolidar_backend": "  "}}), None, |_| true),
+            resolver_backend(
+                &json!({"rules": {"consolidar_backend": "  "}}),
+                None,
+                |_| true
+            ),
             Backend::Apagada
         );
         let apagada = resolver_backend(&json!({}), None, |_| true);
         assert!(apagada.argv().is_none(), "apagada no puede dar un comando");
-        assert!(apagada.motivo_del_skip().unwrap().contains("consolidar_backend"));
+        assert!(
+            apagada
+                .motivo_del_skip()
+                .unwrap()
+                .contains("consolidar_backend")
+        );
     }
 
     #[test]
@@ -455,7 +641,10 @@ mod tests {
         let b = resolver_backend(&encendida(), None, |n| n == "kimi");
         assert_eq!(
             b,
-            Backend::Cli { nombre: "kimi".into(), argv: vec!["kimi".into(), "-p".into()] }
+            Backend::Cli {
+                nombre: "kimi".into(),
+                argv: vec!["kimi".into(), "-p".into()]
+            }
         );
         let b = resolver_backend(&encendida(), None, |_| true);
         assert!(
@@ -490,12 +679,25 @@ mod tests {
             nombre: "una-leccion".into(),
             descripcion: "Una sola oracion.".into(),
             triggers: vec!["uno".into(), "dos".into()],
+            relacionadas: vec!["solo-local".into()],
         }];
         let p = prompt(&r);
         assert!(p.contains("una-leccion") && p.contains("Una sola oracion."));
         assert!(p.contains("uno") && p.contains("dos"));
-        for prohibido in ["## Cuando aplica", "## Procedimiento", "## Pitfalls", "## Verificacion"] {
-            assert!(!p.contains(prohibido), "el prompt lleva el cuerpo: {prohibido}");
+        assert!(
+            !p.contains("solo-local"),
+            "el prompt no lleva relacionadas: {p}"
+        );
+        for prohibido in [
+            "## Cuando aplica",
+            "## Procedimiento",
+            "## Pitfalls",
+            "## Verificacion",
+        ] {
+            assert!(
+                !p.contains(prohibido),
+                "el prompt lleva el cuerpo: {prohibido}"
+            );
         }
         // Y le dice al modelo que la respuesta vacia es valida.
         assert!(p.contains("{\"candidatos\":[]}"), "{p}");
@@ -539,7 +741,10 @@ mod tests {
         let salida = r#"habla de {llaves} y despues: {"candidatos":[{"miembros":["a","b"],"motivo":"con } adentro","confianza":0.1}]}"#;
         // El primer objeto balanceado es `{llaves}`, que no es JSON valido ->
         // el parser devuelve None en vez de inventar. Es el limite conocido.
-        assert!(extraer_json(salida).is_none(), "no puede adivinar cual objeto es");
+        assert!(
+            extraer_json(salida).is_none(),
+            "no puede adivinar cual objeto es"
+        );
     }
 
     fn cand(miembros: &[&str]) -> Candidato {
@@ -550,13 +755,115 @@ mod tests {
         }
     }
 
+    fn resumen(nombre: &str, triggers: &[&str], relacionadas: &[&str]) -> Resumen {
+        Resumen {
+            nombre: nombre.to_string(),
+            descripcion: format!("Leccion {nombre}."),
+            triggers: triggers.iter().map(|s| (*s).to_string()).collect(),
+            relacionadas: relacionadas.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn relacionadas_mutuas_should_produce_a_local_candidate_without_shared_triggers() {
+        // AC-1/AC-5: no depende del modelo ni de coincidir por keywords.
+        let senales = por_relacionadas(&[
+            resumen("a", &["solo-a"], &["b"]),
+            resumen("b", &["solo-b"], &["a"]),
+        ]);
+        assert_eq!(senales.candidatos.len(), 1, "{senales:?}");
+        let candidato = &senales.candidatos[0];
+        assert_eq!(candidato.miembros, ["a", "b"]);
+        assert!(candidato.motivo.contains("relacionadas mutuas"));
+        assert!(candidato.motivo.contains("'a' declara 'b'"));
+        assert!(senales.diagnosticos.is_empty(), "{senales:?}");
+    }
+
+    #[test]
+    fn relacionadas_unilaterales_or_unknown_should_not_invent_candidates() {
+        // AC-2/AC-4: el catálogo elegible es la frontera; ni una referencia
+        // rota ni una unilateral se convierten en acción implícita.
+        let senales = por_relacionadas(&[
+            resumen("a", &["x"], &["b", "archivada"]),
+            resumen("b", &["y"], &[]),
+        ]);
+        assert!(senales.candidatos.is_empty(), "{senales:?}");
+        assert!(
+            senales
+                .diagnosticos
+                .iter()
+                .any(|d| d.contains("no es mutua")),
+            "{senales:?}"
+        );
+        assert!(
+            senales
+                .diagnosticos
+                .iter()
+                .any(|d| d.contains("no es una leccion activa y valida")),
+            "{senales:?}"
+        );
+    }
+
+    #[test]
+    fn related_and_trigger_candidates_should_merge_and_keep_both_reasons() {
+        // AC-3: A-B y B-A son el mismo par, incluso si el LLM lo propuso con
+        // el orden opuesto a la señal local.
+        let relacionadas = por_relacionadas(&[
+            resumen("a", &["comun"], &["b"]),
+            resumen("b", &["comun"], &["a"]),
+        ]);
+        let mut candidatos = relacionadas.candidatos;
+        candidatos.extend(marcar_triggers(vec![Candidato {
+            miembros: vec!["b".into(), "a".into()],
+            motivo: "comparten comun".into(),
+            confianza: 0.8,
+        }]));
+        let unidos = unir_candidatos(candidatos);
+        assert_eq!(unidos.len(), 1, "{unidos:?}");
+        assert_eq!(unidos[0].miembros, ["a", "b"]);
+        assert!(unidos[0].motivo.contains("triggers/LLM"), "{unidos:?}");
+        assert!(
+            unidos[0].motivo.contains("relacionadas mutuas"),
+            "{unidos:?}"
+        );
+    }
+
+    #[test]
+    fn preparar_paraguas_should_union_triggers_and_satisfy_structural_review() {
+        // AC-1/AC-2/AC-3/AC-5: el orden y la capitalización de la selección no
+        // cambian el borrador; los únicos huecos que quedan son humanos.
+        let miembros = vec![
+            (
+                "b".to_string(),
+                vec!["Beta".to_string(), "alfa".to_string()],
+            ),
+            (
+                "a".to_string(),
+                vec!["ALFA".to_string(), "zeta".to_string()],
+            ),
+        ];
+        let borrador = preparar_paraguas(&miembros);
+        assert_eq!(borrador.miembros, ["a", "b"]);
+        assert_eq!(borrador.triggers, ["alfa", "beta", "zeta"]);
+        assert_eq!(borrador.cuerpo.matches("[[a]]").count(), 1);
+        assert_eq!(borrador.cuerpo.matches("[[b]]").count(), 1);
+        assert!(
+            revisar_paraguas(&borrador.cuerpo, &borrador.triggers, &miembros).is_empty(),
+            "el borrador no cumple la estructura"
+        );
+    }
+
     #[test]
     fn consolidar_should_drop_hallucinated_members() {
         let existentes = vec!["a".to_string(), "b".to_string()];
         let (ok, fuera) = validar(vec![cand(&["a", "no-existe"])], &existentes, &[]);
         assert!(ok.is_empty());
         assert_eq!(fuera.len(), 1);
-        assert!(fuera[0].mensaje().contains("no existe"), "{}", fuera[0].mensaje());
+        assert!(
+            fuera[0].mensaje().contains("no existe"),
+            "{}",
+            fuera[0].mensaje()
+        );
         assert!(fuera[0].mensaje().contains("no-existe"));
     }
 
@@ -566,7 +873,11 @@ mod tests {
         let pin = vec!["b".to_string()];
         let (ok, fuera) = validar(vec![cand(&["a", "b"])], &existentes, &pin);
         assert!(ok.is_empty());
-        assert!(fuera[0].mensaje().contains("pinneada"), "{}", fuera[0].mensaje());
+        assert!(
+            fuera[0].mensaje().contains("pinneada"),
+            "{}",
+            fuera[0].mensaje()
+        );
     }
 
     #[test]
@@ -603,8 +914,15 @@ mod tests {
     fn consolidar_should_demand_the_union_of_triggers() {
         // Sin heredar los triggers, el conocimiento deja de encontrarse.
         let texto = "cuerpo escrito de verdad, con [[a]] citada.";
-        let faltas = revisar_paraguas(texto, &["comun".into()], &[miembro("a", &["comun", "propio"])]);
-        let t: Vec<&Falta> = faltas.iter().filter(|f| matches!(f, Falta::Trigger { .. })).collect();
+        let faltas = revisar_paraguas(
+            texto,
+            &["comun".into()],
+            &[miembro("a", &["comun", "propio"])],
+        );
+        let t: Vec<&Falta> = faltas
+            .iter()
+            .filter(|f| matches!(f, Falta::Trigger { .. }))
+            .collect();
         assert_eq!(t.len(), 1, "{faltas:?}");
         assert!(t[0].mensaje().contains("'propio'"), "{}", t[0].mensaje());
         assert!(t[0].mensaje().contains("100"), "explica por que importa");

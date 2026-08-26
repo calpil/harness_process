@@ -28,6 +28,19 @@ sh harness_cli verify --feature <id>            # corre lo declarado, escribe el
 sh harness_cli verify --feature <id> --solo AC-3
 ```
 
+La comprobación cotidiana de consolidación no usa red, cuota ni secretos:
+
+```bash
+bash tests/consolidar_check.sh
+```
+
+Para pedir la integración real de forma deliberada (requiere un CLI autenticado
+`claude` o `kimi`), usa el único interruptor que la habilita:
+
+```bash
+bash tests/consolidar_check.sh --real backend-real
+```
+
 Dos trampas al elegir el comando: uno que filtra tests por nombre suele salir
 **0 cuando no encuentra ninguno**, y cualquier cosa que termine en `|| true` no
 puede fallar. Un comando que no puede fallar no verifica: decora.

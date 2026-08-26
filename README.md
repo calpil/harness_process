@@ -233,11 +233,18 @@ aparte.
 
 ```bash
 sh harness_cli lecciones consolidar          # pregunta e INFORMA; no toca nada
+sh harness_cli lecciones consolidar --preparar --en <paraguas> --de a,b
 sh harness_cli lecciones consolidar --aplicar     --en <paraguas> --de a,b --motivo "<por que>"
 ```
 
-Apagada por default y de forma **estructural**: sin `rules.consolidar_backend`
-no se resuelve backend, no se spawnea nada y ni siquiera se mira el entorno.
+`--preparar` crea un borrador nuevo con la unión de triggers y un
+`[[miembro]]` por cada selección; no archiva nada y, si el archivo ya existe,
+lo preserva. Solo después de escribir la prosa humana corresponde `--aplicar`.
+
+El tramo de modelo está apagado por default y de forma **estructural**: sin
+`rules.consolidar_backend` no se resuelve backend, no se spawnea nada y ni
+siquiera se mira el entorno. Las referencias mutuas `relacionadas` sí se pueden
+informar localmente, porque no gastan cuota ni envían contenido fuera del repo.
 
 ```json
 { "rules": { "consolidar_backend": "auto" } }
