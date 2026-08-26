@@ -99,12 +99,13 @@ pub fn propose(paths: &HarnessPaths, fid: &str) -> anyhow::Result<()> {
     let data = load_features(paths)?;
     let idx = crate::features::find_feature_index(&data, fid)?;
     let feature = crate::features::feature_at(&data, idx).clone();
-    let alcance = documentos::alcance(paths, &feature);
+    let paths = rutas_documentales(paths, &feature, fid)?;
+    let alcance = documentos::alcance(&paths, &feature);
     if alcance.is_empty() {
         println!("No hay documentos que revisar: ni PRD, ni SDD, ni architecture.md.");
         return Ok(());
     }
-    let destino = documentos::propuesta_path(paths, fid);
+    let destino = documentos::propuesta_path(&paths, fid);
     let previo = std::fs::read_to_string(&destino).unwrap_or_default();
     let ya = documentos::parsear(&previo);
 
@@ -196,8 +197,9 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     let data = load_features(paths)?;
     let idx = crate::features::find_feature_index(&data, fid)?;
     let feature = crate::features::feature_at(&data, idx).clone();
-    let alcance = documentos::alcance(paths, &feature);
-    let destino = documentos::propuesta_path(paths, fid);
+    let paths = rutas_documentales(paths, &feature, fid)?;
+    let alcance = documentos::alcance(&paths, &feature);
+    let destino = documentos::propuesta_path(&paths, fid);
     let rel = documentos::propuesta_rel(fid);
 
     let Ok(texto) = std::fs::read_to_string(&destino) else {
@@ -207,7 +209,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     };
 
     let bloques = documentos::parsear(&texto);
-    let plan = documentos::planificar(&alcance, &bloques, &paths.repo_root);
+    let plan = documentos::planificar(&alcance, &bloques, raiz_documental(&paths));
     if !plan.aplicable() {
         println!("[GATE] La propuesta {rel} todavia no se puede aplicar:");
         for p in &plan.problemas {
@@ -239,7 +241,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
         // El binario escribe en docs/prd/**, que la feature #26 protege de las
         // herramientas del AGENTE. Se registra para no dispararse a si mismo la
         // red de seguridad, igual que `close` y `prd add`.
-        crate::commands::rutas::registrar_escritura_del_arnes(paths, &e.rel);
+        crate::commands::rutas::registrar_escritura_del_arnes(&paths, &e.rel);
         println!("Escrito: {}", e.rel);
     }
 
@@ -255,7 +257,7 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     };
     std::fs::write(&destino, sellado)?;
     log(
-        paths,
+        &paths,
         &format!(
             "prd apply feature #{fid} documentos={} escritos={}",
             alcance.len(),
@@ -265,6 +267,38 @@ pub fn apply(paths: &HarnessPaths, fid: &str, yes: bool) -> anyhow::Result<()> {
     println!("\n{sello}");
     println!("Propuesta aplicada: {} documento(s) escrito(s).", plan.escrituras.len());
     Ok(())
+}
+
+/// Todos los documentos de una propuesta pertenecen a un solo arbol. La
+/// feature ya guarda su worktree al iniciar; resolverlo aca —antes del alcance
+/// y del destino— evita leer el principal y escribir la rama (o al reves).
+///
+/// Sin un worktree usable se conserva el modo clasico y se lo hace visible:
+/// nunca se busca un arbol alternativo ni se cambia el CWD silenciosamente.
+fn rutas_documentales(
+    paths: &HarnessPaths,
+    feature: &serde_json::Value,
+    fid: &str,
+) -> anyhow::Result<HarnessPaths> {
+    let Some(meta) = feature.as_object() else {
+        anyhow::bail!("feature_list.json: feature invalida");
+    };
+    let worktree_valido = meta
+        .get("worktree")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|worktree| std::path::Path::new(worktree).is_dir());
+    if !worktree_valido {
+        println!("[i] Feature #{fid} sin worktree valido: uso el docs de la raiz efectiva.");
+    }
+    Ok(paths.para_feature(meta))
+}
+
+/// `plans` siempre es el `docs/` del arbol seleccionado; las citas usan rutas
+/// relativas al repositorio (`docs/...`), por lo que su raiz es el padre de ese
+/// directorio y no necesariamente `repo_root` (que conserva el principal para
+/// el estado global).
+fn raiz_documental(paths: &HarnessPaths) -> &std::path::Path {
+    paths.plans.parent().unwrap_or(&paths.repo_root)
 }
 
 /// Lo que el usuario tiene que poder leer en 30 segundos.

@@ -3348,6 +3348,34 @@ fn sandbox_con_documentos() -> (tempfile::TempDir, PathBuf) {
     (dir, bin)
 }
 
+/// Principal y worktree tienen documentos diferentes: el binario se ejecuta
+/// desde el principal, pero la feature declara que sus documentos viven en
+/// `worktree`. No hace falta un Git real para verificar el contrato de rutas.
+fn sandbox_con_documentos_en_worktree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let (dir, bin) = sandbox_con_documentos();
+    let worktree = dir.path().join("feature-1");
+    let docs = worktree.join("docs");
+    let prd = docs.join("prd");
+    std::fs::create_dir_all(&prd).unwrap();
+
+    // El principal no puede sostener la cita de la propuesta de la feature.
+    std::fs::write(dir.path().join("docs/prd/PRD-master.md"), "# PRD principal\n").unwrap();
+    std::fs::write(prd.join("PRD-master.md"), "# PRD de la feature\ncita solo en worktree\n").unwrap();
+    std::fs::write(prd.join("SDD-master.md"), "# SDD de la feature\n").unwrap();
+    std::fs::write(
+        docs.join("architecture.md"),
+        "# Arquitectura de la feature\n\n- `viejo-worktree.rs`: solo la rama\n",
+    )
+    .unwrap();
+
+    let feature_list = dir.path().join("hp/feature_list.json");
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&feature_list).unwrap()).unwrap();
+    data["features"][0]["worktree"] = serde_json::Value::String(worktree.to_string_lossy().into());
+    std::fs::write(&feature_list, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+    (dir, bin, worktree)
+}
+
 fn enable_docs_rule(harness_dir: &Path) {
     let path = harness_dir.join("feature_list.json");
     let mut data: serde_json::Value =
@@ -3375,6 +3403,61 @@ fn prd_propose_should_seed_one_block_per_document() {
         assert!(texto.contains(esperado), "falta {esperado}: {texto}");
     }
     assert_eq!(texto.matches("Veredicto: PENDIENTE").count(), 3, "{texto}");
+}
+
+#[test]
+fn prd_propose_and_apply_should_use_the_registered_feature_worktree() {
+    // Feature #54 / AC-1..AC-3 + AC-5: aunque se llame desde el principal,
+    // propuesta, cita y escritura tienen que quedarse en la rama de la feature.
+    let (dir, bin, worktree) = sandbox_con_documentos_en_worktree();
+    let main_arch = dir.path().join("docs/architecture.md");
+    let main_before = std::fs::read_to_string(&main_arch).unwrap();
+    let propuesta = worktree.join("docs/prd-diff-1.md");
+
+    cmd(&bin)
+        .current_dir(dir.path())
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2);
+    assert!(propuesta.is_file(), "la propuesta debe vivir en el worktree");
+    assert!(
+        !dir.path().join("docs/prd-diff-1.md").exists(),
+        "el principal no recibe una copia de la propuesta"
+    );
+
+    contestar(
+        &propuesta,
+        [
+            "Veredicto: ya-esta docs/prd/PRD-master.md:2-2",
+            "Veredicto: no-aplica el diseno no cambia",
+            "Veredicto: cambio\nAntes:\n- `viejo-worktree.rs`: solo la rama\nDespues:\n- `viejo-worktree.rs`: solo la rama\n- `nuevo-worktree.rs`: viaja con el merge",
+        ],
+    );
+    cmd(&bin)
+        .current_dir(dir.path())
+        .args(["prd", "apply", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+
+    let arch_feature = std::fs::read_to_string(worktree.join("docs/architecture.md")).unwrap();
+    assert!(arch_feature.contains("nuevo-worktree.rs"), "{arch_feature}");
+    assert_eq!(std::fs::read_to_string(&main_arch).unwrap(), main_before);
+    assert!(std::fs::read_to_string(&propuesta).unwrap().contains("Aplicado:"));
+}
+
+#[test]
+fn prd_commands_should_announce_the_no_worktree_fallback() {
+    // Feature #54 / AC-4 + AC-6: sin worktree se conserva docs/ efectivo, pero
+    // el usuario puede ver que no se eligio un arbol alternativo en silencio.
+    let (dir, bin) = sandbox_con_documentos();
+    cmd(&bin)
+        .args(["prd", "propose", "--feature", "1"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains(
+            "Feature #1 sin worktree valido: uso el docs de la raiz efectiva.",
+        ));
+    assert!(dir.path().join("docs/prd-diff-1.md").is_file());
 }
 
 #[test]
