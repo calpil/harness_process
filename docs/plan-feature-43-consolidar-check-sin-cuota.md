@@ -56,3 +56,6 @@ cobertura de fallas locales; U1-U3 trazan AC-1..AC-6.
 
 ### Avance 2026-08-25T03:06:47Z
 Plan #43 completado: falso por defecto, --real explícito y fallas locales por AC-1..AC-6.
+
+---
+Cerrado: 2026-08-26T01:01:47Z - status=done - Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.
