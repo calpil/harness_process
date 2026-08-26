@@ -54,3 +54,6 @@ de terminación/paridad; U1-U3 cubren AC-1..AC-6.
 
 ### Avance 2026-08-26T00:13:49Z
 Plan #53 completado: cierre de stdin no interactivo, guard directo intacto y pruebas AC-1..AC-6.
+
+---
+Cerrado: 2026-08-26T01:01:48Z - status=done - Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.
