@@ -60,3 +60,6 @@ y fixtures de worktrees múltiples más el fallback clásico.
 
 ### Avance 2026-08-26T00:25:20Z
 Plan completo: resumen de specs aislado por worktree y pruebas de paridad.
+
+---
+Cerrado: 2026-08-26T01:03:10Z - status=done - Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.
