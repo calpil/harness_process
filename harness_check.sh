@@ -117,7 +117,11 @@ if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
     failures=$((failures + 1))
 fi
 
-if ! bash "$HARNESS_DIR/commit_guard.sh"; then
+# `harness_check` no es un hook y no tiene payload: si heredara una tubería
+# abierta, `commit_guard.sh` se quedaría esperando su `cat`. Cerramos stdin solo
+# en este hijo; una invocación directa del guard sigue recibiendo el payload del
+# hook normalmente.
+if ! bash "$HARNESS_DIR/commit_guard.sh" </dev/null; then
     failures=$((failures + 1))
 fi
 
