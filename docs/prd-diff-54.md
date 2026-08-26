@@ -38,4 +38,3 @@ Candidato despues:
 - Cambio de la feature en: `harness_check.sh`, `rust/src/commands/prd.rs`, `rust/tests/cli_basics.rs`, `templates/harness_check.sh` y 1 ruta(s) más. Revisa si este documento debe reflejarlo.
 
 Veredicto: no-aplica El cambio es interno y la documentacion vigente ya cubre el alcance de este documento.
-

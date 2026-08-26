@@ -13,5 +13,5 @@ Microservicios:
 - harness
 
 Evidencia:
-- 
+-
 - 2026-08-26T00:25:20Z Plan completo: resumen de specs aislado por worktree y pruebas de paridad.

@@ -38,4 +38,3 @@ Candidato despues:
 - Cambio de la feature en: `harness_check.sh`, `templates/harness_check.sh`, `tests/commit_guard_stdin_check.sh`. Revisa si este documento debe reflejarlo.
 
 Veredicto: no-aplica El cambio es interno y la documentacion vigente ya cubre el alcance de este documento.
-

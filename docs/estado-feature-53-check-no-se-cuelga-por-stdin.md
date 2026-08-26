@@ -13,5 +13,5 @@ Microservicios:
 - harness
 
 Evidencia:
-- 
+-
 - 2026-08-26T00:13:49Z Plan #53 completado: cierre de stdin no interactivo, guard directo intacto y pruebas AC-1..AC-6.

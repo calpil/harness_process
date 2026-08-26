@@ -38,4 +38,3 @@ Candidato despues:
 - Cambio de la feature en: `rust/src/commands/prd.rs`, `rust/src/documentos.rs`, `rust/tests/cli_basics.rs`. Revisa si este documento debe reflejarlo.
 
 Veredicto: no-aplica El cambio es interno y la documentacion vigente ya cubre el alcance de este documento.
-

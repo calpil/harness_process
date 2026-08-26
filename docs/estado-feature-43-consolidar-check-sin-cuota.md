@@ -13,5 +13,5 @@ Microservicios:
 - harness
 
 Evidencia:
-- 
+-
 - 2026-08-25T03:06:47Z Plan #43 completado: falso por defecto, --real explícito y fallas locales por AC-1..AC-6.

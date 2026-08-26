@@ -229,3 +229,10 @@ con su fecha.>
 - #57 verify_corre_en_el_worktree_de_la_feature -> done 2026-08-26 · spec: ../harness_process-wt/57-verify-corre-en-el-worktree-de-la-feature/docs/spec-feature-57-verify-corre-en-el-worktree-de-la-feature.md · impl: docs/impl-57.md
 - #38 prd_propose_texto_candidato -> done 2026-08-26 · spec: ../harness_process-wt/38-prd-propose-texto-candidato/docs/spec-feature-38-prd-propose-texto-candidato.md · impl: docs/impl-38.md
 - #39 prd_senales_mas_alla_del_nombre -> done 2026-08-26 · spec: ../harness_process-wt/39-prd-senales-mas-alla-del-nombre/docs/spec-feature-39-prd-senales-mas-alla-del-nombre.md · impl: docs/impl-39.md
+- #40 prd_sello_se_invalida_al_editar -> done 2026-08-26 · spec: ../harness_process-wt/40-prd-sello-se-invalida-al-editar/docs/spec-feature-40-prd-sello-se-invalida-al-editar.md · impl: docs/impl-40.md
+- #41 consolidar_usa_relacionadas -> done 2026-08-26 · spec: ../harness_process-wt/41-consolidar-usa-relacionadas/docs/spec-feature-41-consolidar-usa-relacionadas.md · impl: docs/impl-41.md
+- #42 consolidar_esqueleto_del_paraguas -> done 2026-08-26 · spec: ../harness_process-wt/42-consolidar-esqueleto-del-paraguas/docs/spec-feature-42-consolidar-esqueleto-del-paraguas.md · impl: docs/impl-42.md
+- #43 consolidar_check_sin_cuota -> done 2026-08-26 · spec: ../harness_process-wt/43-consolidar-check-sin-cuota/docs/spec-feature-43-consolidar-check-sin-cuota.md · impl: docs/impl-43.md
+- #53 check_no_se_cuelga_por_stdin -> done 2026-08-26 · spec: ../harness_process-wt/53-check-no-se-cuelga-por-stdin/docs/spec-feature-53-check-no-se-cuelga-por-stdin.md · impl: docs/impl-53.md
+- #54 prd_apply_escribe_en_el_docs_de_la_feature -> done 2026-08-26 · spec: ../harness_process-wt/54-prd-apply-escribe-en-el-docs-de-la-feature/docs/spec-feature-54-prd-apply-escribe-en-el-docs-de-la-feature.md · impl: docs/impl-54.md
+- #55 check_resuelve_el_spec_de_la_feature -> done 2026-08-26 · spec: ../harness_process-wt/55-check-resuelve-el-spec-de-la-feature/docs/spec-feature-55-check-resuelve-el-spec-de-la-feature.md · impl: docs/impl-55.md

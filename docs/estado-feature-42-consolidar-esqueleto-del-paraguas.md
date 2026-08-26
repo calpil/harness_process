@@ -13,5 +13,5 @@ Microservicios:
 - harness
 
 Evidencia:
-- 
+-
 - 2026-08-25T02:33:31Z Plan #42 completado: preparar borrador explícito, unión canónica y no-sobrescritura por AC-1..AC-6.

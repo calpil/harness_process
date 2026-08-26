@@ -13,5 +13,5 @@ Microservicios:
 - harness
 
 Evidencia:
-- 
+-
 - 2026-08-24T12:38:38Z Plan #41 completado: relaciones mutuas elegibles, pares canónicos y evidencia local por AC-1..AC-6.

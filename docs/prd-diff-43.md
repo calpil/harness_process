@@ -38,4 +38,3 @@ Candidato despues:
 - Cambio de la feature en: `README.md`, `docs/verification.md`, `rust/src/cli.rs`, `rust/src/commands/leccion.rs` y 3 ruta(s) más. Revisa si este documento debe reflejarlo.
 
 Veredicto: no-aplica El cambio es interno y la documentacion vigente ya cubre el alcance de este documento.
-

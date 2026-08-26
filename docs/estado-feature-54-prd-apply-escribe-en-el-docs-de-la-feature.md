@@ -13,5 +13,5 @@ Microservicios:
 - harness
 
 Evidencia:
-- 
+-
 - 2026-08-26T00:20:05Z Plan completo: selector unico de docs por worktree y fixtures de aislamiento.
