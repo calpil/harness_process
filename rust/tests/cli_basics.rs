@@ -4417,6 +4417,85 @@ fn status_should_keep_the_classic_docs_fallback_without_a_worktree() {
 }
 
 #[test]
+fn verify_should_run_and_report_from_the_registered_feature_worktree() {
+    // Feature #57 / AC-1..AC-3 + AC-5 + AC-6: se invoca desde el principal,
+    // pero los comandos solo pueden pasar con el código de la feature.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Verificable"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let worktree = PathBuf::from(backlog["features"][0]["worktree"].as_str().unwrap());
+    std::fs::write(dir.path().join("origen.txt"), "principal\n").unwrap();
+    std::fs::write(worktree.join("origen.txt"), "feature\n").unwrap();
+    std::fs::write(worktree.join("solo-worktree.txt"), "presente\n").unwrap();
+
+    let spec = worktree.join("docs/spec-feature-1-verificable.md");
+    escribir_acs(
+        &spec,
+        "- AC-1: usa el contenido de la feature.\n  Comando: `test \"$(cat origen.txt)\" = feature`\n\
+         - AC-2: encuentra el archivo de la feature.\n  Comando: `test -f solo-worktree.txt`\n\
+         - AC-3: conserva un rojo.\n  Comando: `false`\n\
+         - AC-4: conserva timeout.\n  Comando: `sleep 30`\n\
+         - AC-5: conserva corrida vacia.\n  Comando: `printf 'running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\\n'`",
+    );
+    let feature_list = dir.path().join("hp/feature_list.json");
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&feature_list).unwrap()).unwrap();
+    data["rules"] = serde_json::json!({"verify_timeout_segundos": 1});
+    std::fs::write(&feature_list, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+
+    cmd(&bin)
+        .current_dir(dir.path())
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(format!(
+            "Raiz de ejecucion: {}",
+            worktree.display()
+        )));
+
+    let reporte = std::fs::read_to_string(worktree.join("docs/verify-1.md")).unwrap();
+    assert!(reporte.contains(&format!("Raiz de ejecucion: {}", worktree.display())));
+    assert!(reporte.contains("| AC-1 | verde |"), "{reporte}");
+    assert!(reporte.contains("| AC-2 | verde |"), "{reporte}");
+    assert!(reporte.contains("| AC-3 | rojo |"), "{reporte}");
+    assert!(reporte.contains("| AC-4 | timeout |"), "{reporte}");
+    assert!(reporte.contains("| AC-5 | vacio |"), "{reporte}");
+    assert!(
+        !dir.path().join("docs/verify-1.md").exists(),
+        "el principal no recibe evidencia de la feature"
+    );
+}
+
+#[test]
+fn verify_should_keep_the_effective_root_when_the_feature_has_no_worktree() {
+    // Feature #57 / AC-4: sin Git no se registra worktree; el fallback se
+    // diagnostica y ejecuta donde viven el spec y el reporte clásicos.
+    let (dir, bin, spec) = feature_con_spec(
+        "- AC-1: deja evidencia local.\n  Comando: `touch evidencia-fallback.txt`",
+    );
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Feature #1 sin worktree valido: se verifica desde la raiz documental efectiva.",
+        ));
+    assert!(dir.path().join("evidencia-fallback.txt").is_file());
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    assert!(reporte.contains(&format!("Raiz de ejecucion: {}", dir.path().display())));
+    assert!(spec.is_file(), "el spec clásico no se mueve");
+}
+
+#[test]
 fn close_done_should_refuse_without_to_and_then_integrate() {
     // AC-14, AC-15, AC-16, AC-19: sin --to se niega; con --to mergea, el commit
     // no lleva trailers de IA y el worktree se borra conservando la rama.

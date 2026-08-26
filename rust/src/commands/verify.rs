@@ -17,7 +17,7 @@ use crate::progress::now_stamp;
 use crate::pycompat::relpath;
 use crate::spec::{SpecState, spec_path, spec_state};
 use crate::verificacion::{
-    self, Estado, Resultado, ejecutar, parsear, render_reporte, reporte_path, reporte_rel,
+    self, Estado, Resultado, ejecutar, parsear, render_reporte_desde, reporte_path, reporte_rel,
 };
 
 pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -> anyhow::Result<()> {
@@ -26,12 +26,15 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     let Some(feature) = feature_at(&data, idx).as_object() else {
         anyhow::bail!("feature_list.json: feature invalida");
     };
-    let spec = spec_path(paths, feature);
+    // Los documentos y el código de la feature viven juntos en su worktree.
+    // `--feature` manda sobre el CWD desde el que se invoca este binario.
+    let paths = paths.para_feature(feature);
+    let spec = spec_path(&paths, feature);
     let rel_spec = relpath(&spec, &paths.repo_root).unwrap_or_else(|| spec.clone());
 
     // BARRERA (AC-5): sin spec aprobado no se ejecuta ni un comando. Se valida
     // antes de leer el archivo entero, y desde luego antes de lanzar nada.
-    exigir_aprobado(paths, feature, &rel_spec.display().to_string())?;
+    exigir_aprobado(&paths, feature, &rel_spec.display().to_string())?;
 
     let texto = std::fs::read_to_string(&spec)
         .map_err(|e| Exit::msg(format!("No se pudo leer {}: {e}", rel_spec.display())))?;
@@ -45,13 +48,24 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     }
 
     let timeout = Duration::from_secs(verificacion::timeout_segundos(&data));
+    let raiz = raiz_de_ejecucion(&paths);
+    let worktree_valido = feature
+        .get("worktree")
+        .and_then(Value::as_str)
+        .is_some_and(|worktree| std::path::Path::new(worktree).is_dir());
     if !as_json {
+        if !worktree_valido {
+            println!(
+                "[i] Feature #{fid} sin worktree valido: se verifica desde la raiz documental efectiva."
+            );
+        }
         println!(
             "Verificando {} AC con comando declarado ({} en total) de {}",
             con_comando,
             verificaciones.len(),
             rel_spec.display()
         );
+        println!("Raiz de ejecucion: {}", raiz.display());
         println!("Timeout por comando: {}s\n", timeout.as_secs());
     }
 
@@ -72,7 +86,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
         if !as_json {
             println!("{}  $ {comando}", v.ac);
         }
-        let (estado, exit, ms, salida) = ejecutar(comando, &paths.repo_root, timeout);
+        let (estado, exit, ms, salida) = ejecutar(comando, raiz, timeout);
         if !as_json {
             println!("       {} {} ({ms} ms)", estado.simbolo(), estado.etiqueta());
             if estado.bloquea() && !salida.is_empty() {
@@ -94,8 +108,8 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     }
 
     let stamp = now_stamp();
-    let reporte = render_reporte(fid, &stamp, &resultados);
-    let destino = reporte_path(paths, fid);
+    let reporte = render_reporte_desde(fid, &stamp, Some(raiz), &resultados);
+    let destino = reporte_path(&paths, fid);
     if let Some(padre) = destino.parent() {
         std::fs::create_dir_all(padre)?;
     }
@@ -103,7 +117,13 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
 
     let bloqueantes: Vec<&Resultado> = resultados.iter().filter(|r| r.estado.bloquea()).collect();
     if as_json {
-        emitir_json(fid, &rel_spec.display().to_string(), &stamp, &resultados);
+        emitir_json(
+            fid,
+            &rel_spec.display().to_string(),
+            &stamp,
+            raiz,
+            &resultados,
+        );
     } else {
         let cuenta = |e: Estado| resultados.iter().filter(|r| r.estado == e).count();
         let vacios = cuenta(Estado::Vacio);
@@ -252,7 +272,17 @@ fn sin_nada_que_verificar(
     Ok(())
 }
 
-fn emitir_json(fid: &str, rel: &str, stamp: &str, resultados: &[Resultado]) {
+fn raiz_de_ejecucion(paths: &HarnessPaths) -> &std::path::Path {
+    paths.plans.parent().unwrap_or(&paths.repo_root)
+}
+
+fn emitir_json(
+    fid: &str,
+    rel: &str,
+    stamp: &str,
+    raiz: &std::path::Path,
+    resultados: &[Resultado],
+) {
     let rows: Vec<Value> = resultados
         .iter()
         .map(|r| {
@@ -270,6 +300,7 @@ fn emitir_json(fid: &str, rel: &str, stamp: &str, resultados: &[Resultado]) {
     let salida = json!({
         "feature": fid,
         "spec": rel,
+        "raiz_ejecucion": raiz.display().to_string(),
         "corrida": stamp,
         "reporte": reporte_rel(fid),
         "verde": rojos == 0,
