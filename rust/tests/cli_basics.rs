@@ -4327,6 +4327,96 @@ fn start_should_keep_working_without_git_or_with_sin_worktree() {
 }
 
 #[test]
+fn status_should_resolve_each_spec_from_its_registered_worktree() {
+    // Feature #55 / AC-1..AC-3 + AC-5 + AC-6: `status` es el resumen que
+    // invoca harness_check. Se lo corre desde el principal con dos features
+    // activas para que no pueda usar el docs del CWD para las dos.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+    enable_spec_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+
+    // #1 aprobado y fresco, #2 draft: el mismo resultado que check-spec.
+    cmd(&bin)
+        .args(["check-spec", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["check-spec", "--feature", "2"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("Spec sin aprobar"));
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"))
+        .stdout(predicate::str::contains("[spec] #2 draft (fresco)"));
+
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let wt_2 = PathBuf::from(backlog["features"][1]["worktree"].as_str().unwrap());
+    let spec_2 = wt_2.join("docs/spec-feature-2-segunda.md");
+    // Cambiar solo el spec de #2 no puede volver stale ni ausente a #1.
+    std::fs::write(
+        &spec_2,
+        format!(
+            "{}\nedicion posterior\n",
+            std::fs::read_to_string(&spec_2).unwrap()
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"))
+        .stdout(predicate::str::contains("[spec] #2 draft (STALE)"));
+    cmd(&bin)
+        .args(["check-spec", "--feature", "2"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("SPEC ACTUALIZADO POR OTRO LLM"));
+
+    // La ausencia verdadera tambien coincide con el gate y no cruza a #1.
+    std::fs::remove_file(&spec_2).unwrap();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 approved (fresco)"))
+        .stdout(predicate::str::contains("[spec] #2 ausente (fresco)"));
+    cmd(&bin)
+        .args(["check-spec", "--feature", "2"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("Spec sin aprobar"));
+}
+
+#[test]
+fn status_should_keep_the_classic_docs_fallback_without_a_worktree() {
+    // Feature #55 / AC-4: en el modo sin Git la feature no registra worktree;
+    // el resumen conserva el docs efectivo y no intenta abrir rutas inexistentes.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Clasica"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[spec] #1 draft (fresco)"));
+    assert!(dir.path().join("docs/spec-feature-1-clasica.md").is_file());
+}
+
+#[test]
 fn close_done_should_refuse_without_to_and_then_integrate() {
     // AC-14, AC-15, AC-16, AC-19: sin --to se niega; con --to mergea, el commit
     // no lleva trailers de IA y el worktree se borra conservando la rama.
