@@ -1,9 +1,9 @@
 ---
 nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
-triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort]
+triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
-origen: [21, 44, 60]
+origen: [21, 44, 60, 61]
 usos: 2
 ultimo_uso: 2026-08-24
 ultima_actualizacion: 2026-08-27
@@ -77,6 +77,30 @@ cierres que se perdieron antes de que el mecanismo existiera.
 
 Regla corta: **un `[i]` no es un pendiente**. Un pendiente es algo que se puede
 volver a consultar despues de que la salida se fue del scroll.
+
+**3. La excepcion justificada en un limite que nadie volvio a medir.** A veces
+la promesa no se cae por olvido: se cae por un `if` que alguien escribio a
+proposito, con su comentario y todo. La cabecera de `git.rs` prometia que "el
+merge corre en un worktree temporal (no toca tu checkout)"; el codigo tenia:
+
+```rust
+// git no permite dos worktrees sobre la misma rama
+if rama_actual(principal) == Some(destino) {
+    return merge_aqui(principal, ...);   // <-- justo el caso mas comun
+}
+```
+
+El comentario era **cierto** y aun asi la excepcion era **evitable**: git no
+deja dos worktrees sobre la misma rama, pero si deja uno en HEAD detached sobre
+su commit. Una linea (`--detach`) borro el caso especial entero.
+
+Como se detecta: buscar en el codigo las palabras que marcan una excepcion
+—`salvo`, `si no se puede`, `git no permite`, `la API no deja`— y preguntar
+*¿cuando se midio esto?*. Un limite que se acepto sin volver a comprobar suele
+tapar el caso mas frecuente, porque las excepciones se escriben cuando algo
+falla, y lo que falla primero es lo que mas se usa. Si el limite es real, la
+promesa de la cabecera tiene que decirlo; una promesa con una excepcion muda es
+peor que no prometer nada.
 
 ## El mismo principio, aplicado a ARREGLAR un bug (feature #44)
 

@@ -979,6 +979,24 @@ archivos en disco. El checkout principal no cambia de rama nunca.
 `start --sin-worktree`, el arnés avisa y funciona como siempre. La rama base es
 `develop` si existe, y si no `main`; el arnés nunca la crea.
 
+**El merge no corre en tu checkout (feature #61).** La promesa de arriba —"el
+cierre de una feature no puede exigirte tener el escritorio ordenado"— tenía una
+excepción que no estaba escrita: el worktree temporal se usaba **solo si el
+destino no era la rama que tenías abierta**. Cerrar hacia `main` estando en
+`main` mergeaba en tu árbol, y moría con el texto crudo de git si tocaba algo
+que tenías sin commitear — después de haber commiteado el worktree de la
+feature. Ahora el merge corre siempre en un worktree temporal `--detach`, y la
+rama destino se avanza con `git reset --keep` (que **conserva** tus cambios sin
+commitear) o moviendo la referencia si no la tenés abierta.
+
+El único caso que no se puede resolver sin decidir por vos —que el merge cambie
+un archivo que vos tenés modificado— se detecta **antes de tocar nada** y el
+cierre se niega nombrando los archivos y las tres salidas (commitear, `git
+stash`, o descartar). El arnés no stashea ni descarta por su cuenta: son tus
+cambios. Tampoco avanza la rama dejando tu árbol atrás: se midió y `git status`
+pasa a mostrar la **reversión** del merge, con lo que un commit distraído
+desharía lo recién integrado.
+
 ## Envio automatico a Atlassian (feature #16)
 
 La feature #15 dejó el arnés y Atlassian hablando el mismo idioma, pero había

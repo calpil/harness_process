@@ -1333,6 +1333,7 @@ sh harness_cli close --feature 47 --status done --to develop
 `--to` es obligatorio para `done`: sin el, el arnes se niega y le pide al
 agente que te pregunte a que rama va (y lista las disponibles). Con el:
 
+0. **verifica que el merge no pise trabajo tuyo sin commitear** (feature #61),
 1. commitea lo que quede en el worktree de la feature,
 2. mergea la rama en la destino (`--no-ff`, en un worktree temporal, sin tocar
    tu checkout ni exigirte tener el arbol limpio),
@@ -1343,6 +1344,45 @@ Ningun commit que haga el arnes lleva trailers de IA. Si el merge tiene
 conflicto, se aborta y no queda nada a medias: el repo sigue como estaba y el
 mensaje dice que resolver. Los cierres `blocked`, `pending` y `superseded` no
 integran nada y conservan el worktree para poder retomar.
+
+### El merge no corre en tu checkout (feature #61)
+
+El punto 2 decia "sin tocar tu checkout" con una excepcion que no estaba
+escrita: el merge se hacia en un worktree temporal **solo si el destino no era
+la rama que tenias abierta**. Y cerrar hacia `main` estando parado en `main` es
+el caso mas comun de todos. Ahi el merge corria en tu arbol, y si tocaba un
+archivo que tenias sin commitear, el cierre moria con el texto crudo de git
+**despues** de haber commiteado el worktree de la feature.
+
+Ahora el merge corre siempre en un worktree temporal `--detach` (git no permite
+dos worktrees sobre la misma rama, pero si uno en HEAD detached sobre su
+commit), y despues se avanza la rama destino:
+
+| Situacion | Que hace |
+| --- | --- |
+| Tenes el destino abierto | `git reset --keep <merge>`: mueve la rama y el arbol **conservando** lo que tengas sin commitear |
+| No lo tenes abierto | mueve la referencia con guarda del valor viejo |
+
+Queda un caso que no se puede resolver sin decidir por vos: que el merge cambie
+un archivo que **vos** tenes modificado sin commitear. El arnes lo detecta
+**antes de tocar nada** —antes de commitear la feature, antes de mergear— y se
+detiene nombrandolos:
+
+```
+[GitFlow] No puedo integrar en main sin pisar trabajo tuyo sin commitear.
+    Tenes estos archivos modificados en tu checkout y el merge tambien los cambia:
+      docs/prd/PRD-master.md
+    NO toque nada: la rama no se movio y la feature no se commiteo.
+    Son TUS cambios, asi que elegis vos:
+      git add -A && git commit      # los queres conservar
+      git stash                     # los queres guardar para despues
+      git checkout -- <archivo>     # no te interesan (DESCARTA lo no commiteado)
+```
+
+No stashea ni descarta por su cuenta: son tus cambios. Y tampoco avanza la rama
+dejando tu arbol atras, que era la otra salida posible — se midio y es
+peligrosa: `git status` pasa a mostrar la **reversion** del merge, y un commit
+distraido desharia lo recien integrado.
 
 ## Verificacion
 

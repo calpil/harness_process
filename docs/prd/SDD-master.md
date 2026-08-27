@@ -149,6 +149,15 @@ toque el flujo:
 - **El arnes nunca reescribe historia ni elige la rama destino.** Sin `--force`,
   sin rebase, sin squash y sin borrar ramas; el merge corre en un worktree
   temporal (no toca tu checkout) y `--to` lo decide el USUARIO.
+- **Y esa promesa no tiene excepciones** (feature #61). El worktree temporal se
+  crea con `--detach`, asi que vale tambien cuando el destino es la rama que el
+  usuario tiene abierta — el caso mas comun, y el que antes se colaba por una
+  excepcion justificada en un limite de git que nadie volvio a comprobar. La
+  rama destino se avanza despues con `reset --keep` (conserva lo que el usuario
+  tenga sin commitear) o con `update-ref` con guarda de valor viejo. El unico
+  caso irreductible —el merge cambia un archivo que el usuario tiene sucio— se
+  DETECTA antes de commitear o mergear y detiene el cierre nombrando los
+  archivos: el arnes no elige entre su merge y el trabajo ajeno.
 
 **Como habla el arnes con un LLM** (feature #28, la unica parte que usa modelo).
 La cadena es `HARNESS_CONSOLIDAR_CMD` -> primer CLI de una tabla corta
