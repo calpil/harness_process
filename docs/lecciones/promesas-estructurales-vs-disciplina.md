@@ -1,9 +1,9 @@
 ---
 nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
-triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion]
+triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion, orden, rollback, deshacer, transaccional, efecto irreversible]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
-origen: [21, 44, 60, 61]
+origen: [21, 44, 60, 61, 62]
 usos: 2
 ultimo_uso: 2026-08-24
 ultima_actualizacion: 2026-08-27
@@ -101,6 +101,37 @@ tapar el caso mas frecuente, porque las excepciones se escriben cuando algo
 falla, y lo que falla primero es lo que mas se usa. Si el limite es real, la
 promesa de la cabecera tiene que decirlo; una promesa con una excepcion muda es
 peor que no prometer nada.
+
+## El ORDEN tambien es estructura
+
+La forma mas barata de no necesitar un rollback es no haber escrito nada
+todavia. Si una operacion tiene varios efectos y alguno puede fallar, el orden
+en que los hacer NO es un detalle de implementacion: es lo que decide si el
+sistema puede mentir.
+
+`close` escribia nueve cosas —backlog en `done`, transicion a Jira, anotacion
+del plan, estado archivado, indice, `history.md`, memoria en el hub, borrado del
+estado vivo y "Feature #N cerrada"— y **despues** integraba. Cuando la
+integracion fallaba, las nueve ya habian pasado sobre un trabajo que no estaba
+integrado.
+
+Procedimiento:
+
+1. **Clasifica los efectos por reversibilidad.** Escribir un JSON se revierte;
+   emitir un evento a un sistema externo, escribir en una base compartida o
+   imprimir una linea en la terminal, no.
+2. **Ordena: lo reversible y lo que puede negarse primero, lo irreversible al
+   final.** En `close` quedo asi: (0) lo que puede negarse, (1) lo que tiene que
+   viajar en la rama, (2) la operacion que puede fallar, (3) todo el estado.
+3. **Lo que no se puede mover, hacelo idempotente.** Dos artefactos del cierre
+   tenian que escribirse antes por una razon fisica —viven en el worktree que el
+   merge borra— asi que se hicieron re-ejecutables sin duplicar.
+4. **No agregues rollback**: seria parcial (los efectos del punto 1 que no se
+   deshacen siguen sin deshacerse) y habria que acordarse de mantenerlo cada vez
+   que la operacion gane un efecto nuevo. Es disciplina otra vez.
+
+Regla corta: **los efectos que no se pueden deshacer van ultimos**. Y el mensaje
+de exito es uno de ellos: una vez que lo leyeron, ya no se puede desdecir.
 
 ## El mismo principio, aplicado a ARREGLAR un bug (feature #44)
 

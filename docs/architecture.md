@@ -167,8 +167,13 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
 
 `add` (con `--prd <ref>` opcional), `next`, `start`, `status`, `advance`,
 `close` (que ademas devuelve el cierre al PRD de origen, best-effort: un PRD
-ausente NUNCA impide cerrar), `autocheck`, `nudge`, `check_plan`, `check_spec`,
-`prd` (`add` / `tree`), `leccion` (`list` / `show` / `nueva` / `usar`),
+ausente NUNCA impide cerrar; desde la feature #62 corre en cuatro FASES —lo que
+puede negarse, los artefactos que viajan en la rama, integrar, y recien despues
+el estado— asi que una integracion fallida no deja el backlog, Jira,
+`progress/`, `history.md` ni las memorias afirmando un cierre que no ocurrio, y
+no hace falta rollback porque no hay nada escrito que revertir),
+`autocheck`, `nudge`, `check_plan`, `check_spec`,
+`prd` (`add` / `tree` / `doctor`), `leccion` (`list` / `show` / `nueva` / `usar`),
 `perfil` (`show` / `add` / `replace` / `remove` / `sugerir` / `check`),
 `buscar` (solo lectura, `--json` / `--todos`),
 `lecciones` (`status` / `curar` / `pin` / `unpin` / `archivar` / `restaurar` /

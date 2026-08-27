@@ -158,6 +158,16 @@ toque el flujo:
   caso irreductible —el merge cambia un archivo que el usuario tiene sucio— se
   DETECTA antes de commitear o mergear y detiene el cierre nombrando los
   archivos: el arnes no elige entre su merge y el trabajo ajeno.
+- **Y nada del ESTADO se escribe hasta que la integracion ocurrio** (feature
+  #62). El cierre corre en cuatro fases: lo que puede negarse (gates, `--to`,
+  colisiones), los artefactos que tienen que viajar en la rama (la anotacion del
+  plan y el estado archivado, idempotentes porque el merge borra el worktree
+  donde viven), la integracion, y recien despues el estado (backlog, Atlassian,
+  `progress/`, `history.md`, memorias y el mensaje de exito). No hay rollback a
+  proposito: quedaria parcial —un intent emitido a Jira y una memoria escrita en
+  el hub no se deshacen— y habria que acordarse de mantenerlo cada vez que el
+  cierre gane un efecto nuevo. La regla que vale para cualquier comando futuro
+  del arnes: **los efectos que no se pueden deshacer van ultimos**.
 
 **Como habla el arnes con un LLM** (feature #28, la unica parte que usa modelo).
 La cadena es `HARNESS_CONSOLIDAR_CMD` -> primer CLI de una tabla corta

@@ -6342,3 +6342,302 @@ fn conflicto_real_no_deja_nada_a_medias() {
         "el worktree temporal tiene que borrarse siempre: {sueltos}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #62: el cierre no declara hecho lo que no hizo
+// ---------------------------------------------------------------------------
+
+/// Estado de una feature en el backlog del sandbox.
+fn feature_json(harness_dir: &Path, fid: u64) -> serde_json::Value {
+    let file = harness_dir.join("feature_list.json");
+    let data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    data["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["id"] == serde_json::json!(fid))
+        .unwrap()
+        .clone()
+}
+
+/// Lo que el cierre NO puede haber tocado cuando la integracion falla.
+fn assert_estado_intacto(harness_dir: &Path, fid: u64) {
+    let feature = feature_json(harness_dir, fid);
+    assert_eq!(
+        feature["status"], "in_progress",
+        "la feature no puede quedar done sin estar integrada: {feature}"
+    );
+    assert!(feature.get("closed_at").is_none(), "sin closed_at: {feature}");
+    assert!(feature.get("leccion").is_none(), "sin leccion: {feature}");
+    assert!(
+        harness_dir.join(format!("progress/current-{fid}.md")).exists(),
+        "el estado vivo sigue donde estaba"
+    );
+    let historia =
+        std::fs::read_to_string(harness_dir.join("progress/history.md")).unwrap_or_default();
+    assert!(
+        !historia.contains(&format!("close feature #{fid}")),
+        "history.md no puede tener la linea de un cierre que no ocurrio:\n{historia}"
+    );
+}
+
+/// AC-1: sin `--to` el backlog no queda en done.
+#[test]
+fn sin_to_el_backlog_no_queda_en_done() {
+    let (dir, bin) = sandbox_git();
+    let harness_dir = bin.parent().unwrap();
+    let _ = dir;
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("A QUE RAMA"));
+
+    assert_estado_intacto(harness_dir, 1);
+}
+
+/// AC-2: la colision de la #61 tampoco deja rastro en el estado.
+#[test]
+fn integracion_fallida_no_escribe_nada_del_estado() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "base\n").unwrap();
+    commitear_todo(raiz, "compartido");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::write(wt.join("docs/COMPARTIDO.md"), "lo de la feature\n").unwrap();
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "lo mio sin commitear\n").unwrap();
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .code(2)
+        // Y no dice que cerro nada.
+        .stdout(predicate::str::contains("cerrada como").not());
+
+    assert_estado_intacto(harness_dir, 1);
+}
+
+/// AC-3: un conflicto REAL de merge tampoco.
+#[test]
+fn conflicto_de_merge_no_deja_el_backlog_en_done() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/C.md"), "base\n").unwrap();
+    commitear_todo(raiz, "c");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    // Los dos lados commitean la misma linea distinta: conflicto de verdad.
+    std::fs::write(wt.join("docs/C.md"), "lo de la rama\n").unwrap();
+    commitear_todo(&wt, "rama toca C");
+    std::fs::write(raiz.join("docs/C.md"), "lo de main\n").unwrap();
+    commitear_todo(raiz, "main toca C");
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("NO quedo marcada como cerrada"));
+
+    assert_estado_intacto(harness_dir, 1);
+}
+
+/// AC-4: reintentar despues de resolver completa el cierre sin duplicar nada.
+#[test]
+fn reintentar_el_cierre_no_duplica_artefactos() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "base\n").unwrap();
+    commitear_todo(raiz, "compartido");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    let plan = wt.join("docs/plan-feature-1-cobranza.md");
+    std::fs::write(wt.join("docs/COMPARTIDO.md"), "lo de la feature\n").unwrap();
+    // Primer intento: choca y falla.
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "lo mio sin commitear\n").unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .code(2);
+    // Un fallo de FASE 0 se niega ANTES de escribir los artefactos: el plan ni
+    // siquiera quedo anotado. Mejor todavia que lo que el AC-4 exige.
+    assert_eq!(
+        std::fs::read_to_string(&plan).unwrap().matches("Cerrado: ").count(),
+        0,
+        "una negativa temprana no escribe ni los artefactos de la rama"
+    );
+
+    // El usuario resuelve como quiera —aca descarta lo suyo, una de las tres
+    // salidas que le ofrece el mensaje— y reintenta el MISMO comando.
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "base\n").unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success();
+
+    // El cierre se completo...
+    assert_eq!(feature_json(harness_dir, 1)["status"], "done");
+    // ...y no hay artefactos duplicados.
+    let historia = std::fs::read_to_string(harness_dir.join("progress/history.md")).unwrap();
+    assert_eq!(
+        historia.matches("close feature #1").count(),
+        1,
+        "una sola entrada de cierre en history.md:\n{historia}"
+    );
+    let plan_final = git_en(raiz, &["show", "main:docs/plan-feature-1-cobranza.md"]);
+    assert_eq!(
+        plan_final.matches("Cerrado: ").count(),
+        1,
+        "una sola linea Cerrado en el plan:\n{plan_final}"
+    );
+}
+
+/// AC-4 (segunda mitad): el fallo que SI deja artefactos escritos es el de la
+/// FASE 2 — el conflicto real de merge, que ocurre despues de anotar el plan.
+/// Ahi la idempotencia es lo unico que evita la duplicacion.
+#[test]
+fn reintentar_despues_de_un_conflicto_real_no_duplica_la_anotacion() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/C.md"), "base\n").unwrap();
+    commitear_todo(raiz, "c");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    let plan = wt.join("docs/plan-feature-1-cobranza.md");
+    std::fs::write(wt.join("docs/C.md"), "lo de la rama\n").unwrap();
+    commitear_todo(&wt, "rama toca C");
+    std::fs::write(raiz.join("docs/C.md"), "lo de main\n").unwrap();
+    commitear_todo(raiz, "main toca C");
+
+    // Primer intento: el merge conflictua. La FASE 1 ya corrio.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .code(1);
+    assert_eq!(
+        std::fs::read_to_string(&plan).unwrap().matches("Cerrado: ").count(),
+        1,
+        "el plan quedo anotado: vive en el worktree que el merge iba a borrar"
+    );
+    assert_estado_intacto(harness_dir, 1);
+
+    // El usuario resuelve el conflicto tomando lo de la rama, y reintenta.
+    std::fs::write(raiz.join("docs/C.md"), "lo de la rama\n").unwrap();
+    commitear_todo(raiz, "resuelvo a favor de la rama");
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success();
+
+    assert_eq!(feature_json(harness_dir, 1)["status"], "done");
+    let plan_final = git_en(raiz, &["show", "main:docs/plan-feature-1-cobranza.md"]);
+    assert_eq!(
+        plan_final.matches("Cerrado: ").count(),
+        1,
+        "la anotacion no se duplico en el reintento:\n{plan_final}"
+    );
+}
+
+/// AC-5: cuando todo anda, el cierre hace exactamente lo de siempre.
+#[test]
+fn cierre_exitoso_hace_todo_lo_de_siempre() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+    let prd = sembrar_prd_maestro(raiz, &["cobranza"]);
+    commitear_todo(raiz, "prd");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"))
+        .stdout(predicate::str::contains("PRD actualizado"));
+
+    assert_eq!(feature_json(harness_dir, 1)["status"], "done");
+    assert!(feature_json(harness_dir, 1).get("closed_at").is_some());
+    assert!(!harness_dir.join("progress/current-1.md").exists(), "estado vivo borrado");
+    assert!(
+        std::fs::read_to_string(harness_dir.join("progress/history.md"))
+            .unwrap()
+            .contains("close feature #1"),
+    );
+    assert!(
+        std::fs::read_to_string(&prd).unwrap().contains("- #1 cobranza -> done"),
+        "bitacora en el PRD"
+    );
+    assert!(!wt.exists(), "worktree borrado");
+    assert!(
+        git_en(raiz, &["show", "main:docs/estado-feature-1-cobranza.md"]).contains("Estado archivado"),
+        "el estado archivado viajo en el merge"
+    );
+}
+
+/// AC-6: los cierres que no integran se comportan igual que antes.
+#[test]
+fn cierres_que_no_integran_no_cambian() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "pending", "--note", "aparcada"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como pending"))
+        .stdout(predicate::str::contains("conservados"));
+
+    assert_eq!(feature_json(harness_dir, 1)["status"], "pending");
+    assert!(wt.is_dir(), "el worktree se conserva para poder retomar");
+    assert!(
+        git_en(raiz, &["for-each-ref", "--format=%(refname:short)", "refs/heads/"])
+            .contains("feature/1-cobranza"),
+        "la rama se conserva"
+    );
+}

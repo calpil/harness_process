@@ -121,7 +121,57 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     let declaracion = lecciones::gate(paths, &data, status, leccion, leccion_motivo)?;
     let stamp = now_stamp();
     let note_text = note.unwrap_or_default().to_string();
+    // Datos derivados de la feature, SIN mutarla todavia (feature #62).
     let (plan, feature_id, feature_name, slug) = {
+        let Some(feature) = feature_at(&data, idx).as_object() else {
+            anyhow::bail!("feature_list.json: feature invalida");
+        };
+        let name = feature
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        (
+            plan_path(paths, feature),
+            py_str(feature.get("id")),
+            py_str(feature.get("name")),
+            slugify(&name),
+        )
+    };
+
+    // --- FASE 0 (feature #62): todo lo que puede NEGARSE, antes de escribir ---
+    //
+    // La integracion se DECIDE y se VALIDA aca (falta `--to`, colisiones con
+    // trabajo sin commitear), pero no se ejecuta. Antes esto vivia adentro de
+    // `integrar`, que corria al final: para cuando se negaba, el arnes ya habia
+    // escrito el backlog, emitido la transicion a Jira, anotado el plan,
+    // archivado el estado, reescrito el indice, dejado la linea en history.md,
+    // guardado la memoria en el hub y dicho "Feature #N cerrada". Nueve
+    // afirmaciones sobre un trabajo que no estaba integrado.
+    let integracion = planificar_integracion(paths, &data, idx, status, to, &feature_id)?;
+
+    // --- FASE 1: los artefactos que tienen que VIAJAR EN LA RAMA ---
+    //
+    // Estos dos no se pueden dejar para el final: viven en el `docs/` del
+    // worktree y el merge borra ese worktree. Escribirlos despues seria no
+    // escribirlos nunca. Por eso son IDEMPOTENTES: si la integracion falla
+    // quedan escritos, y el reintento no los duplica.
+    anotar_plan(&plan, &stamp, status, &note_text)?;
+    let archived_rel = archivar_estado(
+        paths,
+        &feature_id,
+        &feature_name,
+        &slug,
+        &stamp,
+        status,
+        &note_text,
+    )?;
+
+    // --- FASE 2: integrar. Si falla, NADA del estado se escribio ---
+    ejecutar_integracion(&integracion, &feature_id)?;
+
+    // --- FASE 3: recien ahora, el estado. El cierre ya ocurrio ---
+    {
         let feature = feature_mut(&mut data, idx)?;
         feature.insert("status".to_string(), json!(status));
         feature.insert("closed_at".to_string(), json!(stamp.clone()));
@@ -139,63 +189,18 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
                 feature.insert("leccion_motivo".to_string(), json!(motivo));
             }
         }
-        let name = feature
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        (
-            plan_path(paths, feature),
-            py_str(feature.get("id")),
-            py_str(feature.get("name")),
-            slugify(&name),
-        )
-    };
+    }
     save_features(paths, &data)?;
     // Feature #15: transicion al estado final (o flag Impediment si quedo
-    // bloqueada) y comentario con la nota de cierre (AC-8).
+    // bloqueada) y comentario con la nota de cierre (AC-8). Un intent emitido no
+    // se puede deshacer: por eso sale recien cuando el cierre ocurrio.
     if let Some(feature) = feature_at(&data, idx).as_object() {
         crate::atlassian::emit::on_close(paths, feature, status, Some(&note_text));
     }
     crate::atlassian::push::push_bg(paths);
-    if plan.exists() {
-        let mut f = std::fs::OpenOptions::new().append(true).open(&plan)?;
-        write!(f, "\n---\nCerrado: {stamp} - status={status} - {note_text}\n")?;
-    }
-    std::fs::create_dir_all(&paths.progress)?;
-    // No-destructivo: si current.md tiene estado real escrito a mano, archivalo
-    // en docs/ ANTES de resetear.
-    let mut archived_rel: Option<String> = None;
-    // Feature #47 (AC-11): se archiva el estado vivo DE ESTA feature. El de las
-    // otras activas no se toca — antes habia un unico current.md y cerrar una
-    // pisaba el de la otra (era el bug de la feature #45).
-    let vivo = paths.current_de(&feature_id);
-    if vivo.exists() {
-        let content = std::fs::read_to_string(&vivo)?;
-        if !content.trim().is_empty() && !content.contains("Sin feature activa") {
-            std::fs::create_dir_all(&paths.plans)?;
-            let archived = paths
-                .plans
-                .join(format!("estado-feature-{feature_id}-{slug}.md"));
-            let mut body = format!(
-                "# Estado archivado - Feature #{feature_id}: {feature_name}\n"
-            );
-            body.push_str(&format!(
-                "Cerrada: {stamp} - status={status} - {note_text}\n\n---\n\n"
-            ));
-            body.push_str(&content);
-            std::fs::write(&archived, body)?;
-            archived_rel = Some(
-                relpath(&archived, &paths.repo_root)
-                    .unwrap_or_else(|| archived.clone())
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-        }
-    }
     // El estado vivo de la feature cerrada desaparece (ya quedo archivado en
     // docs/) y current.md se reescribe como indice de lo que sigue abierto.
-    let _ = std::fs::remove_file(&vivo);
+    let _ = std::fs::remove_file(paths.current_de(&feature_id));
     crate::progress::escribir_indice(paths, &data)?;
     let leccion_log = match &declaracion {
         Some(decl) => format!(" leccion={}", decl.resumen()),
@@ -220,7 +225,6 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         msg.push_str(&format!(" Estado archivado en {rel}."));
     }
     println!("{msg}");
-    integrar(paths, &data, idx, status, to, &feature_id)?;
     // Vuelta al PRD: marca el hito y deja bitacora en el PRD de origen.
     //
     // Corre DESPUES de integrar y solo si integrar salio bien (feature #60): un
@@ -253,6 +257,74 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         let _ = std::io::stderr().write_all(lecciones::texto_contrato_de_cierre(paths).as_bytes());
     }
     Ok(())
+}
+
+/// FASE 1: deja constancia del cierre en el plan de la feature.
+///
+/// IDEMPOTENTE (feature #62): se escribe ANTES de integrar porque el plan vive
+/// en el worktree que el merge borra, asi que un cierre que despues falla la
+/// deja escrita. Al reintentar no se duplica: la marca se busca por `status`,
+/// no por fecha — el `stamp` cambia en cada corrida y nunca coincidiria.
+fn anotar_plan(plan: &std::path::Path, stamp: &str, status: &str, note: &str) -> anyhow::Result<()> {
+    if !plan.exists() {
+        return Ok(());
+    }
+    let ya = std::fs::read_to_string(plan).unwrap_or_default();
+    if ya
+        .lines()
+        .any(|l| l.starts_with("Cerrado: ") && l.contains(&format!("status={status}")))
+    {
+        return Ok(());
+    }
+    let mut f = std::fs::OpenOptions::new().append(true).open(plan)?;
+    write!(f, "\n---\nCerrado: {stamp} - status={status} - {note}\n")?;
+    Ok(())
+}
+
+/// FASE 1: archiva el estado vivo de la feature en su `docs/`.
+///
+/// No-destructivo: si `current-<id>.md` tiene estado real escrito a mano, se
+/// guarda ANTES de que el cierre lo borre. Se archiva el de ESTA feature; el de
+/// las otras activas no se toca — antes habia un unico `current.md` y cerrar una
+/// pisaba el de la otra (era el bug de la feature #45).
+///
+/// Idempotente por naturaleza: sobrescribe. Y NO borra el estado vivo: eso pasa
+/// en la FASE 3, para que un cierre que no llego a integrar lo conserve
+/// (feature #62).
+fn archivar_estado(
+    paths: &HarnessPaths,
+    feature_id: &str,
+    feature_name: &str,
+    slug: &str,
+    stamp: &str,
+    status: &str,
+    note_text: &str,
+) -> anyhow::Result<Option<String>> {
+    std::fs::create_dir_all(&paths.progress)?;
+    let vivo = paths.current_de(feature_id);
+    if !vivo.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&vivo)?;
+    if content.trim().is_empty() || content.contains("Sin feature activa") {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(&paths.plans)?;
+    let archived = paths
+        .plans
+        .join(format!("estado-feature-{feature_id}-{slug}.md"));
+    let mut body = format!("# Estado archivado - Feature #{feature_id}: {feature_name}\n");
+    body.push_str(&format!(
+        "Cerrada: {stamp} - status={status} - {note_text}\n\n---\n\n"
+    ));
+    body.push_str(&content);
+    std::fs::write(&archived, body)?;
+    Ok(Some(
+        relpath(&archived, &paths.repo_root)
+            .unwrap_or_else(|| archived.clone())
+            .to_string_lossy()
+            .into_owned(),
+    ))
 }
 
 /// Que informar sobre la rama y el worktree cuando el cierre NO integra
@@ -309,22 +381,42 @@ fn mensaje_de_colision(choques: &[String], destino: &str, feature_id: &str) -> S
     )
 }
 
-/// Integracion GitFlow del cierre (feature #47 / AC-14..AC-21).
+/// Lo que el cierre va a hacer con git, ya decidido y VALIDADO.
+///
+/// Partir la integracion en decidir y ejecutar (feature #62) es lo que permite
+/// negarse antes de escribir una sola linea de estado: lo que puede fallar por
+/// algo previsible —falta `--to`, colision con trabajo sin commitear— se
+/// descubre construyendo este plan, no ejecutandolo.
+enum PlanDeIntegracion {
+    /// No hay nada que integrar: sin rama propia (modo clasico o repo sin git),
+    /// o un estado que no integra. `conservacion` es lo que hay que informar.
+    Nada { conservacion: Option<String> },
+    /// Integrar `rama` en `destino`, con todo ya validado.
+    Integrar {
+        principal: std::path::PathBuf,
+        rama: String,
+        destino: String,
+        worktree: Option<std::path::PathBuf>,
+    },
+}
+
+/// FASE 0: decide la integracion GitFlow del cierre y la valida (feature #47 /
+/// AC-14..AC-21). NO escribe nada.
 ///
 /// Solo `done` integra: `blocked`, `pending` y `superseded` conservan la rama y
 /// el worktree para poder retomar. El arnes NO elige la rama destino — se niega
 /// sin `--to` y le ordena al agente preguntarle al USUARIO (decision OBS-1).
-fn integrar(
+fn planificar_integracion(
     paths: &HarnessPaths,
     data: &Value,
     idx: usize,
     status: &str,
     to: Option<&str>,
     feature_id: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PlanDeIntegracion> {
     let (rama, worktree) = {
         let Some(feature) = feature_at(data, idx).as_object() else {
-            return Ok(());
+            return Ok(PlanDeIntegracion::Nada { conservacion: None });
         };
         (
             feature.get("branch").and_then(Value::as_str).map(str::to_string),
@@ -336,7 +428,7 @@ fn integrar(
     };
     // Sin rama propia no hay nada que integrar (modo clasico o repo sin git).
     let Some(rama) = rama else {
-        return Ok(());
+        return Ok(PlanDeIntegracion::Nada { conservacion: None });
     };
     if status != "done" {
         // Feature #50: se mira el repo ANTES de afirmar. El backlog dice que la
@@ -345,13 +437,12 @@ fn integrar(
         let hay_rama = crate::git::repo_principal(&paths.repo_root)
             .is_some_and(|principal| crate::git::rama_existe(&principal, &rama));
         let hay_worktree = worktree.as_ref().is_some_and(|wt| wt.is_dir());
-        if let Some(linea) = mensaje_conservacion(&rama, status, hay_rama, hay_worktree) {
-            println!("{linea}");
-        }
-        return Ok(());
+        return Ok(PlanDeIntegracion::Nada {
+            conservacion: mensaje_conservacion(&rama, status, hay_rama, hay_worktree),
+        });
     }
     let Some(principal) = crate::git::repo_principal(&paths.repo_root) else {
-        return Ok(());
+        return Ok(PlanDeIntegracion::Nada { conservacion: None });
     };
 
     // AC-14: la rama destino la decide el USUARIO, no el arnes.
@@ -360,7 +451,7 @@ fn integrar(
             code: 2,
             message: Some(format!(
                 concat!(
-                    "[GitFlow] La feature #{} quedo cerrada, pero falta decir A QUE RAMA se integra.\n",
+                    "[GitFlow] La feature #{} no se puede cerrar todavia: falta decir A QUE RAMA se integra.\n",
                     "    PREGUNTALE AL USUARIO a cual va (develop, release/..., main) y despues:\n",
                     "      sh harness_cli close --feature {} --status done --to <rama>\n",
                     "    Ramas disponibles: {}"
@@ -374,10 +465,9 @@ fn integrar(
     };
 
     // Feature #61: si el merge fuese a pisar algo que el USUARIO tiene sin
-    // commitear, se dice ACA — antes de anunciar nada, antes de commitear el
-    // worktree y antes de mergear — para que el repo quede exactamente como
-    // estaba. Es el unico caso que no se puede resolver sin decidir por el, y
-    // el arnes no elige entre su merge y el trabajo ajeno.
+    // commitear, se dice ACA — antes de escribir nada — para que el repo quede
+    // exactamente como estaba. Es el unico caso que no se puede resolver sin
+    // decidir por el, y el arnes no elige entre su merge y el trabajo ajeno.
     let choques = crate::git::colisiones(&principal, destino, &rama, worktree.as_deref());
     if !choques.is_empty() {
         // code 2 como el resto de los gates del cierre (spec, verify, docs,
@@ -388,6 +478,34 @@ fn integrar(
         }
         .into());
     }
+
+    Ok(PlanDeIntegracion::Integrar {
+        principal,
+        rama,
+        destino: destino.to_string(),
+        worktree,
+    })
+}
+
+/// FASE 2: ejecuta el plan de integracion. Lo unico que puede fallar aca es un
+/// conflicto de merge REAL, que no se puede saber sin intentarlo.
+fn ejecutar_integracion(plan: &PlanDeIntegracion, feature_id: &str) -> anyhow::Result<()> {
+    let PlanDeIntegracion::Integrar {
+        principal,
+        rama,
+        destino,
+        worktree,
+    } = plan
+    else {
+        if let PlanDeIntegracion::Nada {
+            conservacion: Some(linea),
+        } = plan
+        {
+            println!("{linea}");
+        }
+        return Ok(());
+    };
+
     println!("[GitFlow] integrando {rama} -> {destino}");
     // El trabajo de la feature vive en su worktree: si quedo algo sin
     // commitear, se commitea AHI (nunca en el checkout principal) para que el
@@ -399,22 +517,22 @@ fn integrar(
             Err(err) => println!("  [i] no pude commitear el worktree: {err:#}"),
         }
     }
-    if let Err(err) = crate::git::merge_en(&principal, destino, &rama) {
+    if let Err(err) = crate::git::merge_en(principal, destino, rama) {
         // AC-18: el merge se abortó; nada quedó a medias.
         return Err(Exit::msg(format!(
-            "[GitFlow] no se pudo integrar {rama} en {destino}: {err:#}\n    El merge se aborto y el repo quedo como estaba. Resolvelo a mano y volve a correr el cierre con --to."
+            "[GitFlow] no se pudo integrar {rama} en {destino}: {err:#}\n    El merge se aborto y el repo quedo como estaba. Resolvelo a mano y volve a correr el cierre con --to.\n    La feature NO quedo marcada como cerrada: el backlog dice la verdad."
         ))
         .into());
     }
     println!("  merge hecho (sin trailers de IA)");
 
-    match crate::git::push(&principal, destino) {
+    match crate::git::push(principal, destino) {
         Ok(()) => println!("  {destino} publicada en origin"),
         Err(err) => println!("  [i] merge local hecho, pero no pude publicar {destino}: {err:#}"),
     }
     // AC-19: se borra el worktree, se conserva la rama.
     if let Some(wt) = worktree {
-        match crate::git::borrar_worktree(&principal, &wt) {
+        match crate::git::borrar_worktree(principal, wt) {
             Ok(()) => println!("  worktree {} borrado (la rama {rama} se conserva)", wt.display()),
             Err(err) => println!("  [i] no pude borrar el worktree {}: {err:#}", wt.display()),
         }
@@ -509,7 +627,46 @@ fn aviso_pendiente(fid: &str, motivo: &str) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
+
+    /// AC-7 (feature #62): anotar el plan es idempotente.
+    ///
+    /// La anotacion se escribe ANTES de integrar (el plan vive en el worktree
+    /// que el merge borra), asi que un cierre que despues falla la deja
+    /// escrita. El reintento no la puede duplicar. La marca se busca por
+    /// `status` y no por fecha: el `stamp` cambia en cada corrida y una
+    /// comparacion por linea completa nunca coincidiria.
+    #[test]
+    fn anotar_plan_es_idempotente() {
+        let dir = tempfile::tempdir().unwrap();
+        let plan = dir.path().join("plan-feature-62-x.md");
+        std::fs::write(&plan, "# Plan\n\nLo que hay que hacer.\n").unwrap();
+
+        anotar_plan(&plan, "2026-08-27T10:00:00Z", "done", "primera").unwrap();
+        // Segundo intento, con OTRA fecha y otra nota: es el reintento.
+        anotar_plan(&plan, "2026-08-27T11:30:00Z", "done", "segunda").unwrap();
+
+        let texto = std::fs::read_to_string(&plan).unwrap();
+        assert_eq!(
+            texto.matches("Cerrado: ").count(),
+            1,
+            "una sola anotacion por mas que se reintente:\n{texto}"
+        );
+        assert!(texto.contains("2026-08-27T10:00:00Z"), "vale la del primer intento");
+        assert!(!texto.contains("11:30:00Z"));
+        assert!(texto.contains("# Plan"), "el cuerpo del plan intacto");
+
+        // Otro estado SI se anota: cerrar como pending y despues como done son
+        // dos hechos distintos.
+        anotar_plan(&plan, "2026-08-28T09:00:00Z", "pending", "aparcada").unwrap();
+        let texto = std::fs::read_to_string(&plan).unwrap();
+        assert_eq!(texto.matches("Cerrado: ").count(), 2);
+        assert!(texto.contains("status=pending"));
+
+        // Un plan que no existe no es un error: no todas las features lo tienen.
+        anotar_plan(&dir.path().join("no-existe.md"), "x", "done", "").unwrap();
+    }
 
     /// AC-4 (feature #61): el mensaje nombra cada archivo que choca y da las
     /// tres salidas reales. El texto crudo de git ("Please commit your changes

@@ -1338,12 +1338,46 @@ agente que te pregunte a que rama va (y lista las disponibles). Con el:
 2. mergea la rama en la destino (`--no-ff`, en un worktree temporal, sin tocar
    tu checkout ni exigirte tener el arbol limpio),
 3. publica la rama destino,
-4. borra el worktree y **conserva la rama**.
+4. borra el worktree y **conserva la rama**,
+5. y **recien entonces** escribe el estado del cierre (feature #62).
 
 Ningun commit que haga el arnes lleva trailers de IA. Si el merge tiene
 conflicto, se aborta y no queda nada a medias: el repo sigue como estaba y el
 mensaje dice que resolver. Los cierres `blocked`, `pending` y `superseded` no
 integran nada y conservan el worktree para poder retomar.
+
+### El cierre no declara hecho lo que no hizo (feature #62)
+
+El orden importaba mas de lo que parecia. El cierre escribia TODO su estado
+antes de integrar: marcaba la feature `done` en el backlog, emitia la transicion
+a Jira, anotaba el plan, archivaba el estado vivo y lo borraba, reescribia
+`current.md`, dejaba la linea en `history.md`, guardaba la memoria en el hub e
+imprimia "Feature #N cerrada". Y **despues** integraba. Si la integracion
+fallaba —falta `--to`, colision con trabajo sin commitear, conflicto real— esas
+nueve afirmaciones ya estaban hechas sobre un trabajo que no estaba integrado.
+
+Ahora el cierre corre en cuatro fases:
+
+| Fase | Que hace | Si falla |
+| --- | --- | --- |
+| 0 | gates, `--to`, colisiones | nada escrito, ni siquiera los artefactos |
+| 1 | anota el plan y archiva el estado en el `docs/` de la feature | — |
+| 2 | commitea, mergea, publica, borra el worktree | **el estado no se toco** |
+| 3 | backlog, Jira, `progress/`, `history.md`, memorias, "cerrada", vuelta al PRD | — |
+
+La FASE 1 existe por una razon concreta: esos dos artefactos viven en el `docs/`
+del worktree y el merge **borra** ese worktree, asi que escribirlos despues
+seria no escribirlos nunca. Por eso son idempotentes — la linea `Cerrado:` del
+plan se agrega solo si no esta, buscando por `status` y no por fecha (el sello
+de tiempo cambia en cada corrida y nunca coincidiria).
+
+No hay rollback, y es a proposito: un rollback quedaria **parcial** —el intent
+ya emitido a Jira y la memoria ya escrita en el hub no se deshacen— y ademas
+habria que acordarse de mantenerlo cada vez que el cierre gane un efecto nuevo.
+No hay estado que revertir porque no se escribe hasta que el cierre ocurrio.
+
+Consecuencia visible: `Feature #N cerrada` ahora se imprime **despues** de la
+salida de `[GitFlow]`, que es el orden real de los hechos.
 
 ### El merge no corre en tu checkout (feature #61)
 
