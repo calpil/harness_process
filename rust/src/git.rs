@@ -6,6 +6,21 @@
 //! - **Nunca reescribe historia ni fuerza nada**: sin `--force`, sin rebase,
 //!   sin squash, sin borrar ramas. Un conflicto ABORTA y deja el repo como
 //!   estaba (Articulo 4 / AC-18).
+//! - **El merge NUNCA corre en el checkout del usuario** (feature #61). Se hace
+//!   siempre en un worktree temporal `--detach`, este el destino checkouteado o
+//!   no. Antes habia una excepcion silenciosa —si el destino era la rama abierta
+//!   se mergeaba ahi mismo— y era justo el caso mas comun: cerrar hacia `main`
+//!   estando en `main`. Ahi la promesa "el cierre no puede exigirte tener el
+//!   escritorio ordenado" se caia con el texto crudo de git, y despues de haber
+//!   commiteado el worktree de la feature.
+//!
+//!   Queda UN caso que no se puede resolver sin decidir por el usuario: que el
+//!   merge cambie un archivo que el tiene modificado sin commitear. Ahi el arnes
+//!   no elige entre su merge y el trabajo ajeno: lo DETECTA antes de tocar nada
+//!   (`colisiones`) y se detiene nombrando los archivos. No stashea ni descarta
+//!   (decision USUARIO 2026-08-27), y tampoco avanza la rama dejando el arbol
+//!   atras: eso deja `git status` mostrando la REVERSION del merge, y un commit
+//!   distraido desharia lo recien integrado.
 //! - **Los commits del arnes no llevan trailers de IA** (AC-16): lo exige
 //!   `UPDATING.md` y lo verifica `commit_guard.sh`.
 //!
@@ -13,6 +28,7 @@
 //! el flujo sigue como siempre: el aislamiento es una mejora, no un requisito
 //! (AC-5).
 
+use anyhow::Context;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -236,12 +252,93 @@ pub fn commit_todo(dir: &Path, mensaje: &str) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// Archivos con cambios sin commitear en un checkout (modificados, borrados,
+/// staged o sin trackear). Solo consulta.
+pub fn sucios(dir: &Path) -> Vec<String> {
+    let Some(salida) = git(dir, &["status", "--porcelain"]) else {
+        return Vec::new();
+    };
+    salida.lines().filter_map(ruta_de_status).collect()
+}
+
+/// La ruta de una linea de `git status --porcelain` (`XY ruta`, o
+/// `R  vieja -> nueva`). Devuelve la ruta DESTINO, que es la que el merge
+/// podria pisar.
+///
+/// NO se corta por posicion fija: `git()` le hace `trim()` a la salida, asi que
+/// la primera linea pierde el espacio de la columna X (` M a.md` llega como
+/// `M a.md`) y un corte en la columna 3 se comeria las primeras letras del
+/// nombre. Se parte por el primer espacio despues de los codigos, que funciona
+/// con y sin ese espacio, y deja intactas las rutas con espacios.
+fn ruta_de_status(linea: &str) -> Option<String> {
+    let (_estado, resto) = linea.trim_start().split_once(' ')?;
+    let resto = resto.trim();
+    let ruta = resto.rsplit(" -> ").next().unwrap_or(resto);
+    let ruta = ruta.trim().trim_matches('"');
+    if ruta.is_empty() {
+        return None;
+    }
+    Some(ruta.to_string())
+}
+
+/// Archivos que el merge de `rama` en `destino` cambiaria: lo que la rama toco
+/// desde que se separo (`destino...rama`), mas lo que todavia esta sin
+/// commitear en su worktree — porque el cierre lo va a commitear antes de
+/// mergear.
+pub fn archivos_del_merge(dir: &Path, destino: &str, rama: &str, worktree: Option<&Path>) -> Vec<String> {
+    let mut out: Vec<String> = git(
+        dir,
+        &["diff", "--name-only", &format!("{destino}...{rama}")],
+    )
+    .map(|s| s.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
+    .unwrap_or_default();
+    if let Some(wt) = worktree {
+        out.extend(sucios(wt));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Los archivos que el usuario tiene sin commitear en su checkout Y que el
+/// merge cambiaria: los unicos que de verdad impiden integrar.
+///
+/// SOLO CONSULTA: no muta nada, no necesita hacer el merge y por eso se puede
+/// llamar ANTES de commitear nada (feature #61 / AC-7).
+///
+/// Vacio cuando el principal no tiene el destino abierto: ahi el merge ocurre
+/// en un worktree temporal y el arbol del usuario ni se entera.
+pub fn colisiones(
+    principal: &Path,
+    destino: &str,
+    rama: &str,
+    worktree: Option<&Path>,
+) -> Vec<String> {
+    if rama_actual(principal).as_deref() != Some(destino) {
+        return Vec::new();
+    }
+    let sucios = sucios(principal);
+    if sucios.is_empty() {
+        return Vec::new();
+    }
+    let del_merge = archivos_del_merge(principal, destino, rama, worktree);
+    let mut choques: Vec<String> = sucios
+        .into_iter()
+        .filter(|s| del_merge.iter().any(|m| m == s))
+        .collect();
+    choques.sort();
+    choques.dedup();
+    choques
+}
+
 /// Mergea `rama` en `destino` sin reescribir historia y sin trailers de IA.
 ///
-/// El merge se hace en un worktree TEMPORAL de la rama destino: asi el
-/// checkout principal no cambia de rama y no importa si tiene cambios sin
-/// commitear — el cierre de una feature no puede exigirte tener el escritorio
-/// ordenado. Ante conflicto se aborta y no queda nada a medias (AC-15, AC-18).
+/// El merge se hace SIEMPRE en un worktree temporal `--detach` (feature #61):
+/// el checkout del usuario no participa, no cambia de rama y no queda en estado
+/// de merge pase lo que pase. Despues se avanza la rama destino; si el usuario
+/// la tiene abierta, `git reset --keep` mueve rama y arbol conservando lo que
+/// tenga sin commitear. Ante conflicto se aborta y no queda nada a medias
+/// (AC-15, AC-18).
 pub fn merge_en(principal: &Path, destino: &str, rama: &str) -> anyhow::Result<()> {
     if !rama_existe(principal, destino) {
         anyhow::bail!(
@@ -249,32 +346,67 @@ pub fn merge_en(principal: &Path, destino: &str, rama: &str) -> anyhow::Result<(
             ramas(principal).join(", ")
         );
     }
-    // Si el destino es la rama que el principal tiene abierta, se mergea ahi
-    // mismo (git no permite dos worktrees sobre la misma rama).
-    if rama_actual(principal).as_deref() == Some(destino) {
-        return merge_aqui(principal, destino, rama);
-    }
-    let temporal = std::env::temp_dir().join(format!(
-        "harness-merge-{}-{}",
-        destino.replace('/', "-"),
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&temporal);
+    let Some(viejo) = git(principal, &["rev-parse", destino]) else {
+        anyhow::bail!("no se pudo resolver el commit de '{destino}'");
+    };
+    // Directorio UNICO por invocacion. Con `<destino>-<pid>` dos merges del
+    // mismo proceso (o dos tests en paralelo) se pisaban: uno borraba el
+    // worktree del otro a mitad del merge.
+    let base = tempfile::Builder::new()
+        .prefix(&format!("harness-merge-{}-", destino.replace('/', "-")))
+        .tempdir()
+        .context("no se pudo crear el directorio temporal del merge")?;
+    // `worktree add` exige que el destino NO exista todavia.
+    let temporal = base.path().join("wt");
+    // `--detach` es la clave: git no deja dos worktrees sobre la MISMA rama,
+    // pero si deja uno en HEAD detached sobre su commit. Por eso ya no hace
+    // falta la excepcion de mergear en el checkout principal.
     git_check(
         principal,
-        &["worktree", "add", &temporal.to_string_lossy(), destino],
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            &temporal.to_string_lossy(),
+            destino,
+        ],
     )?;
-    let resultado = merge_aqui(&temporal, destino, rama);
+    let resultado = merge_aqui(&temporal, destino, rama)
+        .and_then(|()| git(&temporal, &["rev-parse", "HEAD"]).context("no se pudo leer el merge"));
     let _ = git(
         principal,
         &["worktree", "remove", "--force", &temporal.to_string_lossy()],
     );
-    let _ = std::fs::remove_dir_all(&temporal);
+    drop(base);
     let _ = git(principal, &["worktree", "prune"]);
-    resultado
+    // El merge quedo en un commit suelto; recien ahora se mueve la rama. Si
+    // fallo, no se movio nada y el commit huerfano se lo lleva el `gc`.
+    avanzar_rama(principal, destino, &resultado?, &viejo)
 }
 
-/// El merge propiamente dicho, en el arbol que ya tiene `destino` abierto.
+/// Mueve `destino` al commit del merge.
+///
+/// Si el usuario tiene esa rama abierta, `reset --keep` mueve la rama Y
+/// actualiza el arbol preservando sus cambios sin commitear; si alguno chocara,
+/// aborta sin tocar nada (por eso `colisiones` lo detecta antes: para poder
+/// explicarlo en castellano y no dejar el cierre a mitad de camino). Si no la
+/// tiene abierta, se mueve la referencia con guarda de valor viejo, que falla si
+/// alguien la movio mientras tanto.
+fn avanzar_rama(principal: &Path, destino: &str, nuevo: &str, viejo: &str) -> anyhow::Result<()> {
+    if rama_actual(principal).as_deref() == Some(destino) {
+        git_check(principal, &["reset", "--keep", nuevo])?;
+        return Ok(());
+    }
+    git_check(
+        principal,
+        &["update-ref", &format!("refs/heads/{destino}"), nuevo, viejo],
+    )?;
+    Ok(())
+}
+
+/// El merge propiamente dicho, en el directorio que se le pase (siempre el
+/// worktree temporal desde la feature #61). Ante conflicto aborta y deja ese
+/// arbol como estaba.
 fn merge_aqui(dir: &Path, destino: &str, rama: &str) -> anyhow::Result<()> {
     let mensaje = format!("merge: {rama} -> {destino} (cierre de feature del arnes)");
     let resultado = git_check(dir, &["merge", "--no-ff", "-m", &mensaje, rama]);
@@ -295,6 +427,120 @@ pub fn push(principal: &Path, rama: &str) -> anyhow::Result<()> {
 /// Rama actual del checkout.
 pub fn rama_actual(dir: &Path) -> Option<String> {
     git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+}
+
+#[cfg(test)]
+mod tests_colisiones {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use std::process::Command;
+
+    fn git_raw(dir: &Path, args: &[&str]) {
+        Command::new("git").args(args).current_dir(dir).output().unwrap();
+    }
+
+    /// Repo con `main` y una rama `feature` que toca `A.md`.
+    fn repo_con_rama() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        git_raw(p, &["init", "-q", "-b", "main"]);
+        git_raw(p, &["config", "user.email", "t@e.c"]);
+        git_raw(p, &["config", "user.name", "T"]);
+        std::fs::write(p.join("A.md"), "base\n").unwrap();
+        std::fs::write(p.join("B.md"), "base\n").unwrap();
+        git_raw(p, &["add", "-A"]);
+        git_raw(p, &["commit", "-qm", "init"]);
+        git_raw(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("A.md"), "lo de la rama\n").unwrap();
+        git_raw(p, &["commit", "-qam", "rama toca A"]);
+        git_raw(p, &["checkout", "-q", "main"]);
+        dir
+    }
+
+    /// AC-7: `colisiones` SOLO consulta. Se llama con el arbol sucio y despues
+    /// el arbol sigue exactamente igual: no mergea, no stashea, no resetea.
+    #[test]
+    fn colisiones_solo_consulta_y_no_muta() {
+        let dir = repo_con_rama();
+        let p = dir.path();
+        std::fs::write(p.join("A.md"), "lo mio sin commitear\n").unwrap();
+
+        let antes_head = git(p, &["rev-parse", "HEAD"]).unwrap();
+        let antes_status = git(p, &["status", "--porcelain"]).unwrap();
+
+        let choques = colisiones(p, "main", "feature", None);
+
+        assert_eq!(choques, vec!["A.md".to_string()], "A.md choca");
+        assert_eq!(git(p, &["rev-parse", "HEAD"]).unwrap(), antes_head, "no movio HEAD");
+        assert_eq!(git(p, &["status", "--porcelain"]).unwrap(), antes_status, "no toco el arbol");
+        assert_eq!(
+            std::fs::read_to_string(p.join("A.md")).unwrap(),
+            "lo mio sin commitear\n"
+        );
+        assert!(!p.join(".git/MERGE_HEAD").exists(), "no mergeo nada");
+    }
+
+    /// Lo sucio que el merge NO toca no es una colision: ese es todo el punto.
+    #[test]
+    fn colisiones_ignora_lo_sucio_que_el_merge_no_toca() {
+        let dir = repo_con_rama();
+        let p = dir.path();
+        std::fs::write(p.join("B.md"), "lo mio sin commitear\n").unwrap();
+        assert!(colisiones(p, "main", "feature", None).is_empty());
+    }
+
+    /// Si el destino no esta checkouteado, el merge ocurre en un worktree
+    /// temporal y el arbol del usuario ni se entera: nunca hay colision.
+    #[test]
+    fn colisiones_vacias_si_el_destino_no_esta_abierto() {
+        let dir = repo_con_rama();
+        let p = dir.path();
+        std::fs::write(p.join("A.md"), "lo mio\n").unwrap();
+        // Parado en otra rama: el destino `main` no es la rama abierta.
+        git_raw(p, &["stash"]);
+        git_raw(p, &["checkout", "-q", "-b", "otra"]);
+        std::fs::write(p.join("A.md"), "lo mio\n").unwrap();
+        assert!(
+            colisiones(p, "main", "feature", None).is_empty(),
+            "sin el destino abierto no hay nada que pisar"
+        );
+    }
+
+    /// Lo que la feature todavia NO commiteo cuenta: el cierre lo va a
+    /// commitear justo antes de mergear.
+    #[test]
+    fn archivos_del_merge_incluye_lo_sin_commitear_del_worktree() {
+        let dir = repo_con_rama();
+        let p = dir.path();
+        let wt = dir.path().join("wt");
+        git_raw(p, &["worktree", "add", "-q", &wt.to_string_lossy(), "feature"]);
+        std::fs::write(wt.join("B.md"), "la feature todavia no lo commiteo\n").unwrap();
+
+        let archivos = archivos_del_merge(p, "main", "feature", Some(&wt));
+        assert!(archivos.contains(&"A.md".to_string()), "lo ya commiteado");
+        assert!(archivos.contains(&"B.md".to_string()), "y lo que esta por commitearse");
+    }
+
+    /// Las rutas de `git status --porcelain`, incluido el rename.
+    #[test]
+    fn ruta_de_status_lee_las_formas_de_porcelain() {
+        assert_eq!(ruta_de_status(" M docs/a.md"), Some("docs/a.md".to_string()));
+        // La forma que llega cuando `git()` ya trimeo la salida: sin el espacio
+        // de la columna X. Cortar por posicion fija devolvia ".md" y la
+        // colision no se detectaba (bug encontrado por el test de la #61).
+        assert_eq!(ruta_de_status("M docs/a.md"), Some("docs/a.md".to_string()));
+        assert_eq!(ruta_de_status("M A.md"), Some("A.md".to_string()));
+        // Rutas con espacios.
+        assert_eq!(ruta_de_status(" M mi archivo.md"), Some("mi archivo.md".to_string()));
+        assert_eq!(ruta_de_status("?? nuevo.md"), Some("nuevo.md".to_string()));
+        assert_eq!(ruta_de_status("M  staged.md"), Some("staged.md".to_string()));
+        // En un rename manda el destino: es el que el merge podria pisar.
+        assert_eq!(
+            ruta_de_status("R  viejo.md -> nuevo.md"),
+            Some("nuevo.md".to_string())
+        );
+        assert_eq!(ruta_de_status(""), None);
+    }
 }
 
 #[cfg(test)]

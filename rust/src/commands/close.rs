@@ -280,6 +280,35 @@ fn mensaje_conservacion(
     }
 }
 
+/// Que decirle al usuario cuando su trabajo sin commitear choca con el merge
+/// (feature #61). Funcion pura: recibe los archivos, no los busca.
+///
+/// Nombra cada archivo y da las tres salidas reales, en castellano: el texto
+/// crudo de git ("Please commit your changes or stash them") no dice CUAL de
+/// las tres queres ni como retomar el cierre.
+fn mensaje_de_colision(choques: &[String], destino: &str, feature_id: &str) -> String {
+    let lista = choques
+        .iter()
+        .map(|f| format!("      {f}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        concat!(
+            "[GitFlow] No puedo integrar en {} sin pisar trabajo tuyo sin commitear.\n",
+            "    Tenes estos archivos modificados en tu checkout y el merge tambien los cambia:\n",
+            "{}\n",
+            "    NO toque nada: la rama no se movio y la feature no se commiteo.\n",
+            "    Son TUS cambios, asi que elegis vos:\n",
+            "      git add -A && git commit      # los queres conservar\n",
+            "      git stash                     # los queres guardar para despues\n",
+            "      git checkout -- <archivo>     # no te interesan (DESCARTA lo no commiteado)\n",
+            "    Y despues volve a correr el cierre:\n",
+            "      sh harness_cli close --feature {} --status done --to {}"
+        ),
+        destino, lista, feature_id, destino
+    )
+}
+
 /// Integracion GitFlow del cierre (feature #47 / AC-14..AC-21).
 ///
 /// Solo `done` integra: `blocked`, `pending` y `superseded` conservan la rama y
@@ -344,6 +373,21 @@ fn integrar(
         .into());
     };
 
+    // Feature #61: si el merge fuese a pisar algo que el USUARIO tiene sin
+    // commitear, se dice ACA — antes de anunciar nada, antes de commitear el
+    // worktree y antes de mergear — para que el repo quede exactamente como
+    // estaba. Es el unico caso que no se puede resolver sin decidir por el, y
+    // el arnes no elige entre su merge y el trabajo ajeno.
+    let choques = crate::git::colisiones(&principal, destino, &rama, worktree.as_deref());
+    if !choques.is_empty() {
+        // code 2 como el resto de los gates del cierre (spec, verify, docs,
+        // --to): esto BLOQUEA, no es un error cualquiera.
+        return Err(Exit {
+            code: 2,
+            message: Some(mensaje_de_colision(&choques, destino, feature_id)),
+        }
+        .into());
+    }
     println!("[GitFlow] integrando {rama} -> {destino}");
     // El trabajo de la feature vive en su worktree: si quedo algo sin
     // commitear, se commitea AHI (nunca en el checkout principal) para que el
@@ -466,6 +510,33 @@ fn aviso_pendiente(fid: &str, motivo: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AC-4 (feature #61): el mensaje nombra cada archivo que choca y da las
+    /// tres salidas reales. El texto crudo de git ("Please commit your changes
+    /// or stash them") no dice cual de las tres queres ni como retomar.
+    #[test]
+    fn mensaje_de_colision_nombra_archivos_y_remedio() {
+        let choques = vec![
+            "docs/prd/PRD-master.md".to_string(),
+            "docs/lecciones/promesas-estructurales-vs-disciplina.md".to_string(),
+        ];
+        let msg = mensaje_de_colision(&choques, "main", "61");
+
+        // Cada archivo, por nombre.
+        for archivo in &choques {
+            assert!(msg.contains(archivo.as_str()), "falta {archivo} en:\n{msg}");
+        }
+        // Las tres salidas, y que son del USUARIO.
+        assert!(msg.contains("git add -A && git commit"));
+        assert!(msg.contains("git stash"));
+        assert!(msg.contains("git checkout -- <archivo>"));
+        assert!(msg.contains("DESCARTA"), "la opcion destructiva se marca como tal");
+        // Que NO paso nada.
+        assert!(msg.contains("NO toque nada"));
+        assert!(msg.contains("la rama no se movio"));
+        // Y como retomar, con la feature y la rama de verdad.
+        assert!(msg.contains("close --feature 61 --status done --to main"));
+    }
 
     /// Feature #50: la tabla completa de lo que el cierre puede encontrarse.
     /// El caso que motivo la feature es el ultimo: borrar la rama y el worktree

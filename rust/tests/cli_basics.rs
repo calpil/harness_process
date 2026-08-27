@@ -6147,3 +6147,198 @@ fn prd_doctor_reparar_arregla_punteros_y_bitacoras_faltantes() {
         .success()
         .stdout(predicate::str::contains("estan al dia"));
 }
+
+// ---------------------------------------------------------------------------
+// Feature #61: el merge del cierre no toca tu checkout
+// ---------------------------------------------------------------------------
+
+/// AC-1: el merge corre en un worktree temporal `--detach` aunque el destino
+/// sea la rama abierta. El checkout principal no participa del merge.
+#[test]
+fn merge_en_la_rama_abierta_no_usa_el_checkout_principal() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    assert_eq!(git_en(raiz, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success();
+
+    // El merge esta hecho...
+    let log = git_en(raiz, &["log", "--oneline", "-1", "main"]);
+    assert!(log.contains("merge:"), "main tiene que tener el merge: {log}");
+    // ...pero el checkout principal nunca estuvo en estado de merge...
+    assert!(
+        !raiz.join(".git/MERGE_HEAD").exists(),
+        "el checkout principal no puede quedar a medio mergear"
+    );
+    // ...y su HEAD llego ahi por un reset, no por haber mergeado el mismo.
+    let reflog = git_en(raiz, &["reflog", "-3", "HEAD"]);
+    assert!(
+        !reflog.contains("merge bugfix/1-cobranza"),
+        "el merge no puede haber corrido en el checkout del usuario: {reflog}"
+    );
+}
+
+/// AC-2: cambios sin commitear que el merge NO toca no impiden cerrar, y
+/// sobreviven intactos. Es la promesa que la cabecera de git.rs ya hacia.
+#[test]
+fn cierre_con_cambios_sin_commitear_que_no_chocan() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    std::fs::write(raiz.join("NOTAS.md"), "original\n").unwrap();
+    commitear_todo(raiz, "notas");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    // El escritorio desordenado, en un archivo que la feature no toca.
+    std::fs::write(raiz.join("NOTAS.md"), "lo que estaba escribiendo\n").unwrap();
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success();
+
+    assert!(
+        git_en(raiz, &["log", "--oneline", "-1", "main"]).contains("merge:"),
+        "el cierre tiene que integrar igual"
+    );
+    assert_eq!(
+        std::fs::read_to_string(raiz.join("NOTAS.md")).unwrap(),
+        "lo que estaba escribiendo\n",
+        "el trabajo sin commitear del usuario se conserva tal cual"
+    );
+}
+
+/// AC-3: cuando el merge SI tocaria un archivo sucio, el arnes se detiene antes
+/// de tocar nada. Es el caso que rompio el cierre de la #60.
+#[test]
+fn colision_se_detecta_antes_de_tocar_nada() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "base\n").unwrap();
+    commitear_todo(raiz, "compartido");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    // La feature toca el archivo compartido...
+    std::fs::write(wt.join("docs/COMPARTIDO.md"), "lo que hizo la feature\n").unwrap();
+    // ...y el usuario lo tiene modificado sin commitear.
+    std::fs::write(raiz.join("docs/COMPARTIDO.md"), "lo que estaba escribiendo yo\n").unwrap();
+
+    let main_antes = git_en(raiz, &["rev-parse", "main"]);
+    let commits_rama_antes = git_en(raiz, &["rev-list", "--count", "bugfix/1-cobranza"]);
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("docs/COMPARTIDO.md"))
+        .stderr(predicate::str::contains("NO toque nada"));
+
+    // El repo quedo EXACTAMENTE como estaba.
+    assert_eq!(git_en(raiz, &["rev-parse", "main"]), main_antes, "main no se movio");
+    assert_eq!(
+        git_en(raiz, &["rev-list", "--count", "bugfix/1-cobranza"]),
+        commits_rama_antes,
+        "no se commiteo el worktree de la feature"
+    );
+    assert!(!raiz.join(".git/MERGE_HEAD").exists());
+    assert_eq!(
+        std::fs::read_to_string(raiz.join("docs/COMPARTIDO.md")).unwrap(),
+        "lo que estaba escribiendo yo\n",
+        "el trabajo del usuario intacto"
+    );
+    assert_eq!(
+        std::fs::read_to_string(wt.join("docs/COMPARTIDO.md")).unwrap(),
+        "lo que hizo la feature\n",
+        "y el de la feature tambien"
+    );
+}
+
+/// AC-5: el camino que ya funcionaba sigue funcionando.
+#[test]
+fn merge_a_rama_no_checkouteada_sigue_funcionando() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    Command::new("git")
+        .args(["branch", "develop"])
+        .current_dir(raiz)
+        .output()
+        .unwrap();
+    let main_antes = git_en(raiz, &["rev-parse", "main"]);
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "develop"])
+        .assert()
+        .success();
+
+    assert!(
+        git_en(raiz, &["log", "--oneline", "-1", "develop"]).contains("merge:"),
+        "develop tiene que tener el merge"
+    );
+    assert_eq!(
+        git_en(raiz, &["rev-parse", "main"]),
+        main_antes,
+        "la rama que NO era destino no se toca"
+    );
+}
+
+/// AC-6: un conflicto de verdad no deja nada a medias (AC-18 de la #47 sigue
+/// valiendo con el merge movido al worktree temporal).
+#[test]
+fn conflicto_real_no_deja_nada_a_medias() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/C.md"), "base\n").unwrap();
+    commitear_todo(raiz, "c");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    // Los dos lados cambian la misma linea, y los dos COMMITEAN: no hay
+    // colision de trabajo sin commitear, hay conflicto de merge de verdad.
+    std::fs::write(wt.join("docs/C.md"), "lo de la rama\n").unwrap();
+    commitear_todo(&wt, "rama toca C");
+    std::fs::write(raiz.join("docs/C.md"), "lo de main\n").unwrap();
+    commitear_todo(raiz, "main toca C");
+    let main_antes = git_en(raiz, &["rev-parse", "main"]);
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        // 1, no 2: el fallo del merge es un error de ejecucion (comportamiento
+        // de la #47, que esta feature no cambia). El GATE de colision, que si
+        // bloquea, sale 2 como el resto de los gates del cierre.
+        .code(1)
+        .stderr(predicate::str::contains("no se pudo integrar"));
+
+    assert_eq!(git_en(raiz, &["rev-parse", "main"]), main_antes, "main no se movio");
+    assert!(!raiz.join(".git/MERGE_HEAD").exists(), "sin merge a medias");
+    assert_eq!(
+        std::fs::read_to_string(raiz.join("docs/C.md")).unwrap(),
+        "lo de main\n",
+        "el checkout del usuario intacto"
+    );
+    // El worktree temporal del merge se limpio.
+    let sueltos = git_en(raiz, &["worktree", "list"]);
+    assert!(
+        !sueltos.contains("harness-merge-"),
+        "el worktree temporal tiene que borrarse siempre: {sueltos}"
+    );
+}

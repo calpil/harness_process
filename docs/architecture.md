@@ -285,8 +285,16 @@ de cada instalador (`CLAUDE_MODEL_*` en `setup_harness.sh`, `$claudeModels` en
 (`../<repo>-wt/<id>-<slug>`), creado ANTES de escribir el plan y el spec para
 que nazcan en esa rama. El checkout principal no cambia de rama nunca.
 
-- `rust/src/git.rs`: ramas, worktrees, merge (en un worktree temporal), push y
-  commit sin trailers de IA. Sin repo git, todo degrada a no hacer nada.
+- `rust/src/git.rs`: ramas, worktrees, merge, push y commit sin trailers de IA.
+  Sin repo git, todo degrada a no hacer nada. El merge corre SIEMPRE en un
+  worktree temporal `--detach` (feature #61: antes habia una excepcion muda
+  cuando el destino era la rama abierta, y ahi el merge usaba el checkout del
+  usuario); despues `avanzar_rama` mueve el destino con `reset --keep` si esta
+  abierto —conserva lo que el usuario tenga sin commitear— o con `update-ref`
+  con guarda de valor viejo si no. `colisiones` (solo consulta) devuelve los
+  archivos sucios del checkout que el merge cambiaria: el unico caso que no se
+  puede resolver sin decidir por el usuario, y por eso se detecta antes de
+  commitear ni mergear nada.
 - Estado: `feature_list.json` y `progress/` son unicos y del repo principal;
   el estado vivo es `progress/current-<id>.md` por feature y `current.md` pasa a
   ser el indice de lo abierto, con `.last_autocheck-<id>` por feature.
