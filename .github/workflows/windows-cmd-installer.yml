@@ -1,0 +1,30 @@
+name: Windows CMD installer
+
+on:
+  pull_request:
+    paths:
+      - setup_harness.cmd
+      - setup_harness.ps1
+      - tests/cmd_installer_check.ps1
+      - .github/workflows/windows-cmd-installer.yml
+  push:
+    paths:
+      - setup_harness.cmd
+      - setup_harness.ps1
+      - tests/cmd_installer_check.ps1
+      - .github/workflows/windows-cmd-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cmd-installer-runtime:
+    name: CMD launcher runtime
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise setup_harness.cmd with cmd.exe
+        shell: pwsh
+        run: .\tests\cmd_installer_check.ps1

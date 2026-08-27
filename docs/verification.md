@@ -91,4 +91,17 @@ bash tests/cmd_installer_check.sh
 ```
 
 Los modos que necesitan `cmd.exe` se saltean **con un `[Ok]` explicito** fuera de
-Windows: un skip silencioso se lee igual que un verde, y no lo es.
+Windows: un skip silencioso se lee igual que un verde, y no lo es. Ese check
+solo conserva cobertura estatica/local.
+
+La verificacion runtime obligatoria vive en el workflow **Windows CMD
+installer**, que ejecuta `cmd.exe` real en `windows-latest`:
+
+```powershell
+# Solo en Windows; fuera de Windows este smoke falla a proposito.
+.\tests\cmd_installer_check.ps1
+```
+
+El smoke usa el launcher real para comprobar su delegacion al PS1 y un sandbox
+para observar traduccion de flags, exit codes y el diagnostico cuando falta el
+delegado. No instala ni compila el arnes completo.

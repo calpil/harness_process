@@ -15,6 +15,7 @@
 #   traduce       --dry-run llega al .ps1 como -DryRun (y --no-subagents como -NoSubagents)
 #   exit-code     el exit code del .ps1 sale intacto por el .cmd
 #   sin-ps1       sin el .ps1 al lado: exit 127 nombrando que falta
+#   ci-windows    el smoke runtime y su workflow Windows estan versionados
 set -Eeuo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -23,6 +24,8 @@ fail() { echo "[!] $1" >&2; exit 1; }
 ok() { echo "[Ok] $1"; }
 
 CMD="$REPO_ROOT/setup_harness.cmd"
+WINDOWS_SMOKE="$REPO_ROOT/tests/cmd_installer_check.ps1"
+WINDOWS_WORKFLOW="$REPO_ROOT/.github/workflows/windows-cmd-installer.yml"
 
 hay_cmd() { command -v cmd.exe >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; }
 
@@ -31,11 +34,19 @@ sandbox() {
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/harness-cmd.XXXXXX")"
     cp "$CMD" "$tmp/setup_harness.cmd"
     printf '%s\n' \
-        'param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)' \
-        '$code = 0' \
-        'foreach ($a in $Rest) { if ($a -eq "-Salir3") { $code = 3 } }' \
-        '"ARGS:" + ($Rest -join " ")' \
-        'exit $code' \
+        'param(' \
+        '    [switch]$DryRun,' \
+        '    [switch]$NoSubagents,' \
+        '    [switch]$Force,' \
+        '    [switch]$Salir3' \
+        ')' \
+        '$received = @()' \
+        'if ($DryRun) { $received += "-DryRun" }' \
+        'if ($NoSubagents) { $received += "-NoSubagents" }' \
+        'if ($Force) { $received += "-Force" }' \
+        'if ($Salir3) { $received += "-Salir3" }' \
+        '"ARGS:" + ($received -join " ")' \
+        'if ($Salir3) { exit 3 }' \
         > "$tmp/setup_harness.ps1"
     echo "$tmp"
 }
@@ -58,6 +69,8 @@ modo_existe() {
         || fail "existe: no saltea la ExecutionPolicy; un .ps1 sin firmar no arranca"
     grep -q "bash setup_harness.sh" "$CMD" \
         || fail "existe: sin PowerShell no nombra el remedio alternativo (Git Bash)"
+    grep -Fq 'do (' "$CMD" \
+        || fail "existe: la conversion de flags debe mantener sus asignaciones dentro del for"
     ok "existe: el .cmd delega en el .ps1, saltea la policy y nombra el remedio"
 }
 
@@ -96,17 +109,35 @@ modo_sin_ps1() {
     ok "sin-ps1: exit 127 y dice cual archivo falta"
 }
 
+modo_ci_windows() {
+    [ -f "$WINDOWS_SMOKE" ] \
+        || fail "ci-windows: falta el smoke PowerShell que ejecuta cmd.exe real"
+    [ -f "$WINDOWS_WORKFLOW" ] \
+        || fail "ci-windows: falta el workflow windows-latest"
+    grep -q 'Windows_NT' "$WINDOWS_SMOKE" \
+        || fail "ci-windows: el smoke no falla fuera de Windows"
+    grep -Fq '& $env:ComSpec /d /c' "$WINDOWS_SMOKE" \
+        || fail "ci-windows: el smoke no invoca cmd.exe real"
+    grep -q 'runs-on: windows-latest' "$WINDOWS_WORKFLOW" \
+        || fail "ci-windows: el workflow no usa un runner Windows"
+    grep -q 'cmd_installer_check.ps1' "$WINDOWS_WORKFLOW" \
+        || fail "ci-windows: el workflow no ejecuta el smoke runtime"
+    ok "ci-windows: smoke runtime y workflow Windows presentes"
+}
+
 case "$MODO" in
     existe)    modo_existe ;;
     traduce)   modo_traduce ;;
     exit-code) modo_exit_code ;;
     sin-ps1)   modo_sin_ps1 ;;
+    ci-windows) modo_ci_windows ;;
     todos)
         modo_existe
         modo_traduce
         modo_exit_code
         modo_sin_ps1
-        ok "instalador cmd: los cuatro modos verdes"
+        modo_ci_windows
+        ok "instalador cmd: los cinco modos verdes"
         ;;
-    *) fail "modo desconocido: $MODO (existe | traduce | exit-code | sin-ps1 | todos)" ;;
+    *) fail "modo desconocido: $MODO (existe | traduce | exit-code | sin-ps1 | ci-windows | todos)" ;;
 esac
