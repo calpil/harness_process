@@ -252,3 +252,5 @@ con su fecha.>
 - #60 la_vuelta_al_prd_no_se_pierde_ni_miente -> done 2026-08-27 · spec: docs/spec-feature-60-la-vuelta-al-prd-no-se-pierde-ni-miente.md · impl: docs/impl-60.md
 - #61 el_merge_del_cierre_no_toca_tu_checkout -> done 2026-08-27 · spec: docs/spec-feature-61-el-merge-del-cierre-no-toca-tu-checkout.md · impl: docs/impl-61.md
 - #62 el_cierre_no_declara_hecho_lo_que_no_hizo -> done 2026-08-27 · spec: docs/spec-feature-62-el-cierre-no-declara-hecho-lo-que-no-hizo.md · impl: docs/impl-62.md
+- #59 cmd_smoke_real_en_windows -> done 2026-08-27 · spec: docs/spec-feature-59-cmd-smoke-real-en-windows.md · impl: docs/impl-59.md
+- #63 el_arnes_no_afirma_lo_que_no_puede_comprobar -> done 2026-08-27 · spec: docs/spec-feature-63-el-arnes-no-afirma-lo-que-no-puede-comprobar.md · impl: docs/impl-63.md
