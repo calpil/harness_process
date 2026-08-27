@@ -15,3 +15,6 @@ __pycache__/
 # lo escribe en cada instalacion.
 /.harness_layout
 .harness.env
+
+# Basura de macOS: nunca entra al repo (ni al commit del cierre).
+.DS_Store
