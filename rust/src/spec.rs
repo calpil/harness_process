@@ -26,6 +26,22 @@ pub fn spec_path(paths: &HarnessPaths, feature: &Map<String, Value>) -> PathBuf 
         .join(format!("spec-feature-{id}-{}.md", slugify(name)))
 }
 
+/// Ruta del spec relativa a la RAIZ del repo, con `/` en todas las
+/// plataformas: la forma que tiene DESPUES del merge, sin importar en que
+/// worktree se escribio.
+///
+/// No se calcula con `relpath` contra el spec del worktree: eso produce
+/// `../<repo>-wt/<id>-<slug>/docs/spec-*.md`, un puntero al arbol que el propio
+/// cierre borra segundos despues (feature #60, bug #92).
+pub fn spec_rel_raiz(feature: &Map<String, Value>) -> String {
+    let id = py_str(feature.get("id"));
+    let name = feature
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    format!("docs/spec-feature-{id}-{}.md", slugify(name))
+}
+
 pub fn spec_template(feature: &Map<String, Value>) -> String {
     let id = py_str(feature.get("id"));
     let name = feature

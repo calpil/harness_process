@@ -59,9 +59,14 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   `child_template` (12 secciones), `link_child` (seccion `## PRDs anidados` del
   padre: la crea al final si falta, agrega fila, nunca duplica),
   `milestone_rows` / `milestone_count` (ignora encabezado, separador y el
-  ejemplo `<...>` de la plantilla), `echo_close` (marca el hito y deja
-  `## Bitacora`; idempotente, conserva la fecha del primer cierre) y
-  `render_tree`.
+  ejemplo `<...>` de la plantilla), `render_tree`, y la vuelta del cierre partida
+  en dos (feature #60): `decidir_vuelta` (PURA: arma la linea y descarta los
+  punteros que escapan de la raiz o no existen; no toca disco) y
+  `aplicar_vuelta` (la UNICA que escribe el PRD; marca el hito y deja
+  `## Bitacora`, idempotente, conserva la fecha del primer cierre). Para auditar
+  lo ya escrito: `bitacora_entries` (parsea las entradas con sus punteros),
+  `hito_marcado`, `escapa_de_la_raiz`, `file_en_raiz` (el PRD del checkout
+  principal, no el del worktree) y `scan_dir`.
 - `lecciones.rs`: la memoria procedural (`docs/lecciones/<clase>.md`, feature
   #17). Expone `validar_nombre_de_clase` (rechaza nombres de sesion: con
   `feature`/`#`, con prefijo `fix-`/`debug-`/`audit-`/`hotfix-`, con fecha o con

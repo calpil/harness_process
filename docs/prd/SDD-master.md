@@ -138,6 +138,14 @@ toque el flujo:
 - **Los docs se resuelven DESDE la feature, no desde el directorio actual.**
   `HarnessPaths::para_feature()` apunta `docs/` al worktree de esa feature, para
   que su spec, su plan y su evidencia viajen con el merge de su rama.
+- **Salvo lo que es de TODAS las features** (feature #60). El PRD es un
+  documento raiz y compartido: la vuelta al cierre (marcar el hito, dejar
+  bitacora) se escribe en el `docs/prd/` del checkout PRINCIPAL y DESPUES de
+  integrar. Guardar un log compartido dentro de una rama por feature hacia que
+  dos cierres en paralelo apendearan al final de la misma seccion: el merge
+  conflictuaba y la linea se perdia en la resolucion (7 de 18 cierres). La
+  pregunta que decide donde va un documento es de quien es el dato, no desde
+  donde se escribe.
 - **El arnes nunca reescribe historia ni elige la rama destino.** Sin `--force`,
   sin rebase, sin squash y sin borrar ramas; el merge corre en un worktree
   temporal (no toca tu checkout) y `--to` lo decide el USUARIO.

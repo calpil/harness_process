@@ -362,9 +362,9 @@ cuatro preguntas en una respuesta.
 
 ### Dos decisiones que parecen detalles y no lo son
 
-- **El anclaje es por texto literal, no por seccion.** `prd::echo_close` corta
-  secciones con `starts_with("## ")` y `docs/architecture.md` tiene tres `###`
-  que ese predicado se tragaria enteros.
+- **El anclaje es por texto literal, no por seccion.** `prd::aplicar_vuelta`
+  corta secciones con `starts_with("## ")` y `docs/architecture.md` tiene tres
+  `###` que ese predicado se tragaria enteros.
 - **La idempotencia sale del contenido, no de una firma.** El spec es 1:1 con su
   feature y por eso se puede firmar (`last_spec_sig`); un PRD lo comparten N
   features —`PRD-master.md` lo comparten 28 del backlog— asi que una firma por
@@ -386,6 +386,88 @@ siempre, sin ningun comando capaz de refrescarla.
 `prd apply --yes`. `verify` los ejecuta con `sh -c`, asi que aplicaria la
 propuesta sin el si del usuario, salteandose el ritual entero. Hay un test que lo
 prohibe sobre los specs reales del repo.
+
+## La vuelta al PRD no se pierde ni miente (feature #60)
+
+Cerrar una feature como `done` **vuelve al PRD**: marca la fila de su hito y
+deja una linea en `## Bitacora`. Durante un tiempo esa promesa fue falsa de dos
+maneras distintas, y las dos salieron de la misma linea mal ubicada.
+
+### Lo que pasaba
+
+El cierre resolvia el PRD con las rutas de la FEATURE (`para_feature`), asi que
+escribia en la copia del PRD que vive dentro del worktree, y lo hacia **antes**
+de integrar. Como el PRD es un documento que comparten todas las features, dos
+cierres en paralelo apendeaban al final de la misma seccion:
+
+```
+main            ...#46
+ |__ wt A (fork en #46) -> agrega #55 -> commit en la rama -> merge  ─┐
+ |__ wt B (fork en #46) -> agrega #57, #38, #39 -> ya en main         │
+                                                                     v
+                                        CONFLICTO en la ultima linea
+                                        resuelto a favor de main
+                                        la linea de A desaparece
+```
+
+En el repo del propio arnes eso se llevo **7 de 18** cierres: las bitacoras de
+las features #40, #41, #42, #43, #53, #54 y #55 hubo que transcribirlas a mano
+(commit `docs(prd): preserva cierres 40-55`). El cierre no fallaba: el `[i]`
+correspondiente se perdia entre el resto de la salida.
+
+Y el puntero al spec se calculaba con `relpath` contra el spec del worktree, o
+sea `../<repo>-wt/<id>-<slug>/docs/spec-*.md`: una ruta al arbol que el propio
+cierre borra con `git worktree remove --force` **unos segundos despues**. Habia
+18 asi. El `impl: docs/impl-<id>.md` era fijo, sin comprobar que existiera.
+
+### Lo que hace ahora
+
+```
+close --status done
+ |__ integrar(): commit + merge + borrar worktree
+ |__ ¿el merge salio bien?  -> si no, no se marca ningun hito
+ |__ decidir_vuelta()   funcion PURA: arma la linea y valida los punteros
+ |__ aplicar_vuelta()   la UNICA que escribe, y escribe en la RAIZ
+```
+
+- **En la raiz.** El log de cierre no pertenece a ninguna rama, asi que deja de
+  viajar en una. No hay dos lados que apendeen al mismo lugar: no hay conflicto
+  que resolver mal. El PRD queda modificado sin commitear en el checkout
+  principal, como el resto de los documentos que el arnes toca.
+- **Despues de integrar.** Un hito marcado afirma que el trabajo esta en la rama
+  destino. Sin merge no lo esta, asi que no se marca.
+- **Ningun puntero sin verificar.** Cada ruta tiene que ser relativa a la raiz y
+  abrir un archivo que existe; la que no cumple no se escribe y se dice por que.
+  Que la promesa la sostenga la ESTRUCTURA y no la disciplina es deliberado: la
+  parte que decide es pura y no tiene con que escribir, y la que escribe solo
+  sabe ejecutar un plan ya validado (leccion `promesas-estructurales-vs-disciplina`).
+
+### `prd doctor`: el pendiente que no depende de que alguien lo anote
+
+```sh
+sh harness_cli prd doctor            # informe: NO escribe. Sale 2 si hay hallazgos
+sh harness_cli prd doctor --reparar  # aplica los arreglos
+```
+
+Contrasta el backlog con el arbol de PRDs y encuentra:
+
+| Hallazgo | Que hace `--reparar` |
+| --- | --- |
+| Puntero que no resuelve (escapa de la raiz, o el archivo no existe) | lo reescribe al archivo que si existe en `docs/`, o lo quita antes que mentir |
+| Feature `done` sin linea de bitacora en su PRD | la agrega, con la fecha de SU cierre (`closed_at`), no la de hoy |
+| Fila de hito de una feature `done` sin marcar | la marca `done (YYYY-MM-DD)` |
+
+La gracia esta en de donde sale el pendiente: **del backlog**, no de un archivo
+que el cierre tenga que acordarse de escribir cuando algo sale mal. Una feature
+`done` que no esta en su PRD **es** el hallazgo, aunque la perdida haya sido
+hace meses y nadie la haya registrado. Por eso el comando encontro, y reparo,
+los 18 punteros rotos y las 13 bitacoras que faltaban desde antes de que la
+vuelta al PRD existiera.
+
+`harness_check.sh` lo corre en modo informe y lo reporta con `[i]`: **avisa y no
+bloquea**, por la misma razon que la paridad de instaladores — un PRD
+desactualizado no impide trabajar hoy, y un proyecto que arrastraba punteros
+rotos no puede quedarse sin poder cerrar por un arreglo del arnes.
 
 ## Rutas protegidas: los PRD dejan de depender de la buena fe (feature #26)
 

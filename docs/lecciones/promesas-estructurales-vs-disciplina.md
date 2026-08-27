@@ -1,12 +1,12 @@
 ---
 nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
-triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug]
+triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
-origen: [21, 44]
+origen: [21, 44, 60]
 usos: 1
 ultimo_uso: 2026-08-17
-ultima_actualizacion: 2026-08-19
+ultima_actualizacion: 2026-08-27
 estado: activa
 ---
 
@@ -44,9 +44,39 @@ Ejemplos de este repo:
 | "el nudge no escribe artefactos" (#18) | el modulo no importa `Leccion`: no tiene con que escribir una |
 | "buscar no depende del hub" (#20) | el modulo no importa `graph`: no tiene con que consultarlo |
 | "nunca borra" (#21) | no existe ninguna llamada a `remove_*` fuera del `move` de archivar |
+| "no escribe un puntero roto" (#60) | `decidir_vuelta` recibe `Candidato { existe }` ya resuelto: no tiene con que mirar el disco, y la que escribe solo ejecuta un plan validado |
 
 Fijate el patron: casi todas se sostienen por **lo que el modulo NO importa**.
 Un `use` que no esta es una garantia mucho mas fuerte que un comentario.
+
+## La otra cara: promesas sobre lo que SI va a pasar
+
+El mismo error tiene una variante que cuesta mas ver, porque la promesa es
+positiva. Dos formas concretas, las dos de la feature #60:
+
+**1. El dato compartido guardado dentro de la unidad aislada.** La #54 prometio
+que los documentos escritos en el worktree "viajan en el merge sin pasos de copia
+especiales". Vale para el spec y la evidencia, que son de UNA feature. No vale
+para la bitacora del PRD, que es de TODAS: cada cierre en paralelo apendeaba al
+final de la misma seccion desde una rama distinta, el merge conflictuaba y la
+linea se perdia en la resolucion. **7 de 18 cierres**, sin que nadie se enterara.
+
+La pregunta que lo detecta: *¿este dato es de la unidad de trabajo o de todas?*
+Si es de todas, guardarlo adentro de una hace que su supervivencia dependa de
+como alguien resuelva un conflicto. Eso es disciplina, no estructura. El arreglo
+no fue detectar el conflicto: fue sacar el dato del branch, y entonces no hay
+conflicto que resolver mal.
+
+**2. El pendiente que hay que acordarse de anotar.** Cuando algo best-effort
+falla, la tentacion es escribir el pendiente en un archivo. Pero eso hereda el
+problema: si el paso que falla es el mismo que tiene que anotar, no hay
+pendiente. Preguntate si el pendiente se puede **derivar del estado que ya
+existe**: una feature `done` que no esta en la bitacora de su PRD ES el
+pendiente, lo haya anotado alguien o no — y por eso `prd doctor` encontro los 13
+cierres que se perdieron antes de que el mecanismo existiera.
+
+Regla corta: **un `[i]` no es un pendiente**. Un pendiente es algo que se puede
+volver a consultar despues de que la salida se fue del scroll.
 
 ## El mismo principio, aplicado a ARREGLAR un bug (feature #44)
 

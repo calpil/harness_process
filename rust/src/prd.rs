@@ -112,6 +112,21 @@ pub fn rel_path(slug: &str) -> String {
     parts.join("/")
 }
 
+/// El PRD tal como vive en la RAIZ del repo, sin importar desde donde se
+/// invoque el comando ni si hay un worktree de por medio.
+///
+/// `file_for` resuelve contra `paths.plans`, que en un worktree apunta al
+/// `docs/` de la feature: correcto para el spec, el plan y la evidencia, y
+/// EQUIVOCADO para el PRD, que es un documento raiz y compartido por todas las
+/// features (feature #60).
+pub fn file_en_raiz(repo_root: &Path, slug: &str) -> PathBuf {
+    let mut file = repo_root.to_path_buf();
+    for parte in rel_path(slug).split('/') {
+        file.push(parte);
+    }
+    file
+}
+
 /// Normaliza el nombre que escribio el usuario a UN segmento de la cadena.
 /// Reusa la `slugify` de planes y specs, asi que `cobranza_mora` -> `cobranza-mora`
 /// y cualquier `../` o separador se disuelve antes de tocar el filesystem.
@@ -151,7 +166,13 @@ pub fn normalize_parent(parent: Option<&str>) -> String {
 /// dice su cadena), ordenados por cadena. Un arbol inexistente devuelve vacio:
 /// no tener PRDs no es un error.
 pub fn scan(paths: &HarnessPaths) -> Vec<Prd> {
-    let root = prd_dir(paths);
+    scan_dir(&prd_dir(paths))
+}
+
+/// Igual que `scan`, pero sobre un `docs/prd/` dado. Lo usa `prd doctor`, que
+/// audita el arbol de la RAIZ y no el del worktree de turno (feature #60).
+pub fn scan_dir(root: &Path) -> Vec<Prd> {
+    let root = root.to_path_buf();
     let mut found = Vec::new();
     let master = root.join(file_name_for(&[]));
     if master.is_file() {
@@ -583,17 +604,130 @@ pub struct CloseEcho {
     pub logged: bool,
 }
 
-/// Marca el hito de la feature y deja bitacora en el PRD de origen. NUNCA
-/// reescribe el cuerpo del documento. Idempotente: una feature ya registrada no
-/// se vuelve a anotar.
-pub fn echo_close(
-    file: &Path,
+/// Un puntero candidato a entrar en la bitacora, YA resuelto contra el disco
+/// por quien llama: `decidir_vuelta` no toca el filesystem. Esa division es lo
+/// que sostiene la promesa "el arnes no escribe un puntero que no resuelve":
+/// la sostiene la estructura, no acordarse de comprobarlo (leccion
+/// `promesas-estructurales-vs-disciplina`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidato {
+    /// Como se nombra en la linea (`spec`, `impl`).
+    pub etiqueta: String,
+    /// Ruta relativa a la RAIZ del repo, con `/` en todas las plataformas.
+    pub rel: String,
+    /// Si el archivo existe. Lo resuelve quien llama, contra la raiz.
+    pub existe: bool,
+}
+
+impl Candidato {
+    pub fn nuevo(etiqueta: &str, rel: &str, existe: bool) -> Self {
+        Self {
+            etiqueta: etiqueta.to_string(),
+            rel: rel.trim().replace('\\', "/"),
+            existe,
+        }
+    }
+}
+
+/// Un puntero que NO entro en la bitacora, con su motivo. Se dice en voz alta:
+/// omitirlo en silencio seria el mismo bug con otra cara.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Descarte {
+    pub etiqueta: String,
+    pub rel: String,
+    pub motivo: &'static str,
+}
+
+pub const MOTIVO_VACIO: &str = "no se pudo resolver la ruta";
+pub const MOTIVO_ESCAPA: &str = "la ruta escapa de la raiz del repo";
+pub const MOTIVO_AUSENTE: &str = "el archivo no existe";
+
+/// Lo que la vuelta al PRD va a decir, ya decidido y validado.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanDeVuelta {
+    /// Cabeza de la entrada: el candado de idempotencia.
+    pub cabeza: String,
+    /// La linea completa de bitacora.
+    pub linea: String,
+    /// Slug con el que se busca la fila del hito (literal, sin adornos).
+    pub slug_hito: String,
+    pub fecha: String,
+    /// Punteros que quedaron afuera y por que.
+    pub descartes: Vec<Descarte>,
+}
+
+/// Decide QUE dice la vuelta al PRD.
+///
+/// Funcion PURA: no lee ni escribe disco, no consulta el entorno. Devuelve el
+/// plan que `aplicar_vuelta` — la unica que toca el documento — ejecuta. Un
+/// puntero que no resuelve no llega a la linea: queda en `descartes`.
+pub fn decidir_vuelta(
     feature_id: &str,
     feature_name: &str,
     date: &str,
-    spec_rel: &str,
-    impl_rel: &str,
-) -> anyhow::Result<CloseEcho> {
+    candidatos: &[Candidato],
+) -> PlanDeVuelta {
+    let cabeza = format!("- #{feature_id} {feature_name} -> done");
+    let mut linea = format!("{cabeza} {date}");
+    let mut descartes = Vec::new();
+    for candidato in candidatos {
+        match motivo_de_descarte(candidato) {
+            Some(motivo) => descartes.push(Descarte {
+                etiqueta: candidato.etiqueta.clone(),
+                rel: candidato.rel.clone(),
+                motivo,
+            }),
+            None => linea.push_str(&format!(" {SEP} {}: {}", candidato.etiqueta, candidato.rel)),
+        }
+    }
+    PlanDeVuelta {
+        cabeza,
+        linea,
+        slug_hito: feature_name.to_string(),
+        fecha: date.to_string(),
+        descartes,
+    }
+}
+
+/// Separador de punteros en la linea de bitacora (punto medio).
+pub const SEP: &str = "\u{b7}";
+
+/// Por que un puntero no entra. `None` = entra.
+fn motivo_de_descarte(candidato: &Candidato) -> Option<&'static str> {
+    let rel = candidato.rel.trim();
+    if rel.is_empty() {
+        return Some(MOTIVO_VACIO);
+    }
+    // Una ruta que sale de la raiz apunta a un arbol que el arnes no controla
+    // — tipicamente el worktree que el propio cierre esta por borrar.
+    if escapa_de_la_raiz(rel) {
+        return Some(MOTIVO_ESCAPA);
+    }
+    if !candidato.existe {
+        return Some(MOTIVO_AUSENTE);
+    }
+    None
+}
+
+/// True si la ruta no es relativa a la raiz del repo: absoluta, con raiz de
+/// Windows, o con cualquier `..` en el camino.
+pub fn escapa_de_la_raiz(rel: &str) -> bool {
+    let rel = rel.replace('\\', "/");
+    if rel.starts_with('/') || rel.starts_with("~") {
+        return true;
+    }
+    // `C:/...` y compania.
+    if rel.len() >= 2 && rel.as_bytes()[1] == b':' {
+        return true;
+    }
+    rel.split('/').any(|seg| seg == "..")
+}
+
+/// Escribe el plan en el PRD. La UNICA funcion que toca el documento del
+/// USUARIO: nunca reescribe su cuerpo, solo marca la celda de estado del hito y
+/// apendea la bitacora. Idempotente: una feature ya registrada no se vuelve a
+/// anotar y la fecha del PRIMER cierre no se reescribe.
+pub fn aplicar_vuelta(file: &Path, plan: &PlanDeVuelta) -> anyhow::Result<CloseEcho> {
     let text = std::fs::read_to_string(file)?;
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     let mut echo = CloseEcho::default();
@@ -601,14 +735,14 @@ pub fn echo_close(
     // (a) La fila del hito cuyo slug de feature coincide.
     if let Some((idx, cells_)) = milestone_rows(&text)
         .into_iter()
-        .find(|(_, c)| c.get(2).map(String::as_str) == Some(feature_name))
+        .find(|(_, c)| c.get(2).map(String::as_str) == Some(plan.slug_hito.as_str()))
     {
         let mut updated = cells_;
         if let Some(last) = updated.last_mut() {
             // Ya marcado: la fecha del PRIMER cierre es la que vale. Re-cerrar
             // la misma feature no reescribe la historia del documento.
             if !last.starts_with("done") {
-                *last = format!("done ({date})");
+                *last = format!("done ({})", plan.fecha);
                 lines[idx] = format!("| {} |", updated.join(" | "));
                 echo.milestone_marked = true;
             }
@@ -616,10 +750,10 @@ pub fn echo_close(
     }
 
     // (b) La bitacora, sin duplicar la entrada de esta feature.
-    let entry_head = format!("- #{feature_id} {feature_name} -> done");
-    let already = lines.iter().any(|l| l.trim_start().starts_with(&entry_head));
+    let already = lines
+        .iter()
+        .any(|l| l.trim_start().starts_with(&plan.cabeza));
     if !already {
-        let entry = format!("{entry_head} {date} · spec: {spec_rel} · impl: {impl_rel}");
         match lines.iter().position(|l| l.trim_end() == LOG_SECTION) {
             Some(start) => {
                 let end = lines
@@ -632,7 +766,7 @@ pub fn echo_close(
                     .rev()
                     .find(|&i| !lines[i].trim().is_empty())
                     .map_or(end, |i| i + 1);
-                lines.insert(insert_at, entry);
+                lines.insert(insert_at, plan.linea.clone());
             }
             None => {
                 while lines.last().is_some_and(|l| l.trim().is_empty()) {
@@ -650,7 +784,7 @@ pub fn echo_close(
                         .to_string(),
                 );
                 lines.push(String::new());
-                lines.push(entry);
+                lines.push(plan.linea.clone());
             }
         }
         echo.logged = true;
@@ -662,6 +796,77 @@ pub fn echo_close(
         write_text_atomic(file, &joined)?;
     }
     Ok(echo)
+}
+
+// ---------------------------------------------------------------------------
+// Leer la bitacora: lo que ya quedo escrito
+// ---------------------------------------------------------------------------
+
+/// Una entrada de bitacora ya escrita en un PRD, con sus punteros separados.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntradaBitacora {
+    /// Indice de la linea dentro del archivo (0-based).
+    pub idx: usize,
+    pub feature_id: String,
+    pub feature_name: String,
+    pub fecha: String,
+    /// `(etiqueta, ruta)` en el orden en que aparecen.
+    pub punteros: Vec<(String, String)>,
+}
+
+impl EntradaBitacora {
+    /// Reconstruye la linea con los punteros dados (los que sobrevivan).
+    pub fn con_punteros(&self, punteros: &[(String, String)]) -> String {
+        let mut linea = format!(
+            "- #{} {} -> done {}",
+            self.feature_id, self.feature_name, self.fecha
+        );
+        for (etiqueta, rel) in punteros {
+            linea.push_str(&format!(" {SEP} {etiqueta}: {rel}"));
+        }
+        linea
+    }
+}
+
+/// Todas las entradas de bitacora de un PRD. Una linea que no tenga la forma
+/// `- #<id> <name> -> done <fecha>` no es una entrada: se ignora sin ruido (el
+/// cuerpo del documento es del USUARIO y puede tener cualquier cosa).
+pub fn bitacora_entries(text: &str) -> Vec<EntradaBitacora> {
+    let mut out = Vec::new();
+    for (idx, linea) in text.lines().enumerate() {
+        let Some(cuerpo) = linea.trim_start().strip_prefix("- #") else {
+            continue;
+        };
+        let Some((izq, der)) = cuerpo.split_once(" -> done ") else {
+            continue;
+        };
+        let Some((feature_id, feature_name)) = izq.split_once(' ') else {
+            continue;
+        };
+        let mut partes = der.split(SEP);
+        let fecha = partes.next().unwrap_or_default().trim().to_string();
+        let punteros = partes
+            .filter_map(|p| p.trim().split_once(": "))
+            .map(|(e, r)| (e.trim().to_string(), r.trim().to_string()))
+            .collect();
+        out.push(EntradaBitacora {
+            idx,
+            feature_id: feature_id.trim().to_string(),
+            feature_name: feature_name.trim().to_string(),
+            fecha,
+            punteros,
+        });
+    }
+    out
+}
+
+/// True si la fila del hito de `slug` esta marcada `done`. `None` = no hay fila
+/// para ese slug (una feature sin hito declarado no es un hallazgo).
+pub fn hito_marcado(text: &str, slug: &str) -> Option<bool> {
+    milestone_rows(text)
+        .into_iter()
+        .find(|(_, c)| c.get(2).map(String::as_str) == Some(slug))
+        .and_then(|(_, c)| c.last().map(|last| last.starts_with("done")))
 }
 
 // ---------------------------------------------------------------------------
@@ -995,6 +1200,28 @@ mod tests {
         assert_eq!(rows[0].1[2], "avisar_mora");
     }
 
+    /// Envoltorio: arma el plan con los dos punteros dados por existentes.
+    /// Los tests de la validacion de punteros son los de `decidir_vuelta`.
+    fn escribir_vuelta(
+        file: &Path,
+        fid: &str,
+        name: &str,
+        date: &str,
+        spec: &str,
+        impl_: &str,
+    ) -> CloseEcho {
+        let plan = decidir_vuelta(
+            fid,
+            name,
+            date,
+            &[
+                Candidato::nuevo("spec", spec, true),
+                Candidato::nuevo("impl", impl_, true),
+            ],
+        );
+        aplicar_vuelta(file, &plan).unwrap()
+    }
+
     #[test]
     fn echo_close_should_mark_the_milestone_and_log_once() {
         let dir = tempfile::tempdir().unwrap();
@@ -1008,15 +1235,14 @@ mod tests {
         )
         .unwrap();
 
-        let echo = echo_close(
+        let echo = escribir_vuelta(
             &file,
             "13",
             "avisar_mora",
             "2026-08-12",
             "docs/spec-feature-13-avisar-mora.md",
             "docs/impl-13.md",
-        )
-        .unwrap();
+        );
         assert_eq!(
             echo,
             CloseEcho {
@@ -1032,15 +1258,14 @@ mod tests {
         ));
 
         // Idempotente: ni marca de nuevo ni duplica la bitacora.
-        let again = echo_close(
+        let again = escribir_vuelta(
             &file,
             "13",
             "avisar_mora",
             "2026-08-13",
             "docs/spec-feature-13-avisar-mora.md",
             "docs/impl-13.md",
-        )
-        .unwrap();
+        );
         assert_eq!(again, CloseEcho::default());
         let text2 = std::fs::read_to_string(&file).unwrap();
         assert_eq!(text2.matches("- #13 avisar_mora").count(), 1);
@@ -1052,7 +1277,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("PRD-master.md");
         std::fs::write(&file, "# PRD Master\n\n## 12. Decisiones abiertas\n\n- ninguna\n").unwrap();
-        let echo = echo_close(&file, "7", "otra_cosa", "2026-08-12", "s.md", "i.md").unwrap();
+        let echo = escribir_vuelta(&file, "7", "otra_cosa", "2026-08-12", "s.md", "i.md");
         assert_eq!(
             echo,
             CloseEcho {
@@ -1121,6 +1346,184 @@ mod tests {
         let master = resolve(&paths, MASTER).unwrap();
         let out = render_tree(&paths, &json!({"features": []}), &master);
         assert!(out.contains("[!] declara Padre: ventas (su lugar dice master)"), "{out}");
+    }
+}
+
+#[cfg(test)]
+mod tests_vuelta_al_prd {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// AC-11: la parte que DECIDE es pura. Se le pasa un directorio vacio como
+    /// testigo: si `decidir_vuelta` tocara el disco, quedaria rastro.
+    #[test]
+    fn decidir_vuelta_es_pura_y_no_escribe() {
+        let dir = tempfile::tempdir().unwrap();
+        let antes: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert!(antes.is_empty(), "el fixture arranca vacio");
+
+        let plan = decidir_vuelta(
+            "60",
+            "la_vuelta_no_se_pierde",
+            "2026-08-27",
+            &[
+                Candidato::nuevo("spec", "docs/spec-feature-60-la-vuelta.md", true),
+                Candidato::nuevo("impl", "docs/impl-60.md", true),
+            ],
+        );
+
+        // No escribio nada...
+        let despues: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert!(despues.is_empty(), "decidir_vuelta no puede tocar el disco");
+        // ...y devolvio el plan completo.
+        assert_eq!(plan.cabeza, "- #60 la_vuelta_no_se_pierde -> done");
+        assert_eq!(plan.slug_hito, "la_vuelta_no_se_pierde");
+        assert!(plan.descartes.is_empty());
+        assert_eq!(
+            plan.linea,
+            "- #60 la_vuelta_no_se_pierde -> done 2026-08-27 \u{b7} spec: docs/spec-feature-60-la-vuelta.md \u{b7} impl: docs/impl-60.md"
+        );
+    }
+
+    /// AC-4: el puntero al spec es relativo a la raiz. Una ruta que escapa
+    /// (tipicamente el worktree que el cierre esta por borrar) NO entra.
+    #[test]
+    fn punteros_de_bitacora_son_relativos_a_la_raiz() {
+        // La forma exacta que tenian los 18 punteros rotos del PRD maestro.
+        let del_worktree = "../harness_process-wt/47-features/docs/spec-feature-47-features.md";
+        assert!(escapa_de_la_raiz(del_worktree));
+        assert!(escapa_de_la_raiz("/abs/docs/spec.md"));
+        assert!(escapa_de_la_raiz("C:/docs/spec.md"));
+        assert!(escapa_de_la_raiz("docs/../../fuera.md"));
+        assert!(!escapa_de_la_raiz("docs/spec-feature-47-features.md"));
+
+        let plan = decidir_vuelta(
+            "47",
+            "features",
+            "2026-08-22",
+            &[Candidato::nuevo("spec", del_worktree, true)],
+        );
+        assert!(
+            !plan.linea.contains(".."),
+            "la linea no puede llevar una ruta que escapa: {}",
+            plan.linea
+        );
+        assert_eq!(plan.descartes.len(), 1);
+        assert_eq!(plan.descartes[0].motivo, MOTIVO_ESCAPA);
+    }
+
+    /// AC-5: un puntero que no resuelve se OMITE, no se escribe roto.
+    #[test]
+    fn bitacora_omite_el_puntero_que_no_resuelve() {
+        let plan = decidir_vuelta(
+            "60",
+            "una_feature",
+            "2026-08-27",
+            &[
+                Candidato::nuevo("spec", "docs/spec-feature-60-una-feature.md", true),
+                // El caso del bug #92: impl-<n>.md que nadie creo nunca.
+                Candidato::nuevo("impl", "docs/impl-60.md", false),
+            ],
+        );
+        assert!(plan.linea.contains("spec: docs/spec-feature-60-una-feature.md"));
+        assert!(!plan.linea.contains("impl:"), "no escribe el puntero ausente");
+        assert_eq!(plan.descartes.len(), 1);
+        assert_eq!(plan.descartes[0].etiqueta, "impl");
+        assert_eq!(plan.descartes[0].motivo, MOTIVO_AUSENTE);
+
+        // Y sin ningun puntero valido, la entrada igual se escribe: la bitacora
+        // vale por si misma.
+        let pelada = decidir_vuelta("61", "otra", "2026-08-27", &[]);
+        assert_eq!(pelada.linea, "- #61 otra -> done 2026-08-27");
+    }
+
+    /// AC-10: re-aplicar no duplica ni reescribe la fecha del primer cierre.
+    #[test]
+    fn vuelta_al_prd_es_idempotente() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("PRD-master.md");
+        std::fs::write(
+            &file,
+            concat!(
+                "# PRD Master\n",
+                "\n",
+                "## 10. Hitos -> features\n",
+                "\n",
+                "| # | Hito | Slug de feature | Objetivo | Criterio | Estado |\n",
+                "| --- | --- | --- | --- | --- | --- |\n",
+                "| 1 | La vuelta | la_vuelta | O1 | queda escrita | pendiente |\n",
+            ),
+        )
+        .unwrap();
+        let plan = |fecha: &str| {
+            decidir_vuelta(
+                "60",
+                "la_vuelta",
+                fecha,
+                &[Candidato::nuevo("spec", "docs/spec-feature-60-la-vuelta.md", true)],
+            )
+        };
+        let primero = aplicar_vuelta(&file, &plan("2026-08-27")).unwrap();
+        assert!(primero.milestone_marked && primero.logged);
+        let segundo = aplicar_vuelta(&file, &plan("2026-09-01")).unwrap();
+        assert_eq!(segundo, CloseEcho::default(), "la segunda no hace nada");
+
+        let texto = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(texto.matches("- #60 la_vuelta").count(), 1);
+        assert!(texto.contains("done (2026-08-27)"), "vale la fecha del primer cierre");
+        assert!(!texto.contains("2026-09-01"));
+    }
+
+    /// La bitacora ya escrita se puede volver a leer: es lo que le permite a
+    /// `prd doctor` auditar y reparar punteros sin tocar el resto de la linea.
+    #[test]
+    fn bitacora_entries_lee_lo_que_aplicar_vuelta_escribe() {
+        let texto = concat!(
+            "## Bitacora\n",
+            "\n",
+            "-\n",
+            "- #47 features -> done 2026-08-22 \u{b7} spec: ../wt/47/docs/spec-47.md \u{b7} impl: docs/impl-47.md\n",
+            "- una linea cualquiera del usuario\n",
+            "- #55 check -> done 2026-08-26\n",
+        );
+        let entradas = bitacora_entries(texto);
+        assert_eq!(entradas.len(), 2, "solo las que tienen la forma de entrada");
+
+        assert_eq!(entradas[0].feature_id, "47");
+        assert_eq!(entradas[0].feature_name, "features");
+        assert_eq!(entradas[0].fecha, "2026-08-22");
+        assert_eq!(entradas[0].punteros.len(), 2);
+        assert_eq!(entradas[0].punteros[0].1, "../wt/47/docs/spec-47.md");
+
+        // Reparar = reescribir la linea con los punteros que sobreviven.
+        let reparada = entradas[0].con_punteros(&[
+            ("spec".to_string(), "docs/spec-47.md".to_string()),
+            ("impl".to_string(), "docs/impl-47.md".to_string()),
+        ]);
+        assert_eq!(
+            reparada,
+            "- #47 features -> done 2026-08-22 \u{b7} spec: docs/spec-47.md \u{b7} impl: docs/impl-47.md"
+        );
+
+        // Una entrada sin punteros se lee igual (la del #55).
+        assert!(entradas[1].punteros.is_empty());
+        assert_eq!(entradas[1].con_punteros(&[]), "- #55 check -> done 2026-08-26");
+    }
+
+    /// `hito_marcado` distingue los tres casos que le importan al doctor.
+    #[test]
+    fn hito_marcado_distingue_sin_fila_de_sin_marcar() {
+        let texto = concat!(
+            "## 10. Hitos -> features\n",
+            "\n",
+            "| # | Hito | Slug de feature | Objetivo | Criterio | Estado |\n",
+            "| --- | --- | --- | --- | --- | --- |\n",
+            "| 1 | Uno | ya_cerrada | O1 | c | done (2026-08-01) |\n",
+            "| 2 | Dos | sin_marcar | O1 | c | pendiente |\n",
+        );
+        assert_eq!(hito_marcado(texto, "ya_cerrada"), Some(true));
+        assert_eq!(hito_marcado(texto, "sin_marcar"), Some(false));
+        assert_eq!(hito_marcado(texto, "no_esta_en_la_tabla"), None);
     }
 }
 

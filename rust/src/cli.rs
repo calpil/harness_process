@@ -335,6 +335,12 @@ pub enum PrdCommand {
         #[arg(long)]
         prd: Option<String>,
     },
+    /// Audita las bitacoras de los PRD: punteros que no resuelven y cierres sin registrar
+    Doctor {
+        /// Escribe los arreglos. Sin este flag NO toca ningun archivo
+        #[arg(long)]
+        reparar: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -570,6 +576,9 @@ pub fn run() -> anyhow::Result<()> {
             }
             PrdCommand::Tree { prd } => {
                 commands::prd::tree(&HarnessPaths::resolve()?, prd.as_deref())
+            }
+            PrdCommand::Doctor { reparar } => {
+                commands::prd::doctor(&HarnessPaths::resolve()?, reparar)
             }
         },
         Command::Leccion { command } => {
