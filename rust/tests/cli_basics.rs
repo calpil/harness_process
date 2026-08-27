@@ -6641,3 +6641,77 @@ fn cierres_que_no_integran_no_cambian() {
         "la rama se conserva"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #63: el arnes no afirma lo que no puede comprobar
+// ---------------------------------------------------------------------------
+
+/// AC-5: tras integrar, la ruta que imprime el cierre apunta a donde el archivo
+/// quedo de verdad — no al worktree que el propio cierre acaba de borrar.
+#[test]
+fn estado_archivado_apunta_a_donde_quedo_el_archivo() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    let salida = cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let salida = String::from_utf8_lossy(&salida);
+
+    assert!(
+        salida.contains("Estado archivado en docs/estado-feature-1-cobranza.md"),
+        "la ruta tiene que ser la de la raiz:\n{salida}"
+    );
+    assert!(
+        !salida.contains("Estado archivado en ../"),
+        "no puede nombrar un worktree, y menos el que acaba de borrar:\n{salida}"
+    );
+    // Y el archivo esta ahi de verdad, en la rama destino.
+    assert!(
+        git_en(raiz, &["show", "main:docs/estado-feature-1-cobranza.md"])
+            .contains("Estado archivado"),
+        "el archivo tiene que existir en la ruta que se imprimio"
+    );
+}
+
+/// AC-6: si el cierre NO integra, el worktree sigue vivo y la ruta real es la
+/// que vale.
+#[test]
+fn estado_archivado_sin_integrar_mantiene_la_ruta_real() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    let salida = cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "pending", "--note", "aparcada"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let salida = String::from_utf8_lossy(&salida);
+
+    // Sin integrar el worktree sigue existiendo, asi que la ruta real resuelve.
+    let wt = raiz.parent().unwrap().join(format!(
+        "{}-wt/1-cobranza",
+        raiz.file_name().unwrap().to_string_lossy()
+    ));
+    assert!(wt.is_dir(), "el cierre pending conserva el worktree");
+    assert!(
+        salida.contains("Estado archivado en"),
+        "igual informa donde quedo:\n{salida}"
+    );
+    assert!(
+        wt.join("docs/estado-feature-1-cobranza.md").is_file(),
+        "y el archivo esta en el worktree, que es lo que la ruta dice"
+    );
+}

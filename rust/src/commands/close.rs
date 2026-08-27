@@ -222,7 +222,14 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     let _ = std::fs::remove_file(paths.autocheck_stamp_de(&feature_id));
     let mut msg = format!("Feature #{feature_id} cerrada como {status}.");
     if let Some(rel) = &archived_rel {
-        msg.push_str(&format!(" Estado archivado en {rel}."));
+        // Feature #63: si la integracion borro el worktree, la ruta que vale es
+        // la de la raiz, que es donde el merge dejo el archivo.
+        let donde = ruta_del_estado_archivado(
+            rel,
+            &format!("docs/estado-feature-{feature_id}-{slug}.md"),
+            integracion.borra_el_worktree(),
+        );
+        msg.push_str(&format!(" Estado archivado en {donde}."));
     }
     println!("{msg}");
     // Vuelta al PRD: marca el hito y deja bitacora en el PRD de origen.
@@ -398,6 +405,33 @@ enum PlanDeIntegracion {
         destino: String,
         worktree: Option<std::path::PathBuf>,
     },
+}
+
+impl PlanDeIntegracion {
+    /// True si al ejecutarse este plan el worktree de la feature deja de
+    /// existir. Lo usa el mensaje del cierre para no nombrar una ruta que el
+    /// propio cierre acaba de borrar (feature #63).
+    fn borra_el_worktree(&self) -> bool {
+        matches!(self, Self::Integrar { worktree: Some(_), .. })
+    }
+}
+
+/// Donde esta el estado archivado PARA EL USUARIO, que no siempre es donde el
+/// cierre lo escribio.
+///
+/// Se escribe en el `docs/` del worktree de la feature, y si el cierre integra,
+/// ese worktree se borra: la ruta real deja de existir en el mismo comando que
+/// la imprime. Despues del merge el archivo vive en la RAIZ, en su ruta
+/// canonica. Es el mismo defecto que la #92 arreglo para los punteros del PRD,
+/// sobreviviendo en un mensaje de consola.
+///
+/// Funcion PURA: recibe si el worktree va a desaparecer, no lo averigua.
+fn ruta_del_estado_archivado(rel_real: &str, canonica: &str, borra_el_worktree: bool) -> String {
+    if borra_el_worktree {
+        canonica.to_string()
+    } else {
+        rel_real.to_string()
+    }
 }
 
 /// FASE 0: decide la integracion GitFlow del cierre y la valida (feature #47 /
@@ -629,6 +663,38 @@ fn aviso_pendiente(fid: &str, motivo: &str) {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    /// AC-7 (feature #63): la funcion que decide donde decir que quedo el
+    /// estado archivado es PURA. Recibe si el worktree va a desaparecer; no lo
+    /// averigua, no mira el disco.
+    #[test]
+    fn ruta_del_estado_archivado_es_pura() {
+        let dir = tempfile::tempdir().unwrap();
+        let antes: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+
+        let real = "../harness_process-wt/59-cmd-smoke/docs/estado-feature-59-cmd-smoke.md";
+        let canonica = "docs/estado-feature-59-cmd-smoke.md";
+
+        // El cierre integro: ese worktree ya no existe cuando se imprime.
+        assert_eq!(
+            ruta_del_estado_archivado(real, canonica, true),
+            canonica,
+            "tras integrar vale la ruta de la raiz"
+        );
+        // No integro: el archivo sigue donde se escribio.
+        assert_eq!(
+            ruta_del_estado_archivado(real, canonica, false),
+            real,
+            "sin integrar vale la ruta real"
+        );
+        // Y ninguna de las dos toco el disco.
+        let despues: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(antes.len(), despues.len());
+
+        // La ruta que devuelve tras integrar nunca escapa de la raiz: es
+        // copiable y pegable, que era todo el punto.
+        assert!(!ruta_del_estado_archivado(real, canonica, true).contains(".."));
+    }
 
     /// AC-7 (feature #62): anotar el plan es idempotente.
     ///

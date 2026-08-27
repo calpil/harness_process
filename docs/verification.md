@@ -80,9 +80,23 @@ El commit_guard, que es el gate que mas veces corre:
 bash tests/commit_guard_check.sh
 ```
 
-Cinco modos, e incluye la **prueba del rojo**: reconstruye la invocacion previa
-al arreglo y verifica que esa si se cuelga. Sin ese modo, el que dice "no se
-cuelga" podria estar pasando por casualidad.
+Seis modos, e incluye la **prueba del rojo**: reconstruye la version previa al
+arreglo y verifica que esa si se cuelga. Sin ese modo, el que dice "no se
+cuelga" podria estar pasando por casualidad — y eso fue exactamente lo que
+pasó (feature #63):
+
+- El test cortaba por tiempo con `timeout 10`, y `timeout(1)` es de coreutils:
+  **no viene en macOS**. Ahi el subshell devolvia 127, el test solo consideraba
+  colgado al 124, y el modo `no-cuelga` salia verde pase lo que pase. Ahora el
+  limite lo pone `timeout`, `gtimeout` o `perl alarm` —alguno hay en macOS y en
+  Linux— y si no hubiera ninguno el test **falla** diciendo cual instalar, en
+  vez de saltear en verde.
+- La prueba del rojo revertia una sola de las dos defensas contra el cuelgue (la
+  invocacion con `</dev/null`, feature #52) y dejaba en pie la otra (la guarda
+  `[ -t 0 ]` del propio guard, feature #53), asi que el rojo ya no aparecia.
+  Ahora revierte las dos.
+- Y el modo `limite` prueba el mecanismo de corte contra un caso que se cuelga y
+  uno que no: sin eso, "ahora si mide" seria otra afirmacion sin comprobar.
 
 El instalador para `cmd.exe`:
 
