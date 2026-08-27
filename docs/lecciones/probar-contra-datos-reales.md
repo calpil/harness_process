@@ -4,8 +4,8 @@ descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
 origen: [22, 25, 30, 36, 29, 28, 47]
-usos: 0
-ultimo_uso:
+usos: 1
+ultimo_uso: 2026-08-24
 ultima_actualizacion: 2026-08-21
 estado: activa
 ---
