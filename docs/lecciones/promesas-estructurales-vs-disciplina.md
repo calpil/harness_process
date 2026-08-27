@@ -4,8 +4,8 @@ descripcion: Si el invariante depende de acordarse, no es invariante: es una int
 triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
 origen: [21, 44, 60]
-usos: 1
-ultimo_uso: 2026-08-17
+usos: 2
+ultimo_uso: 2026-08-24
 ultima_actualizacion: 2026-08-27
 estado: activa
 ---
