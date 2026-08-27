@@ -204,9 +204,14 @@ concretos viven en `docs/verification.md`.>
   eso `verify` mira la salida ademas del exit code y marca `vacio` al AC que
   reconocidamente no ejecuto ningun caso. Sobre salidas que no son de libtest no
   opina: el estado no cambia.
-- **Entornos**: solo local. El arnes no se despliega; se instala en el repo del
-  proyecto con `setup_harness.sh` / `.ps1`, y `tests/parity_check.sh` verifica
-  que los dos hagan lo mismo.
+- **Entornos**: local y un runner Windows en CI (feature #59). El arnes no se
+  despliega; se instala en el repo del proyecto con `setup_harness.sh` / `.ps1`,
+  y `tests/parity_check.sh` verifica que los dos DECLAREN lo mismo. Lo que la
+  paridad no puede probar desde macOS o Linux —que `setup_harness.cmd` de verdad
+  arranque el `.ps1` y le traduzca los flags— lo ejecuta
+  `.github/workflows/windows-cmd-installer.yml` en `windows-latest`, y
+  `tests/cmd_installer_check.ps1` se NIEGA a correr fuera de Windows en vez de
+  informar un skip verde.
 - **Criterio de "listo"**: los AC del spec en verde en su reporte, la suite
   completa y `cargo clippy -D warnings` limpios, los chequeos de `tests/` en
   verde, y `harness_check.sh` sin problemas.
