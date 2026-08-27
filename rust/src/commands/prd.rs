@@ -641,3 +641,332 @@ mod tests {
         assert!(candidato_desde_rutas(&[]).is_none());
     }
 }
+
+// ---------------------------------------------------------------------------
+// `prd doctor`: el pendiente durable de la vuelta al PRD (feature #60)
+// ---------------------------------------------------------------------------
+
+/// Como se arregla un puntero roto.
+#[derive(Debug, PartialEq, Eq)]
+enum Arreglo {
+    /// El archivo existe en otro lado de la raiz: se reescribe la ruta.
+    Reescribir(String),
+    /// No existe en ninguna parte: se quita el segmento antes que mentir.
+    Quitar,
+}
+
+/// Algo que la vuelta al PRD dejo a medias o mal escrito.
+#[derive(Debug)]
+enum Hallazgo {
+    /// Un puntero de la bitacora que no abre ningun archivo.
+    PunteroRoto {
+        prd_rel: String,
+        linea: usize,
+        fid: String,
+        etiqueta: String,
+        rel: String,
+        motivo: &'static str,
+        arreglo: Arreglo,
+    },
+    /// Una feature cerrada como `done` que no figura en la bitacora de su PRD.
+    ///
+    /// Este es EL pendiente durable: no depende de que el cierre se haya
+    /// acordado de anotarlo en algun lado. La feature esta `done` en el backlog
+    /// y no esta en el PRD: eso ES el hallazgo, lo haya registrado alguien o no
+    /// (leccion `promesas-estructurales-vs-disciplina`).
+    BitacoraFaltante {
+        prd_rel: String,
+        fid: String,
+        name: String,
+    },
+    /// La fila del hito existe con el slug de la feature y sigue sin marcar.
+    HitoSinMarcar {
+        prd_rel: String,
+        fid: String,
+        name: String,
+    },
+}
+
+impl Hallazgo {
+    fn linea_de_informe(&self) -> String {
+        match self {
+            Self::PunteroRoto {
+                prd_rel,
+                linea,
+                fid,
+                etiqueta,
+                rel,
+                motivo,
+                arreglo,
+            } => {
+                let como = match arreglo {
+                    Arreglo::Reescribir(nueva) => format!("-> {nueva}"),
+                    Arreglo::Quitar => "-> se quita (no existe en ninguna parte)".to_string(),
+                };
+                format!("  {prd_rel}:{} #{fid} {etiqueta}: {rel} ({motivo}) {como}", linea + 1)
+            }
+            Self::BitacoraFaltante { prd_rel, fid, name } => {
+                format!("  {prd_rel} #{fid} {name}: cerrada como done y sin linea de bitacora")
+            }
+            Self::HitoSinMarcar { prd_rel, fid, name } => {
+                format!("  {prd_rel} #{fid} {name}: hito sin marcar done")
+            }
+        }
+    }
+}
+
+/// La raiz que audita el doctor: el checkout PRINCIPAL. El PRD no vive en la
+/// rama de ninguna feature.
+fn raiz_del_arbol(paths: &HarnessPaths) -> std::path::PathBuf {
+    crate::git::repo_principal(&paths.repo_root).unwrap_or_else(|| paths.repo_root.clone())
+}
+
+/// `prd doctor [--reparar]`: audita las bitacoras de todos los PRD contra el
+/// backlog y el filesystem.
+///
+/// Sin `--reparar` NO escribe una sola linea: informa y sale distinto de 0 si
+/// encontro algo. La parte que decide y la que actua estan separadas a
+/// proposito — la promesa "el informe no toca nada" la sostiene que ahi no hay
+/// codigo que toque nada.
+pub fn doctor(paths: &HarnessPaths, reparar: bool) -> anyhow::Result<()> {
+    let raiz = raiz_del_arbol(paths);
+    let data = load_features(paths)?;
+    let hallazgos = auditar(&raiz, &data);
+
+    if hallazgos.is_empty() {
+        println!("[OK] Las bitacoras de los PRD estan al dia: sin punteros rotos ni cierres sin registrar.");
+        return Ok(());
+    }
+
+    let rotos = hallazgos
+        .iter()
+        .filter(|h| matches!(h, Hallazgo::PunteroRoto { .. }))
+        .count();
+    let faltantes = hallazgos.len() - rotos;
+    println!(
+        "{} hallazgo(s): {rotos} puntero(s) que no resuelven, {faltantes} cierre(s) sin registrar.",
+        hallazgos.len()
+    );
+    for hallazgo in &hallazgos {
+        println!("{}", hallazgo.linea_de_informe());
+    }
+
+    if !reparar {
+        return Err(Exit {
+            code: 2,
+            message: Some(
+                "Nada se escribio (esto es un informe). Para arreglarlo:\n    \
+                 sh harness_cli prd doctor --reparar"
+                    .to_string(),
+            ),
+        }
+        .into());
+    }
+
+    let escritos = reparar_todo(&raiz, &data, &hallazgos)?;
+    for rel in &escritos {
+        // Los PRD son rutas protegidas (feature #26) y esta escritura la hizo el
+        // ARNES: se registra para que la red de seguridad no la reporte despues.
+        crate::commands::rutas::registrar_escritura_del_arnes(paths, rel);
+    }
+    println!("\n[OK] Reparado. Documentos escritos: {}", escritos.join(", "));
+    log(paths, &format!("prd doctor --reparar: {} hallazgo(s)", hallazgos.len()))?;
+    Ok(())
+}
+
+/// Recorre el arbol y el backlog y devuelve lo que esta mal. SOLO LEE.
+fn auditar(raiz: &std::path::Path, data: &serde_json::Value) -> Vec<Hallazgo> {
+    let mut out = Vec::new();
+    let arbol = prd::scan_dir(&raiz.join("docs").join("prd"));
+    for prd_ in &arbol {
+        let prd_rel = prd::rel_path(&prd_.slug);
+        let Ok(texto) = std::fs::read_to_string(&prd_.file) else {
+            continue;
+        };
+        // (a) Punteros que no abren nada.
+        for entrada in prd::bitacora_entries(&texto) {
+            for (etiqueta, rel) in &entrada.punteros {
+                let Some(motivo) = motivo_roto(raiz, rel) else {
+                    continue;
+                };
+                out.push(Hallazgo::PunteroRoto {
+                    prd_rel: prd_rel.clone(),
+                    linea: entrada.idx,
+                    fid: entrada.feature_id.clone(),
+                    etiqueta: etiqueta.clone(),
+                    rel: rel.clone(),
+                    motivo,
+                    arreglo: arreglo_para(raiz, rel),
+                });
+            }
+        }
+        // (b) Cierres que nunca llegaron a este PRD.
+        for feature in crate::features::features_slice(data) {
+            if feature.get("status").and_then(serde_json::Value::as_str) != Some("done") {
+                continue;
+            }
+            if prd::feature_prd_slug(feature) != prd_.slug {
+                continue;
+            }
+            let fid = crate::pycompat::py_str(feature.get("id"));
+            let name = feature
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let cabeza = format!("- #{fid} {name} -> done");
+            if !texto.lines().any(|l| l.trim_start().starts_with(&cabeza)) {
+                out.push(Hallazgo::BitacoraFaltante {
+                    prd_rel: prd_rel.clone(),
+                    fid: fid.clone(),
+                    name: name.clone(),
+                });
+            }
+            // Una feature sin fila de hito no es un hallazgo: no todo hito esta
+            // declarado en la tabla.
+            if prd::hito_marcado(&texto, &name) == Some(false) {
+                out.push(Hallazgo::HitoSinMarcar {
+                    prd_rel: prd_rel.clone(),
+                    fid,
+                    name,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Por que un puntero ya escrito no sirve. `None` = abre bien.
+fn motivo_roto(raiz: &std::path::Path, rel: &str) -> Option<&'static str> {
+    if rel.trim().is_empty() {
+        return Some(prd::MOTIVO_VACIO);
+    }
+    if prd::escapa_de_la_raiz(rel) {
+        return Some(prd::MOTIVO_ESCAPA);
+    }
+    if !raiz.join(rel).is_file() {
+        return Some(prd::MOTIVO_AUSENTE);
+    }
+    None
+}
+
+/// Busca el archivo por su nombre en `docs/`: un puntero al worktree borrado
+/// casi siempre tiene su gemelo ahi, que es donde lo dejo el merge.
+fn arreglo_para(raiz: &std::path::Path, rel: &str) -> Arreglo {
+    let Some(base) = rel.rsplit('/').next().filter(|b| !b.is_empty()) else {
+        return Arreglo::Quitar;
+    };
+    let candidata = format!("docs/{base}");
+    if raiz.join(&candidata).is_file() {
+        return Arreglo::Reescribir(candidata);
+    }
+    Arreglo::Quitar
+}
+
+/// Aplica los hallazgos. Primero reescribe punteros (no cambia la cantidad de
+/// lineas, asi que los indices siguen valiendo) y recien despues apendea las
+/// bitacoras faltantes.
+fn reparar_todo(
+    raiz: &std::path::Path,
+    data: &serde_json::Value,
+    hallazgos: &[Hallazgo],
+) -> anyhow::Result<Vec<String>> {
+    let mut escritos: Vec<String> = Vec::new();
+    let arbol = prd::scan_dir(&raiz.join("docs").join("prd"));
+
+    for prd_ in &arbol {
+        let prd_rel = prd::rel_path(&prd_.slug);
+        let toca: Vec<&Hallazgo> = hallazgos
+            .iter()
+            .filter(|h| matches!(h, Hallazgo::PunteroRoto { prd_rel: p, .. } if *p == prd_rel))
+            .collect();
+        if toca.is_empty() {
+            continue;
+        }
+        let texto = std::fs::read_to_string(&prd_.file)?;
+        let mut lineas: Vec<String> = texto.lines().map(str::to_string).collect();
+        for entrada in prd::bitacora_entries(&texto) {
+            let arreglos: Vec<&Hallazgo> = toca
+                .iter()
+                .copied()
+                .filter(|h| matches!(h, Hallazgo::PunteroRoto { linea, .. } if *linea == entrada.idx))
+                .collect();
+            if arreglos.is_empty() {
+                continue;
+            }
+            let punteros: Vec<(String, String)> = entrada
+                .punteros
+                .iter()
+                .filter_map(|(etiqueta, rel)| {
+                    match arreglos.iter().find_map(|h| match h {
+                        Hallazgo::PunteroRoto {
+                            etiqueta: e,
+                            rel: r,
+                            arreglo,
+                            ..
+                        } if e == etiqueta && r == rel => Some(arreglo),
+                        _ => None,
+                    }) {
+                        None => Some((etiqueta.clone(), rel.clone())),
+                        Some(Arreglo::Reescribir(nueva)) => {
+                            Some((etiqueta.clone(), nueva.clone()))
+                        }
+                        Some(Arreglo::Quitar) => None,
+                    }
+                })
+                .collect();
+            if let Some(slot) = lineas.get_mut(entrada.idx) {
+                *slot = entrada.con_punteros(&punteros);
+            }
+        }
+        let mut joined = lineas.join("\n");
+        joined.push('\n');
+        crate::features::write_text_atomic(&prd_.file, &joined)?;
+        escritos.push(prd_rel);
+    }
+
+    // Las bitacoras y los hitos faltantes: el MISMO plan que usa el cierre.
+    for hallazgo in hallazgos {
+        let (prd_rel, fid, name) = match hallazgo {
+            Hallazgo::BitacoraFaltante { prd_rel, fid, name }
+            | Hallazgo::HitoSinMarcar { prd_rel, fid, name } => (prd_rel, fid, name),
+            Hallazgo::PunteroRoto { .. } => continue,
+        };
+        let Some(feature) = crate::features::features_slice(data)
+            .iter()
+            .find(|f| crate::pycompat::py_str(f.get("id")) == *fid)
+            .and_then(|f| f.as_object())
+        else {
+            continue;
+        };
+        let slug = prd::feature_prd_slug(&serde_json::Value::Object(feature.clone()));
+        let file = prd::file_en_raiz(raiz, &slug);
+        if !file.is_file() {
+            continue;
+        }
+        // La fecha del cierre real, no la de hoy: el documento cuenta cuando
+        // paso, no cuando lo reparamos.
+        let fecha = feature
+            .get("closed_at")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| s.get(..10))
+            .unwrap_or("")
+            .to_string();
+        let spec_rel = crate::spec::spec_rel_raiz(feature);
+        let impl_rel = format!("docs/impl-{fid}.md");
+        let plan = prd::decidir_vuelta(
+            fid,
+            name,
+            &fecha,
+            &[
+                prd::Candidato::nuevo("spec", &spec_rel, raiz.join(&spec_rel).is_file()),
+                prd::Candidato::nuevo("impl", &impl_rel, raiz.join(&impl_rel).is_file()),
+            ],
+        );
+        let echo = prd::aplicar_vuelta(&file, &plan)?;
+        if (echo.milestone_marked || echo.logged) && !escritos.contains(prd_rel) {
+            escritos.push(prd_rel.clone());
+        }
+    }
+    Ok(escritos)
+}

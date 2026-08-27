@@ -44,6 +44,10 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     } = opts;
     let mut data = load_features(paths)?;
     let idx = find_feature_index(&data, fid)?;
+    // El PRD es un documento RAIZ y COMPARTIDO: no vive en la rama de ninguna
+    // feature (feature #60). Se guardan las rutas de la raiz ANTES de sombrear
+    // `paths` con las de la feature.
+    let raiz = paths;
     // Feature #47: los docs (spec, plan, evidencia) viven en el worktree de la
     // feature, no en el directorio desde el que se corre el comando.
     let paths = &match feature_at(&data, idx).as_object() {
@@ -148,14 +152,6 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         )
     };
     save_features(paths, &data)?;
-    // Vuelta al PRD: cerrar como done marca el hito y deja bitacora en el PRD de
-    // origen. Nunca reescribe el cuerpo del documento (es del USUARIO) y nunca
-    // bloquea el cierre: si el PRD no esta, avisa y sigue.
-    if status == "done"
-        && let Some(feature) = feature_at(&data, idx).as_object()
-    {
-        echo_to_prd(paths, feature, &stamp);
-    }
     // Feature #15: transicion al estado final (o flag Impediment si quedo
     // bloqueada) y comentario con la nota de cierre (AC-8).
     if let Some(feature) = feature_at(&data, idx).as_object() {
@@ -225,6 +221,20 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     }
     println!("{msg}");
     integrar(paths, &data, idx, status, to, &feature_id)?;
+    // Vuelta al PRD: marca el hito y deja bitacora en el PRD de origen.
+    //
+    // Corre DESPUES de integrar y solo si integrar salio bien (feature #60): un
+    // hito marcado afirma que el trabajo esta en la rama destino, y hasta que el
+    // merge no ocurrio, no lo esta. Antes se escribia ANTES y dentro del docs/
+    // del worktree, asi que la linea viajaba en la rama y dos cierres en
+    // paralelo chocaban en el mismo final de seccion: 7 de 18 se perdieron en la
+    // resolucion del conflicto. Nunca reescribe el cuerpo del documento (es del
+    // USUARIO) y nunca bloquea el cierre: si no se puede, avisa fuerte y sigue.
+    if status == "done"
+        && let Some(feature) = feature_at(&data, idx).as_object()
+    {
+        echo_to_prd(raiz, feature, &stamp);
+    }
     if let Some(decl) = &declaracion {
         match &decl.motivo {
             Some(motivo) => println!("  Leccion declarada: ninguna ({motivo})."),
@@ -368,27 +378,59 @@ fn integrar(
     Ok(())
 }
 
-/// Marca el hito y deja bitacora en el PRD de origen de la feature. Best-effort
-/// por diseno: un PRD ausente o ilegible NO puede impedir cerrar una feature.
+/// La raiz donde vive el PRD: el checkout PRINCIPAL, sin importar desde donde
+/// se haya invocado el comando (feature #60). Sin git, la raiz de siempre.
+fn raiz_del_prd(paths: &HarnessPaths) -> std::path::PathBuf {
+    crate::git::repo_principal(&paths.repo_root).unwrap_or_else(|| paths.repo_root.clone())
+}
+
+/// Los punteros que la bitacora podria llevar, cada uno resuelto contra la
+/// raiz. Devolver `existe` en vez de filtrar aca es lo que deja a
+/// `prd::decidir_vuelta` pura y testeable sin filesystem.
+fn candidatos_de_bitacora(
+    raiz: &std::path::Path,
+    feature: &serde_json::Map<String, Value>,
+    fid: &str,
+) -> Vec<prd::Candidato> {
+    // La forma CANONICA post-merge: relativa a la raiz. No se calcula contra el
+    // worktree — ese arbol lo borra el propio cierre unos segundos despues.
+    let spec_rel = crate::spec::spec_rel_raiz(feature);
+    let impl_rel = format!("docs/impl-{fid}.md");
+    vec![
+        prd::Candidato::nuevo("spec", &spec_rel, raiz.join(&spec_rel).is_file()),
+        prd::Candidato::nuevo("impl", &impl_rel, raiz.join(&impl_rel).is_file()),
+    ]
+}
+
+/// Marca el hito y deja bitacora en el PRD de origen de la feature, en la RAIZ.
+/// Best-effort por diseno: un PRD ausente o ilegible NO puede impedir cerrar una
+/// feature. Pero best-effort no es mudo (feature #60): lo que no se pudo
+/// escribir se dice por stderr y queda como pendiente que `prd doctor` reporta.
 fn echo_to_prd(paths: &HarnessPaths, feature: &serde_json::Map<String, Value>, stamp: &str) {
+    let raiz = raiz_del_prd(paths);
     let slug = prd::normalize_parent(feature.get("prd").and_then(Value::as_str));
-    let file = prd::file_for(paths, &prd::segments(&slug));
+    let file = prd::file_en_raiz(&raiz, &slug);
     let rel = prd::rel_path(&slug);
+    let fid = py_str(feature.get("id"));
     if !file.is_file() {
-        println!("[i] Sin vuelta al PRD: falta {rel}.");
+        aviso_pendiente(&fid, &format!("falta {rel} en la raiz del repo"));
         return;
     }
-    let fid = py_str(feature.get("id"));
     let name = feature
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or_default();
     let date = stamp.get(..10).unwrap_or(stamp);
-    let spec_rel = relpath(&spec_path(paths, feature), &paths.repo_root)
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-    let impl_rel = format!("docs/impl-{fid}.md");
-    match prd::echo_close(&file, &fid, name, date, &spec_rel, &impl_rel) {
+    let plan = prd::decidir_vuelta(&fid, name, date, &candidatos_de_bitacora(&raiz, feature, &fid));
+    // Un puntero descartado se dice: omitirlo en silencio seria el mismo bug con
+    // otra cara.
+    for descarte in &plan.descartes {
+        println!(
+            "  [i] sin puntero {}: {} ({})",
+            descarte.etiqueta, descarte.rel, descarte.motivo
+        );
+    }
+    match prd::aplicar_vuelta(&file, &plan) {
         Ok(echo) if echo.milestone_marked || echo.logged => {
             let what = if echo.milestone_marked {
                 "hito marcado done + bitacora"
@@ -402,8 +444,23 @@ fn echo_to_prd(paths: &HarnessPaths, feature: &serde_json::Map<String, Value>, s
             crate::commands::rutas::registrar_escritura_del_arnes(paths, &rel);
         }
         Ok(_) => println!("[i] El PRD {rel} ya tenia registrada esta feature."),
-        Err(err) => println!("[i] No se pudo actualizar {rel}: {err}"),
+        Err(err) => aviso_pendiente(&fid, &format!("no se pudo escribir {rel}: {err}")),
     }
+}
+
+/// Avisa que la vuelta al PRD quedo pendiente. Va a STDERR y al final del
+/// cierre, con el exit code ya fijado: avisar no puede cambiar el resultado de
+/// un cierre (mismo contrato que el nudge de lecciones, AC-8).
+fn aviso_pendiente(fid: &str, motivo: &str) {
+    let _ = std::io::stderr().write_all(
+        format!(
+            "\n[!] La feature #{fid} cerro como done pero NO quedo registrada en su PRD: {motivo}.\n    \
+             El cierre es valido; el que queda pendiente es el PRD. Cuando lo resuelvas:\n      \
+             sh harness_cli prd doctor            # que falta\n      \
+             sh harness_cli prd doctor --reparar  # escribirlo\n"
+        )
+        .as_bytes(),
+    );
 }
 
 #[cfg(test)]

@@ -518,6 +518,34 @@ if [ "$rutas_rc" -ne 0 ]; then
     esac
 fi
 
+# Bitacoras de los PRD al dia (feature #60). Dos cosas que el cierre puede
+# dejar a medias y que antes no dejaban rastro: una feature cerrada como `done`
+# que nunca llego a la bitacora de su PRD (bug #91) y un puntero escrito que no
+# abre ningun archivo (bug #92, tipicamente una ruta al worktree que el propio
+# cierre borro).
+#
+# Este es EL pendiente durable: no depende de que el cierre se haya acordado de
+# anotarlo. Se deriva del backlog — una feature `done` que no esta en su PRD ES
+# el hallazgo — asi que aparece aca aunque la perdida haya ocurrido hace meses.
+#
+# AVISA Y NO BLOQUEA, por la misma razon que la paridad de instaladores: un PRD
+# desactualizado no impide trabajar hoy, y un proyecto que ya venia arrastrando
+# punteros rotos no puede quedarse sin poder cerrar por un arreglo del arnes. El
+# remedio es una sola linea y esta escrita aca. Por eso este bloque NO toca el
+# contador de fallos.
+if [ -f "$HARNESS_DIR/feature_list.json" ]; then
+    if ! prd_out="$(sh "$HARNESS_DIR/harness_cli" prd doctor 2>&1)"; then
+        case "$prd_out" in
+            *"hallazgo"*)
+                echo "[i] Bitacoras de los PRD con pendientes:" >&2
+                printf '%s\n' "$prd_out" | grep -v '^Nada se escribio' | sed 's/^/    /' >&2
+                echo "    Reparalo con: sh harness_cli prd doctor --reparar" >&2
+                ;;
+            *) : ;;  # sin PRDs, sin binario u otra cosa: no es un hallazgo
+        esac
+    fi
+fi
+
 # Paridad de los instaladores (feature #30). El .ps1 no se puede EJECUTAR sin
 # PowerShell —once features seguidas lo declararon como limite— pero si se puede
 # comparar lo que los dos DECLARAN. Este bloque avisa cuando uno se adelanta al

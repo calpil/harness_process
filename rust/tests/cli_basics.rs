@@ -5876,3 +5876,274 @@ fn start_should_always_print_the_context_summary() {
         "con como pedir el cuerpo"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #60: la vuelta al PRD no se pierde ni miente (bugs #91 / #92)
+// ---------------------------------------------------------------------------
+
+/// PRD maestro en la RAIZ, con una fila de hito por slug pedido.
+fn sembrar_prd_maestro(raiz: &Path, slugs: &[&str]) -> PathBuf {
+    let dir = raiz.join("docs").join("prd");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut texto = String::from("# PRD Master - demo\n\n## 10. Hitos -> features\n\n");
+    texto.push_str("| # | Hito | Slug de feature | Objetivo | Criterio | Estado |\n");
+    texto.push_str("| --- | --- | --- | --- | --- | --- |\n");
+    for (i, slug) in slugs.iter().enumerate() {
+        texto.push_str(&format!(
+            "| {} | Hito de {slug} | {slug} | O1 | se cierra | pendiente |\n",
+            i + 1
+        ));
+    }
+    let file = dir.join("PRD-master.md");
+    std::fs::write(&file, texto).unwrap();
+    file
+}
+
+fn commitear_todo(raiz: &Path, mensaje: &str) {
+    Command::new("git").args(["add", "-A"]).current_dir(raiz).output().unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", mensaje])
+        .current_dir(raiz)
+        .output()
+        .unwrap();
+}
+
+/// AC-1: el hito y la bitacora van al PRD de la RAIZ, no al del worktree.
+#[test]
+fn close_should_write_the_prd_echo_in_the_root_not_the_worktree() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let prd = sembrar_prd_maestro(raiz, &["cobranza"]);
+    commitear_todo(raiz, "prd");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PRD actualizado"));
+
+    // (a) El PRD de la RAIZ quedo escrito.
+    let en_raiz = std::fs::read_to_string(&prd).unwrap();
+    assert!(
+        en_raiz.contains("- #1 cobranza -> done"),
+        "la bitacora tiene que estar en la raiz:\n{en_raiz}"
+    );
+    assert!(
+        en_raiz.contains("| 1 | Hito de cobranza | cobranza | O1 | se cierra | done ("),
+        "el hito tiene que quedar marcado:\n{en_raiz}"
+    );
+
+    // (b) La rama de la feature NUNCA llevo el PRD: por eso no puede conflictuar.
+    let en_la_rama = git_en(raiz, &["show", "feature/1-cobranza:docs/prd/PRD-master.md"]);
+    assert!(
+        !en_la_rama.contains("-> done"),
+        "el log de cierre no viaja en la rama:\n{en_la_rama}"
+    );
+}
+
+/// AC-2: si la integracion no ocurre, no se marca ningun hito. Un hito marcado
+/// afirma que el trabajo esta en la rama destino.
+#[test]
+fn close_should_not_touch_the_prd_when_integration_fails() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let prd = sembrar_prd_maestro(raiz, &["cobranza"]);
+    commitear_todo(raiz, "prd");
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    // Sin --to el arnes se niega a integrar (AC-14 de la #47).
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .code(2);
+
+    let texto = std::fs::read_to_string(&prd).unwrap();
+    assert!(
+        !texto.contains("-> done"),
+        "sin merge no hay bitacora:\n{texto}"
+    );
+    assert!(
+        texto.contains("| pendiente |"),
+        "sin merge el hito sigue pendiente:\n{texto}"
+    );
+}
+
+/// AC-3: la regresion exacta de las 7 perdidas. Dos features cerrando contra el
+/// mismo PRD desde worktrees distintos conservan LAS DOS lineas.
+#[test]
+fn dos_cierres_en_paralelo_conservan_las_dos_bitacoras() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    let prd = sembrar_prd_maestro(raiz, &["cobranza", "mora"]);
+    commitear_todo(raiz, "prd");
+
+    for nombre in ["cobranza", "mora"] {
+        cmd(&bin).args(["add", "--name", nombre]).assert().success();
+    }
+    // Las DOS abiertas a la vez, cada una en su worktree: es el escenario que
+    // habilito la #47 y el que rompia la vuelta al PRD.
+    for fid in ["1", "2"] {
+        cmd(&bin).args(["start", "--feature", fid]).assert().success();
+    }
+    for fid in ["1", "2"] {
+        cmd(&bin)
+            .args(["close", "--feature", fid, "--status", "done", "--to", "main"])
+            .assert()
+            .success();
+    }
+
+    let texto = std::fs::read_to_string(&prd).unwrap();
+    assert!(
+        texto.contains("- #1 cobranza -> done"),
+        "falta la del primer cierre:\n{texto}"
+    );
+    assert!(
+        texto.contains("- #2 mora -> done"),
+        "falta la del segundo cierre (era la que se perdia):\n{texto}"
+    );
+    assert_eq!(texto.matches("-> done").count(), 2);
+    // Y los dos hitos marcados.
+    assert_eq!(texto.matches("| done (").count(), 2, "{texto}");
+}
+
+/// AC-8: la vuelta al PRD imposible avisa por stderr y NO cambia el cierre.
+#[test]
+fn aviso_de_vuelta_al_prd_fallida_no_cambia_el_cierre() {
+    let (dir, bin) = sandbox_git();
+    let raiz = dir.path();
+    // Sin PRD en el repo: la vuelta no se puede completar.
+    assert!(!raiz.join("docs/prd/PRD-master.md").exists());
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        // El cierre es valido: avisar no puede cambiar el exit code.
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"))
+        .stderr(predicate::str::contains(
+            "NO quedo registrada en su PRD",
+        ))
+        // Y nombra el comando exacto que lo repara.
+        .stderr(predicate::str::contains("prd doctor --reparar"));
+}
+
+/// Deja una feature cerrada como done en el backlog del sandbox.
+fn marcar_done(harness_dir: &Path, fid: u64, closed_at: &str) {
+    let file = harness_dir.join("feature_list.json");
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    for feature in data["features"].as_array_mut().unwrap() {
+        if feature["id"] == serde_json::json!(fid) {
+            feature["status"] = serde_json::json!("done");
+            feature["closed_at"] = serde_json::json!(closed_at);
+        }
+    }
+    std::fs::write(&file, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+}
+
+/// AC-6: el doctor informa y NO escribe una sola linea.
+#[test]
+fn prd_doctor_reporta_y_no_escribe() {
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["add", "--name", "mora"]).assert().success();
+    marcar_done(harness_dir, 1, "2026-08-20T10:00:00Z");
+    marcar_done(harness_dir, 2, "2026-08-21T10:00:00Z");
+
+    // El spec de la #1 existe donde el merge lo deja.
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    std::fs::write(raiz.join("docs/spec-feature-1-cobranza.md"), "# spec\n").unwrap();
+
+    let prd = sembrar_prd_maestro(raiz, &["cobranza", "mora"]);
+    // La #1 quedo con el puntero al worktree borrado (bug #92); la #2 no quedo
+    // registrada (bug #91).
+    let mut texto = std::fs::read_to_string(&prd).unwrap();
+    texto.push_str("\n## Bitacora\n\n- #1 cobranza -> done 2026-08-20 \u{b7} spec: ../demo-wt/1-cobranza/docs/spec-feature-1-cobranza.md \u{b7} impl: docs/impl-1.md\n");
+    std::fs::write(&prd, &texto).unwrap();
+    let antes = std::fs::read_to_string(&prd).unwrap();
+
+    cmd(&bin)
+        .args(["prd", "doctor"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("spec: ../demo-wt/1-cobranza"))
+        .stdout(predicate::str::contains("la ruta escapa de la raiz del repo"))
+        .stdout(predicate::str::contains("docs/impl-1.md"))
+        .stdout(predicate::str::contains(
+            "#2 mora: cerrada como done y sin linea de bitacora",
+        ))
+        .stderr(predicate::str::contains("Nada se escribio"));
+
+    assert_eq!(
+        std::fs::read_to_string(&prd).unwrap(),
+        antes,
+        "el informe no puede tocar el documento"
+    );
+}
+
+/// AC-7: `--reparar` arregla punteros y agrega lo que falta, con la fecha del
+/// cierre real y sin tocar el resto del documento.
+#[test]
+fn prd_doctor_reparar_arregla_punteros_y_bitacoras_faltantes() {
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path();
+    let harness_dir = bin.parent().unwrap();
+
+    cmd(&bin).args(["add", "--name", "cobranza"]).assert().success();
+    cmd(&bin).args(["add", "--name", "mora"]).assert().success();
+    marcar_done(harness_dir, 1, "2026-08-20T10:00:00Z");
+    marcar_done(harness_dir, 2, "2026-08-21T10:00:00Z");
+
+    std::fs::create_dir_all(raiz.join("docs")).unwrap();
+    // El spec de la #1 esta en docs/ (donde lo dejo el merge); el impl-1.md no
+    // existe en ninguna parte.
+    std::fs::write(raiz.join("docs/spec-feature-1-cobranza.md"), "# spec\n").unwrap();
+    std::fs::write(raiz.join("docs/spec-feature-2-mora.md"), "# spec\n").unwrap();
+    std::fs::write(raiz.join("docs/impl-2.md"), "# impl\n").unwrap();
+
+    let prd = sembrar_prd_maestro(raiz, &["cobranza", "mora"]);
+    let mut texto = std::fs::read_to_string(&prd).unwrap();
+    texto.push_str("\n## Bitacora\n\n- #1 cobranza -> done 2026-08-20 \u{b7} spec: ../demo-wt/1-cobranza/docs/spec-feature-1-cobranza.md \u{b7} impl: docs/impl-1.md\n");
+    std::fs::write(&prd, &texto).unwrap();
+
+    cmd(&bin)
+        .args(["prd", "doctor", "--reparar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Reparado"));
+
+    let reparado = std::fs::read_to_string(&prd).unwrap();
+    // El puntero al worktree quedo apuntando a docs/ ...
+    assert!(
+        reparado.contains("- #1 cobranza -> done 2026-08-20 \u{b7} spec: docs/spec-feature-1-cobranza.md"),
+        "{reparado}"
+    );
+    // ... y el impl que no existe en ningun lado se quito en vez de mentir.
+    assert!(!reparado.contains("impl: docs/impl-1.md"), "{reparado}");
+    assert!(!reparado.contains(".."), "no puede quedar ninguna ruta que escape:\n{reparado}");
+    // La #2 se agrego con la fecha de SU cierre, no la de hoy.
+    assert!(
+        reparado.contains("- #2 mora -> done 2026-08-21 \u{b7} spec: docs/spec-feature-2-mora.md \u{b7} impl: docs/impl-2.md"),
+        "{reparado}"
+    );
+    // Los dos hitos marcados con su fecha.
+    assert!(reparado.contains("| done (2026-08-20) |"), "{reparado}");
+    assert!(reparado.contains("| done (2026-08-21) |"), "{reparado}");
+    // Y el cuerpo del documento intacto.
+    assert!(reparado.contains("# PRD Master - demo"), "{reparado}");
+
+    // Idempotente: correrlo de nuevo no encuentra nada.
+    cmd(&bin)
+        .args(["prd", "doctor"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("estan al dia"));
+}

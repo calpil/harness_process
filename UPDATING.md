@@ -253,7 +253,46 @@ cerrar la feature con `close --status done` el arnés **vuelve al PRD**: marca l
 fila del hito (`Estado` → `done (YYYY-MM-DD)`) y agrega una línea a su
 `## Bitacora` con la feature, su spec y su `docs/impl-<id>.md`. Es idempotente
 (re-cerrar no duplica ni reescribe la fecha del primer cierre) y **best-effort**:
-un PRD ausente o ilegible avisa con `[i]` y jamás impide cerrar.
+un PRD ausente o ilegible jamás impide cerrar.
+
+**Dónde y cuándo escribe (feature #60).** El PRD es un documento **raíz y
+compartido**: la vuelta al PRD se escribe en el `docs/prd/` del checkout
+principal, y **después** de que la integración salió bien. Las dos cosas
+importan:
+
+- *En la raíz*, porque el log de cierre no pertenece a ninguna rama. Cuando se
+  escribía dentro del `docs/` del worktree, dos features cerrando en paralelo
+  apendeaban al final de la misma sección y el merge conflictuaba; la línea de
+  la rama desaparecía en la resolución. En el repo del arnés **7 de 18** cierres
+  perdieron así su bitácora, y hubo que transcribirlas a mano.
+- *Después de integrar*, porque un hito marcado afirma que el trabajo está en la
+  rama destino. Si el merge falla o falta `--to`, no se marca nada.
+
+El PRD queda modificado **sin commitear** en el checkout principal, como el resto
+de los documentos que el arnés toca: commitealo cuando corresponda.
+
+**Los punteros se verifican antes de escribirse.** Cada ruta que entra en la
+bitácora tiene que ser relativa a la raíz y abrir un archivo que existe. La que
+no cumple **no se escribe** y se dice por qué (`[i] sin puntero impl: ... (el
+archivo no existe)`). Antes se escribía la ruta al worktree — que el propio
+cierre borra segundos después — y un `docs/impl-<id>.md` fijo que nadie
+garantiza que exista.
+
+**El pendiente durable: `prd doctor`.**
+
+```sh
+sh harness_cli prd doctor            # informe: NO escribe nada, sale 2 si hay algo
+sh harness_cli prd doctor --reparar  # aplica los arreglos
+```
+
+Contrasta el backlog con los PRD y encuentra dos cosas: **punteros que no
+resuelven** (los reescribe al archivo que sí existe, o los quita antes que
+mentir) y **features cerradas como `done` que no están en la bitácora de su
+PRD** (las agrega con la fecha de su cierre real y marca su hito). No depende de
+que el cierre haya anotado el pendiente en ningún lado: una feature `done` que
+no está en su PRD **es** el hallazgo, aunque la pérdida sea de hace meses.
+`harness_check.sh` lo reporta con `[i]` y **no bloquea** por ello: un PRD
+desactualizado no impide trabajar hoy.
 
 El **cuerpo** del PRD (historia, datos, pseudo-código) no lo reescribe nadie: si
 lo implementado difiere de lo que promete el documento, actualizarlo es tuyo.
