@@ -32,3 +32,6 @@ La vuelta al PRD sale del branch: se escribe en el docs/prd/ de la RAIZ y DESPUE
 
 ---
 Cerrado: 2026-08-27T18:04:26Z - status=done - La vuelta al PRD sale del branch: se escribe en el docs/prd/ de la RAIZ y DESPUES de integrar, y ningun puntero se escribe sin verificar que resuelve. Nuevo prd doctor [--reparar]. Reparados los 18 punteros rotos y 13 bitacoras faltantes. 12/12 AC verdes, 576 tests.
+
+---
+Cerrado: 2026-08-27T18:05:47Z - status=done - La vuelta al PRD sale del branch: se escribe en el docs/prd/ de la RAIZ y DESPUES de integrar, y ningun puntero se escribe sin verificar que resuelve. Nuevo prd doctor [--reparar]. Reparados los 18 punteros rotos y 13 bitacoras faltantes. 12/12 AC verdes, 576 tests.
