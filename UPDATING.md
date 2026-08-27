@@ -979,6 +979,23 @@ archivos en disco. El checkout principal no cambia de rama nunca.
 `start --sin-worktree`, el arnés avisa y funciona como siempre. La rama base es
 `develop` si existe, y si no `main`; el arnés nunca la crea.
 
+**El cierre no declara hecho lo que no hizo (feature #62).** El cierre escribía
+todo su estado —backlog en `done`, transición a Jira, anotación del plan, estado
+archivado, índice, `history.md`, memorias del hub y el mensaje "cerrada"— **antes**
+de integrar. Si la integración fallaba, esas nueve afirmaciones ya estaban hechas
+sobre un trabajo que no estaba integrado. Ahora corre en cuatro fases: lo que
+puede negarse (gates, `--to`, colisiones), los artefactos que tienen que viajar
+en la rama (la anotación del plan y el estado archivado, hechos **idempotentes**
+porque el merge borra el worktree donde viven), la integración, y recién después
+el estado. Si la integración falla, no hay nada que revertir porque no se
+escribió nada: la feature sigue `in_progress`, su `current-<id>.md` sigue vivo y
+`history.md` no tiene la línea. Resolvés y volvés a correr el mismo comando.
+
+Sin rollback a propósito: quedaría parcial (el intent ya emitido a Jira y la
+memoria ya escrita en el hub no se deshacen) y habría que acordarse de
+mantenerlo cada vez que el cierre gane un efecto nuevo. **Cambio visible:**
+`Feature #N cerrada` ahora se imprime después de la salida de `[GitFlow]`.
+
 **El merge no corre en tu checkout (feature #61).** La promesa de arriba —"el
 cierre de una feature no puede exigirte tener el escritorio ordenado"— tenía una
 excepción que no estaba escrita: el worktree temporal se usaba **solo si el
