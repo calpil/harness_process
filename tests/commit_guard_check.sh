@@ -9,6 +9,7 @@
 # pasarle por entorno el unico dato que ese JSON traia.
 #
 # Modos, uno por criterio:
+#   limite          el mecanismo de limite de tiempo de este test funciona
 #   no-cuelga       harness_check.sh termina con stdin abierto que nunca cierra
 #   prueba-del-rojo la version PREVIA si se cuelga (si no, este test no mide nada)
 #   stop-por-env    el guard respeta HARNESS_STOP_HOOK_ACTIVE=1 y no bloquea
@@ -36,15 +37,90 @@ sandbox() {
     echo "$tmp"
 }
 
+# --- Limite de tiempo, sin depender de coreutils ---------------------------
+#
+# Este test decide si algo se colgo cortandolo por tiempo. Durante un tiempo
+# uso `timeout 10` a secas, y `timeout(1)` es de coreutils: NO viene en macOS.
+# Ahi el subshell devolvia 127, el test solo consideraba colgado al 124, y el
+# modo `no-cuelga` salia VERDE pase lo que pase — un criterio que no se puede
+# fallar (leccion criterios-de-cierre-que-se-pueden-fallar). `perl` si esta en
+# macOS y en Linux, y `alarm` hace exactamente lo mismo.
+#
+# Codigos: 124 lo pone timeout(1); 142 es 128+14 (SIGALRM) y lo pone perl.
+LIMITE_CORTADO_TIMEOUT=124
+LIMITE_CORTADO_ALARM=142
+
+# Que mecanismo hay en esta maquina. Sin ninguno devuelve 1: quien llama FALLA,
+# nunca saltea en verde.
+mecanismo_de_limite() {
+    for cand in timeout gtimeout perl; do
+        if command -v "$cand" >/dev/null 2>&1; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Corre un comando con limite de `$1` segundos. Devuelve 0 si termino solo y 1
+# si hubo que cortarlo.
+con_limite() {
+    seg="$1"
+    shift
+    mec="$(mecanismo_de_limite)" || fail "limite: no hay timeout, gtimeout ni perl en esta maquina; instala coreutils o perl (este test no puede medir sin uno de los tres, y no se saltea en verde)"
+    case "$mec" in
+        timeout)  "$mec" "$seg" "$@" >/dev/null 2>&1 && rc=0 || rc=$? ;;
+        gtimeout) "$mec" "$seg" "$@" >/dev/null 2>&1 && rc=0 || rc=$? ;;
+        # Perl vigila a un hijo y sale EL NORMALMENTE con el codigo: si en
+        # cambio se dejara matar por SIGALRM, el shell imprimiria un
+        # "Alarm clock" que ensucia la salida del test.
+        perl)     rc="$(perl -e '
+            my $seg = shift;
+            my $pid = fork();
+            if (!defined $pid) { print 127; exit 0 }
+            if ($pid == 0) {
+                open(STDOUT, ">", "/dev/null");
+                open(STDERR, ">", "/dev/null");
+                exec(@ARGV);
+                exit 127;
+            }
+            $SIG{ALRM} = sub { kill("KILL", $pid); waitpid($pid, 0); print '"$LIMITE_CORTADO_ALARM"'; exit 0 };
+            alarm($seg);
+            waitpid($pid, 0);
+            alarm(0);
+            print($? >> 8);
+        ' "$seg" "$@")" ;;
+    esac
+    [ "$rc" != "$LIMITE_CORTADO_TIMEOUT" ] && [ "$rc" != "$LIMITE_CORTADO_ALARM" ]
+}
+
+# El auto-test del andamiaje: sin esto, "ahora si mide" seria otra afirmacion
+# sin comprobar, que es justo el bug que este test arrastraba.
+modo_limite() {
+    mec="$(mecanismo_de_limite)" || fail "limite: no hay timeout, gtimeout ni perl en esta maquina; instala coreutils o perl (este test no puede medir sin uno de los tres, y no se saltea en verde)"
+    con_limite 5 sleep 0 \
+        || fail "limite: con '$mec', un comando que termina solo se reporto como colgado"
+    if con_limite 1 sleep 30; then
+        fail "limite: con '$mec', un comando que se cuelga NO se corto (este test no puede medir nada)"
+    fi
+    # Y sin NINGUN mecanismo la deteccion tiene que fallar, para que quien la
+    # llama se detenga: un test que no puede medir se pone rojo, no verde
+    # (leccion criterios-de-cierre-que-se-pueden-fallar).
+    if ( PATH="/nonexistent"; mecanismo_de_limite ) >/dev/null 2>&1; then
+        fail "limite: sin timeout, gtimeout ni perl en el PATH, la deteccion tiene que fallar y no devolver un mecanismo"
+    fi
+    ok "limite: '$mec' corta lo que se cuelga y no corta lo que termina; sin ninguno, falla"
+}
+
 # Corre un comando con una entrada que NUNCA cierra, y responde si termino solo.
 # `sleep | cmd` deja el pipe abierto sin mandar un byte: exactamente la corrida
 # en segundo plano / CI del hallazgo.
 termina_con_stdin_abierto() {
     script="$1"
     dir="$(dirname "$script")"
-    (cd "$dir" && sleep 20 | timeout 10 bash "$script" >/dev/null 2>&1) && rc=0 || rc=$?
-    # 124 es el timeout: se colgo.
-    [ "$rc" != "124" ]
+    # El `sleep` que alimenta el pipe vive un poco mas que el limite, para que
+    # el pipe siga abierto todo el tiempo que dura la medicion.
+    (cd "$dir" && sleep 12 | con_limite 6 bash "$script")
 }
 
 modo_no_cuelga() {
@@ -60,11 +136,22 @@ modo_no_cuelga() {
 
 modo_prueba_del_rojo() {
     tmp="$(sandbox)"
-    # Se reconstruye la invocacion PREVIA al arreglo: sin `</dev/null`.
+    # Contra el cuelgue hay DOS defensas, una en cada lado, y de features
+    # distintas: la #52 le cerro la entrada al guard en la invocacion
+    # (`</dev/null`), y la #53 le puso al guard su propia guarda de terminal
+    # (`[ -t 0 ]`). Reconstruir solo una deja la otra en pie y el rojo no
+    # aparece — que es como este modo dejo de medir sin que nadie lo notara.
     sed 's#bash "$HARNESS_DIR/commit_guard.sh" </dev/null#bash "$HARNESS_DIR/commit_guard.sh"#' \
         "$tmp/hp/harness_check.sh" > "$tmp/hp/viejo.sh"
     grep -q 'commit_guard.sh"; then' "$tmp/hp/viejo.sh" \
-        || { rm -rf "$tmp"; fail "prueba-del-rojo: no se pudo reconstruir la version previa"; }
+        || { rm -rf "$tmp"; fail "prueba-del-rojo: no se pudo reconstruir la invocacion previa (#52)"; }
+    # `if false` deja el `cat` sin guarda, como antes de la #53.
+    sed 's/^if \[ -t 0 \]; then$/if false; then/' \
+        "$tmp/hp/commit_guard.sh" > "$tmp/hp/guard_viejo.sh"
+    grep -q '^if false; then$' "$tmp/hp/guard_viejo.sh" \
+        || { rm -rf "$tmp"; fail "prueba-del-rojo: no se pudo reconstruir la guarda previa del guard (#53)"; }
+    mv "$tmp/hp/guard_viejo.sh" "$tmp/hp/commit_guard.sh"
+
     if termina_con_stdin_abierto "$tmp/hp/viejo.sh"; then
         rm -rf "$tmp"
         fail "prueba-del-rojo: la version previa NO se colgo; este test no esta midiendo el cuelgue"
@@ -101,18 +188,20 @@ modo_bloquea() {
 }
 
 case "$MODO" in
+    limite)          modo_limite ;;
     no-cuelga)       modo_no_cuelga ;;
     prueba-del-rojo) modo_prueba_del_rojo ;;
     stop-por-env)    modo_stop_por_env ;;
     stop-por-json)   modo_stop_por_json ;;
     bloquea)         modo_bloquea ;;
     todos)
+        modo_limite
         modo_no_cuelga
         modo_prueba_del_rojo
         modo_stop_por_env
         modo_stop_por_json
         modo_bloquea
-        ok "commit_guard: los cinco modos verdes"
+        ok "commit_guard: los seis modos verdes"
         ;;
-    *) fail "modo desconocido: $MODO (no-cuelga | prueba-del-rojo | stop-por-env | stop-por-json | bloquea | todos)" ;;
+    *) fail "modo desconocido: $MODO (limite | no-cuelga | prueba-del-rojo | stop-por-env | stop-por-json | bloquea | todos)" ;;
 esac

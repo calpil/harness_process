@@ -231,6 +231,14 @@ concretos viven en `docs/verification.md`.>
   eso `verify` mira la salida ademas del exit code y marca `vacio` al AC que
   reconocidamente no ejecuto ningun caso. Sobre salidas que no son de libtest no
   opina: el estado no cambia.
+- **Y el andamiaje que no puede medir se pone ROJO, no verde** (feature #63).
+  Un test que corta por tiempo con `timeout(1)` no mide nada en macOS —no viene
+  con el sistema— y salia verde igual: el codigo 127 de "no existe" no era el
+  124 de "se corto". La regla que queda: cuando una prueba depende de una
+  herramienta externa, se elige entre varias (`timeout`, `gtimeout`,
+  `perl alarm`), se PRUEBA el mecanismo elegido contra un caso que falla y uno
+  que no, y si no hay ninguno se falla nombrando cual instalar. Un skip verde es
+  la forma mas cara de no enterarse.
 - **Entornos**: local y un runner Windows en CI (feature #59). El arnes no se
   despliega; se instala en el repo del proyecto con `setup_harness.sh` / `.ps1`,
   y `tests/parity_check.sh` verifica que los dos DECLAREN lo mismo. Lo que la
