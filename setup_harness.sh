@@ -338,6 +338,21 @@ ensure_harness_not_committed() {
         } >> "$gitignore_file"
         echo "[Harness] .gitignore actualizado: .harness.env (credenciales) nunca debe commitearse."
     fi
+
+    # `.DS_Store` lo crea Finder en cualquier carpeta que se abra, y el
+    # commit_guard lo cuenta como cambio sucio porque no es un artefacto del
+    # arnes (commit_guard.sh:105-114): en macOS un proyecto falla el check sin
+    # haber tocado una linea de codigo. Se ignora SIEMPRE y aparte del bloque
+    # de arriba, como `.harness.env`, para que tambien lo gane una instalacion
+    # vieja que ya tenia su .gitignore.
+    if [ ! -f "$gitignore_file" ] || ! grep -qxF ".DS_Store" "$gitignore_file" 2>/dev/null; then
+        {
+            echo ""
+            echo "# Basura de Finder (macOS): nunca se commitea"
+            echo ".DS_Store"
+        } >> "$gitignore_file"
+        echo "[Harness] .gitignore actualizado: .DS_Store (macOS) nunca debe commitearse."
+    fi
 }
 
 usage() {

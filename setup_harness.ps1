@@ -604,6 +604,21 @@ function Ensure-HarnessGitIgnore {
         Add-Content -LiteralPath $gitIgnore -Value $credBlock
         Write-HarnessLog INFO ".gitignore updated: .harness.env (credentials) must never be committed."
     }
+
+    # `.DS_Store` lo crea Finder en cualquier carpeta que se abra y el
+    # commit_guard lo cuenta como sucio porque no es un artefacto del arnes:
+    # en macOS un proyecto falla el check sin haber tocado codigo. Se ignora
+    # SIEMPRE y aparte, para que tambien lo gane una instalacion vieja.
+    # Paridad con setup_harness.sh.
+    if (($existing -notcontains ".DS_Store") -and (-not $DryRun)) {
+        $dsStoreBlock = @(
+            "",
+            "# Finder junk (macOS): never commit",
+            ".DS_Store"
+        ) -join [Environment]::NewLine
+        Add-Content -LiteralPath $gitIgnore -Value $dsStoreBlock
+        Write-HarnessLog INFO ".gitignore updated: .DS_Store (macOS) must never be committed."
+    }
     if ($existing -contains $ignoreName) {
         $script:Counters.skipped++
         return
