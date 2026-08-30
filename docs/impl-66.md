@@ -300,6 +300,39 @@ de sus partes puede matar el check. Cinco bugs de la misma clase en una sola
 feature —tres encontrados por el reviewer, dos por esta auditoria— alcanzan para
 convertir el caso puntual en un invariante.
 
+## La sexta y septima: cerrar la clase no alcanzo, porque mi heuristica era angosta
+
+Cerre "la clase" buscando **pipelines sin proteccion**. El reviewer encontro la
+sexta muerte, y no era un pipeline: era **aritmetica**.
+
+    progress/.stop_streak con  <firma-actual>:08
+
+`08` son digitos puros, asi que pasa el filtro `''|*[!0-9]*`, pero bash lo lee
+como OCTAL en `$((n_previo + 1))` y muere: *"value too great for base"*. rc=1, el
+mismo sintoma de las otras cinco. Arreglo: `n_previo=$((10#$n_previo))`.
+
+Y con el FIFO paso algo peor, que aprendi arreglandolo mal tres veces seguidas:
+
+1. Puse `[ -f ]` en el `cat` de `racha_de`. **El test se colgo igual.**
+2. Habia OTRO `cat`. Lo protegi. **Se colgo igual.**
+3. Abrir un FIFO para **escritura** tambien bloquea: era el `printf >`.
+
+Cada arreglo parcial dejaba el siguiente, y el sintoma no era un error sino un
+CUELGUE — o sea que el modo `estado-degrada` no fallaba, se quedaba esperando.
+La unica salida fue dejar de tapar casos y preguntar UNA vez, arriba de todo:
+**¿es esto un archivo regular que puedo usar como estado?** Un solo guard
+(`-L` primero, porque `-f` sigue symlinks; despues `-e && ! -f`) cierra symlink,
+FIFO, directorio y device de una.
+
+**El balance de la feature: siete bugs mios, todos de la misma familia.** Cinco
+por `set -e`, uno por octal, uno por cuelgue. Tres los encontro el reviewer, dos
+una auditoria mia, dos el test que el reviewer me hizo escribir. La leccion que
+queda no es "revisa mas": es que **una heuristica ("busca pipelines") cierra los
+casos que la heuristica ve, y por eso el invariante hay que escribirlo como
+propiedad** —ninguna parte del centinela puede matar ni colgar el check— **y
+defenderlo con un test que rompa las herramientas de verdad**, no con una lista
+de casos conocidos.
+
 ## Compatibilidad con una instalacion vieja (medido)
 
 `HARNESS_HOOK_EVENT` es una señal NUEVA que exporta `bin/harness-hook`. Si

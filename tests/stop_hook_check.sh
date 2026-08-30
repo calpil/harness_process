@@ -151,7 +151,35 @@ modo_estado_degrada() {
     [ -L "$p/progress/.stop_streak" ] \
         && fail "no reemplazo el symlink por el archivo real"
 
-    ok "estado-degrada: ausente, vacio, basura, symlink y sin permisos: decide siempre y no toca nada del usuario"
+    # El caso que el barrido de `|| true` no podia ver, porque no es un pipeline
+    # sino ARITMETICA: `08` y `09` son digitos puros —pasan el filtro— pero bash
+    # los lee como octal en `$(( ))` y muere con "value too great for base".
+    # Hace falta que la FIRMA coincida para llegar a la aritmetica, asi que se
+    # toma la que el propio check acaba de escribir.
+    rm -f "$p/progress/.stop_streak" 2>/dev/null || true
+    rc=0; correr "$p" 0 || rc=$?
+    firma_real="$(cut -d: -f1 "$p/progress/.stop_streak" 2>/dev/null || true)"
+    for n in 08 09 007; do
+        printf '%s:%s\n' "$firma_real" "$n" > "$p/progress/.stop_streak"
+        rc=0; correr "$p" 0 || rc=$?
+        case "$rc" in
+            0|2) : ;;
+            *) fail "una racha '$n' (octal) mato el check (rc=$rc): un Stop con rc=1 no bloquea" ;;
+        esac
+    done
+
+    # Y un FIFO: no hace FALLAR el cat, lo CUELGA. Si este modo se queda colgado,
+    # el bug esta de vuelta.
+    rm -f "$p/progress/.stop_streak"
+    mkfifo "$p/progress/.stop_streak" 2>/dev/null || true
+    rc=0; correr "$p" 0 || rc=$?
+    case "$rc" in
+        0|2) : ;;
+        *) fail "un FIFO en .stop_streak dejo el check en rc=$rc" ;;
+    esac
+    rm -f "$p/progress/.stop_streak"
+
+    ok "estado-degrada: ausente, vacio, basura, octal, symlink, FIFO y sin permisos: decide siempre"
 }
 
 modo_payload_grande() {

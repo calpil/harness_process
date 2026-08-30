@@ -635,12 +635,22 @@ streak_file="$REPO_ROOT/progress/.stop_streak"
 # default. Este estado no puede hacer fallar un comando jamas.
 racha_de() {
     firma_actual="$1"
-    linea="$(cat "$streak_file" 2>/dev/null || true)"
+    # `[ -f ]` es falso para FIFOs y directorios: un FIFO no hacia fallar el
+    # `cat`, lo COLGABA esperando un escritor que no existe (como hook, hasta que
+    # el timeout de 120 s mata el turno; a mano, para siempre).
+    linea=""
+    [ -f "$streak_file" ] && linea="$(cat "$streak_file" 2>/dev/null || true)"
     firma_previa="${linea%%:*}"
     n_previo="${linea##*:}"
     case "$n_previo" in
         ''|*[!0-9]*) n_previo=0 ;;
     esac
+    # Base 10 EXPLICITA: `08` y `09` son digitos puros, asi que pasan el filtro de
+    # arriba, pero bash los lee como OCTAL en `$(( ))` y muere con "value too
+    # great for base" — rc=1, que en un Stop no bloquea y cierra el turno sin
+    # veredicto. Es la sexta muerte de esta clase en la feature y la primera que
+    # no es un pipeline: por eso el barrido de `|| true` no la encontro.
+    n_previo=$((10#$n_previo))
     if [ "$firma_previa" = "$firma_actual" ] && [ -n "$firma_previa" ]; then
         echo $((n_previo + 1))
     else
@@ -666,31 +676,40 @@ if [ "$failures" -gt 0 ]; then
         # Se escribe solo si cambio algo: reescribir el mismo valor tambien
         # corre el mtime, y este archivo es estado, no reloj.
         nuevo="$firma:$racha"
-        if [ "$(cat "$streak_file" 2>/dev/null || true)" != "$nuevo" ]; then
-            mkdir -p "$REPO_ROOT/progress" 2>/dev/null || true
-            # NUNCA escribir a traves de un symlink: el centinela es estado
-            # interno y no tiene por que tocar un archivo del usuario. Si alguien
-            # dejo un symlink ahi, se reemplaza por el archivo real.
-            # El `|| true` es obligatorio, no cosmetico: bajo `set -Eeuo
-            # pipefail` esta lista `&&` es el ULTIMO comando del bloque, asi que
-            # un `rm` que falla (progress/ en solo-lectura) mataba el check con
-            # rc=1 — y un Stop con rc=1 no bloquea: el turno cerraba SIN
-            # veredicto, peor que cualquiera de los dos finales legitimos. Es la
-            # misma trampa que el `grep | tail -1` de unas lineas mas arriba.
-            if [ -L "$streak_file" ]; then rm -f "$streak_file" 2>/dev/null || true; fi
+        # UN solo guard para todo lo que no es un archivo regular. Se llego
+        # aca arreglando de a un caso —primero el symlink, despues un `cat` que
+        # colgaba con un FIFO, despues el OTRO `cat`— y cada arreglo parcial
+        # dejaba el siguiente. Abrir un FIFO para ESCRITURA tambien bloquea, asi
+        # que la unica forma de cerrarlo es preguntar una vez, arriba de todo:
+        # ¿es esto un archivo regular que puedo usar como estado?
+        #
+        # `-L` va primero porque `-f` sigue los symlinks: un symlink a un archivo
+        # regular pasa `-f`, y escribir ahi es escribir en el archivo del USUARIO.
+        usable=1
+        if [ -L "$streak_file" ]; then
+            rm -f "$streak_file" 2>/dev/null || true
             if [ -L "$streak_file" ]; then
-                # El `rm` no pudo (progress/ en solo-lectura, por ejemplo) y el
-                # symlink sigue ahi: escribir ahora seria escribir en el archivo
-                # del USUARIO, que es exactamente lo que este bloque evita.
-                # Escribir a traves de un symlink no necesita permiso en el
-                # directorio, solo en el destino: por eso no alcanza con intentar.
                 echo "[i] $streak_file es un symlink y no se pudo reemplazar: no escribo a traves de el." >&2
-                echo "    La proteccion contra el bucle queda solo en manos del CLI." >&2
-            elif ! printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null; then
-                # Un skip en silencio deja al centinela clavado en 1 para siempre:
-                # el caso P1 del spec (un CLI que no manda la señal) se queda sin
-                # proteccion y nadie se entera.
-                echo "[i] No se pudo escribir $streak_file: la proteccion contra el bucle queda solo en manos del CLI." >&2
+                usable=0
+            fi
+        fi
+        if [ "$usable" -eq 1 ] && [ -e "$streak_file" ] && [ ! -f "$streak_file" ]; then
+            # FIFO, directorio, device: leerlo puede COLGAR y escribirlo tambien.
+            echo "[i] $streak_file no es un archivo regular: no lo uso como estado." >&2
+            usable=0
+        fi
+        if [ "$usable" -eq 0 ]; then
+            echo "    La proteccion contra el bucle queda solo en manos del CLI." >&2
+        else
+            actual=""
+            [ -f "$streak_file" ] && actual="$(cat "$streak_file" 2>/dev/null || true)"
+            # Se escribe solo si cambio algo: reescribir el mismo valor tambien
+            # corre el mtime, y este archivo es estado, no reloj.
+            if [ "$actual" != "$nuevo" ]; then
+                mkdir -p "$REPO_ROOT/progress" 2>/dev/null || true
+                if ! printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null; then
+                    echo "[i] No se pudo escribir $streak_file: la proteccion contra el bucle queda solo en manos del CLI." >&2
+                fi
             fi
         fi
     else
