@@ -76,7 +76,16 @@ failures=0
 fallos_sitios=""
 sumar_fallo() {
     failures=$((failures + 1))
-    fallos_sitios="$fallos_sitios ${1:-?}"
+    # El segundo argumento es el DETALLE, y entra en la firma resumido. Sin el,
+    # la firma identifica el GATE y no el contenido: el guard colapsa todos los
+    # archivos sucios en un solo sitio, asi que arreglar uno y ensuciar otro
+    # dejaba la firma igual, la racha seguia corriendo y el check degradaba
+    # diciendo "pedi lo mismo N veces" sobre un problema que era nuevo.
+    if [ -n "${2:-}" ]; then
+        fallos_sitios="$fallos_sitios ${1:-?}#$(printf '%s' "$2" | cksum | cut -d' ' -f1)"
+    else
+        fallos_sitios="$fallos_sitios ${1:-?}"
+    fi
 }
 
 echo "== Harness Check =="
@@ -136,8 +145,22 @@ fi
 # #52). Se le cierra la entrada. El unico dato que ese JSON traia
 # —`stop_hook_active`— viaja por entorno: quien SI es un hook lo lee una vez y
 # exporta HARNESS_STOP_HOOK_ACTIVE antes de llamar al check.
-if ! bash "$HARNESS_DIR/commit_guard.sh" </dev/null; then
-    sumar_fallo "$LINENO"
+# Feature #66: el guard se invoca con la señal APAGADA a proposito. El guard
+# tiene su propia degradacion (commit_guard.sh:186), que era la unica que existia
+# antes de esta feature; si se la dejamos actuar aca, el guard sale 0 por su
+# cuenta, el check no cuenta el fallo y termina imprimiendo "[Ok] Harness Check
+# limpio" DEBAJO del detalle de un repo sucio — contradiciendo su propio stderr.
+# La degradacion es del check entero y vive en UN solo lugar: el final de este
+# archivo. El guard sigue degradando por su cuenta cuando corre solo (modo
+# --no-subagents, donde no hay check que decida por el).
+guard_salida=""
+if ! guard_salida="$(HARNESS_STOP_HOOK_ACTIVE=0 bash "$HARNESS_DIR/commit_guard.sh" </dev/null 2>&1)"; then
+    printf '%s\n' "$guard_salida" >&2
+    # El detalle entra en la firma: si cambia QUE esta sucio, la racha se
+    # reinicia y el problema nuevo se gana su vuelta de bloqueo.
+    sumar_fallo "$LINENO" "$guard_salida"
+elif [ -n "$guard_salida" ]; then
+    printf '%s\n' "$guard_salida" >&2
 fi
 
 # Integridad del mapa de agentes (solo si la capa de subagentes esta instalada).

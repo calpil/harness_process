@@ -1381,15 +1381,38 @@ run_stop() {
     # (feature #52).
     stop_input=""
     [ -t 0 ] || stop_input="$(cat 2>/dev/null || true)"
-    # Sin pipe a proposito (feature #66): `printf | grep -q` corre bajo
-    # `set -o pipefail`, y `grep -q` sale apenas encuentra la coincidencia. Con un
-    # payload grande, `printf` muere con EPIPE y pipefail devuelve ESE codigo, asi
-    # que el `if` tomaba el `else` y ponia el flag en 0 justo cuando el JSON decia
-    # `true` — o sea, el bucle. El case no tiene pipe y no depende del tamaño.
-    case "$stop_input" in
-        *'"stop_hook_active"'*[Tt]rue*) HARNESS_STOP_HOOK_ACTIVE=1 ;;
-        *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
-    esac
+    # Sin pipe (feature #66): el `printf | grep -q` anterior corria bajo
+    # `set -o pipefail`, y aunque el EPIPE que se temia NO se pudo reproducir
+    # —medido hasta 8 MB, rc=0 siempre—, sacar el pipe simplifica y quita una
+    # dependencia del buffer.
+    #
+    # Pero el match tiene que exigir ADYACENCIA clave-valor, que es justo lo que
+    # el grep daba gratis: un `case *'"stop_hook_active"'*[Tt]rue*` acepta
+    # cualquier `true` POSTERIOR a la clave, y el JSON real del Stop trae `cwd`.
+    # Con `"stop_hook_active":false` y un cwd como `/Users/alan/truenorth` el flag
+    # salia 1 y el agente perdia su unica vuelta para arreglar lo suyo. Se recorta
+    # hasta la clave y se mira SOLO lo que sigue.
+    resto_stop="${stop_input#*\"stop_hook_active\"}"
+    if [ "$resto_stop" = "$stop_input" ]; then
+        HARNESS_STOP_HOOK_ACTIVE=0          # la clave no esta
+    else
+        case "$resto_stop" in
+            [[:space:]]*:*) resto_stop="${resto_stop#"${resto_stop%%:*}"}" ;;
+            :*) : ;;
+            *) resto_stop="" ;;             # la clave no venia seguida de `:`
+        esac
+        resto_stop="${resto_stop#:}"
+        while :; do
+            case "$resto_stop" in
+                [[:space:]]*) resto_stop="${resto_stop#?}" ;;
+                *) break ;;
+            esac
+        done
+        case "$resto_stop" in
+            [Tt]rue*) HARNESS_STOP_HOOK_ACTIVE=1 ;;
+            *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
+        esac
+    fi
     export HARNESS_STOP_HOOK_ACTIVE
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Checkpoint automatico de avance; harness_check conserva el exit code.

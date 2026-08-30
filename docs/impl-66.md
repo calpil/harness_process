@@ -110,6 +110,58 @@ Y restaurado, todo vuelve a verde.
   UBICACION ademas del nombre (`commit_guard.sh:97-108`) — un `impl-notas.md`
   suelto en un microservicio es un documento real. El test tenia razon.
 
+## La revision adversarial, y el bug que introdujo mi propio arreglo
+
+El reviewer la rechazo con cinco bloqueantes. El peor era mio, y nacio de la
+"robustez" del AC-11:
+
+**B4 — el `case` que introduje era PEOR que el `grep` que saque.** El patron
+`*'"stop_hook_active"'*[Tt]rue*` acepta cualquier `true` POSTERIOR a la clave, y
+el JSON real del Stop trae `cwd`. Reproducido en frio con un payload real:
+
+    {"stop_hook_active":false,"cwd":"/Users/alan/truenorth"}
+                                                  ^^^^
+
+El flag salia 1 con el JSON diciendo `false`, o sea que **la primera vuelta no
+bloqueaba y el agente perdia su unica chance de arreglar lo suyo**. El `grep` que
+reemplace exigia adyacencia clave-valor y no tenia ese fallo. Tambien caian
+`"note":"construed"`, `"verbose":true` y `"msg":"True story"`.
+
+La leccion, que es mas cara que el bug: **quise arreglar un bug que no existia y
+en el intento cree uno que si.** El AC-11 nacio de un hallazgo teorico, no
+reproducible; en vez de dejar el codigo como estaba, lo "mejore". Ahora el match
+recorta hasta la clave y mira SOLO lo que sigue, verificado contra los doce casos
+de la matriz del reviewer (incluidos sus cuatro falsos positivos).
+
+Los otros cuatro:
+
+| # | Que rompio | Arreglo |
+| --- | --- | --- |
+| B1 | Con el guard como UNICO gate en rojo —el escenario exacto que reporto Alan— el check salia 0 pero imprimia `[Ok] Harness Check limpio` debajo del detalle del repo sucio, y nunca la linea prometida. El guard se auto-degradaba (`commit_guard.sh:186`) antes de que el check lo contara | El check invoca el guard con la señal APAGADA: la degradacion vive en UN solo lugar. El guard sigue degradando solo cuando corre sin check (modo `--no-subagents`) |
+| B2 | La firma por `$LINENO` identifica el GATE, no el contenido: el guard colapsa todos los archivos sucios en un `sumar_fallo`, asi que arreglar A y ensuciar B dejaba la racha corriendo y el mensaje decia "no cambio nada" sobre un problema nuevo | `sumar_fallo` acepta un DETALLE que entra en la firma; el guard aporta su salida. Verificado con el escenario exacto: A sucio -> rc=2, mismo -> rc=0, A commiteado + B nuevo -> **rc=2** |
+| B3 | Mi modo `cableado-hooks` eran tres grep NEGATIVOS de las formas historicas. Tres mutantes reales lo pasaban por arriba | Reescrito como afirmacion POSITIVA: cada evento invoca el runtime con SU evento, con timeout, en los dos instaladores |
+| B5 | El comando del AC-12 no podia fallar: borrar el `timeout` dejaba `parity_check` verde | Asercion del timeout, que acepta JSON (`"timeout":`) y TOML (`timeout =`, Kimi) |
+
+Ademas, el comentario del codigo afirmaba el bug del EPIPE como HECHO mientras el
+spec y este archivo lo declaraban no reproducido: el mismo commit decia una cosa
+en el codigo y la contraria en los docs. Corregido.
+
+**Y una tercera vez me pase por arriba mi propia prueba del rojo.** Los mutantes
+M1 y M3 "pasaban" porque mis reemplazos con `python3 -c` y escapes anidados no
+mutaban nada. Recien al imprimir `cambio el archivo=True` antes de correr el test
+aparecio la verdad: M3 SI se detectaba, y M1 era un agujero real (mi regex
+`"command": "[^"]*(harness_check|...)` se corta en la comilla escapada del
+comando). La regla que me llevo: **una prueba del rojo empieza por demostrar que
+la mutacion existe.**
+
+**Un test ajeno se rompio y tenia razon.** `commit_guard_check.sh:prueba-del-rojo`
+reconstruye la invocacion previa del guard para probar que el modo `no-cuelga`
+mide algo; al cambiar yo esa invocacion, dejo de reconstruirla y **fallo
+ruidosamente**. Es exactamente lo que `criterios-de-cierre-que-se-pueden-fallar`
+dice que tiene que pasar ("si tu prueba del rojo empieza a fallar, la primera
+hipotesis es que el instrumento dejo de medir"). Se actualizo el `sed` a la
+invocacion nueva.
+
 ## Lo que NO se hizo, y por que
 
 - **La linea de base de suciedad por sesion** (que el guard solo cuente lo que

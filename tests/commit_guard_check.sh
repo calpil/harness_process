@@ -141,9 +141,13 @@ modo_prueba_del_rojo() {
     # (`</dev/null`), y la #53 le puso al guard su propia guarda de terminal
     # (`[ -t 0 ]`). Reconstruir solo una deja la otra en pie y el rojo no
     # aparece — que es como este modo dejo de medir sin que nadie lo notara.
-    sed 's#bash "$HARNESS_DIR/commit_guard.sh" </dev/null#bash "$HARNESS_DIR/commit_guard.sh"#' \
+    # La #66 cambio la invocacion (captura la salida y apaga la señal del guard),
+    # asi que este sed se actualizo con ella. Que el test HAYA FALLADO al
+    # cambiarla es la señal de que sigue midiendo: si el sed no reconstruye nada,
+    # el modo `no-cuelga` deja de probar el cuelgue sin que nadie lo note.
+    sed 's#commit_guard.sh" </dev/null#commit_guard.sh"#' \
         "$tmp/hp/harness_check.sh" > "$tmp/hp/viejo.sh"
-    grep -q 'commit_guard.sh"; then' "$tmp/hp/viejo.sh" \
+    grep -q 'commit_guard.sh" 2>&1' "$tmp/hp/viejo.sh" \
         || { rm -rf "$tmp"; fail "prueba-del-rojo: no se pudo reconstruir la invocacion previa (#52)"; }
     # `if false` deja el `cat` sin guarda, como antes de la #53.
     sed 's/^if \[ -t 0 \]; then$/if false; then/' \

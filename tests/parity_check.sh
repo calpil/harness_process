@@ -213,23 +213,45 @@ modo_migracion_rules() {
 # que vuelva a existir un cableado que se saltee `bin/harness-hook`.
 modo_cableado_hooks() {
     falta=""
-    # Todo comando de hook que corra el check o el guard tiene que entrar por el
-    # runtime, que es el unico que lee el JSON del evento.
-    if grep -n '"command": "sh .*harness_cli.*autocheck.*harness_check' "$REPO_ROOT/setup_harness.sh" >/dev/null 2>&1; then
-        falta="$falta setup_harness.sh:Stop-no-pasa-por-el-runtime"
+    sh_file="$REPO_ROOT/setup_harness.sh"
+    # AFIRMACION POSITIVA, no denylist. La primera version eran tres grep
+    # NEGATIVOS de las formas historicas, y el reviewer la paso por arriba con
+    # tres mutantes que rompian el cableado dejando la forma nueva: el Stop
+    # apuntando al check directo pero con SURFACE_BASE, el PreToolUse
+    # despachando el evento equivocado, y un typo (harness-hookk) que sale 127.
+    # Un chequeo que solo prohibe tres formas conocidas no afirma nada.
+    grep -qF 'bin/harness-hook\" plain stop' "$sh_file" \
+        || falta="$falta Stop:no-invoca-el-runtime-con-su-evento"
+    grep -qF 'bin/harness-hook\" plain PreToolUse' "$sh_file" \
+        || falta="$falta PreToolUse:no-invoca-el-runtime-con-su-evento"
+    # Y NINGUN comando de hook corre el check o el guard por su cuenta: ahi es
+    # donde muere el JSON del evento.
+    # Sin clase negada: el comando trae comillas ESCAPADAS (\") y un `[^"]*` se
+    # corta en la primera, dejando pasar `"command": "bash \"$X/harness_check.sh\""`
+    # — que es exactamente el mutante con el que el reviewer paso por arriba la
+    # primera version de este modo.
+    if grep -E '"command":.*(harness_check|commit_guard)' "$sh_file" >/dev/null 2>&1; then
+        falta="$falta comando-de-hook-sin-pasar-por-el-runtime"
     fi
-    if grep -n '"command": "bash .*HOOK_BASE/commit_guard' "$REPO_ROOT/setup_harness.sh" >/dev/null 2>&1; then
-        falta="$falta setup_harness.sh:Stop-sin-subagentes-no-pasa-por-el-runtime"
+    # El runtime es SUPERFICIE y vive en la raiz: con HOOK_BASE la ruta apunta a
+    # <raiz>/<subdir>/bin/harness-hook, que en layout subdir no existe (127).
+    grep -qF 'HOOK_BASE/bin/harness-hook' "$sh_file" \
+        && falta="$falta runtime-con-HOOK_BASE-en-vez-de-SURFACE_BASE"
+    # Cada Stop declara su timeout, como las otras cuatro superficies (AC-12).
+    stops="$(grep -cF 'bin/harness-hook\" plain stop' "$sh_file" || true)"
+    # JSON usa `"timeout":`, TOML (Kimi) usa `timeout =`: se aceptan los dos.
+    timeouts="$(grep -A1 -F 'bin/harness-hook\" plain stop' "$sh_file" | grep -cE '"timeout"|timeout *=' || true)"
+    if [ "$stops" -eq 0 ] || [ "$timeouts" -ne "$stops" ]; then
+        falta="$falta Stop-sin-timeout-declarado[$timeouts-de-$stops]"
     fi
-    # Y el runtime es SUPERFICIE: vive en la raiz, no adentro del arnes. Con
-    # HOOK_BASE la ruta apunta a <raiz>/<subdir>/bin/harness-hook, que en layout
-    # subdir no existe (salia 127 y la capa de prevencion no corria nunca).
-    if grep -n 'HOOK_BASE/bin/harness-hook' "$REPO_ROOT/setup_harness.sh" >/dev/null 2>&1; then
-        falta="$falta setup_harness.sh:runtime-con-HOOK_BASE-en-vez-de-SURFACE_BASE"
+    # Los DOS instaladores, para el MISMO backend, despachan al runtime.
+    if [ -f "$REPO_ROOT/setup_harness.ps1" ]; then
+        grep -qF 'harness-hook.ps1" plain stop' "$REPO_ROOT/setup_harness.ps1" \
+            || falta="$falta ps1:Stop-no-despacha-al-runtime"
     fi
     [ -z "$falta" ] \
-        || fail "cableado-hooks: hay hooks que no pasan por bin/harness-hook:$falta"
-    ok "cableado-hooks: los hooks del check y del guard entran por el runtime"
+        || fail "cableado-hooks: el cableado no cumple el contrato:$falta"
+    ok "cableado-hooks: cada evento invoca el runtime con SU evento, con timeout, en los dos instaladores"
 }
 
 modo_promesa_acotada() {
