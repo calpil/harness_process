@@ -82,7 +82,11 @@ sumar_fallo() {
     # dejaba la firma igual, la racha seguia corriendo y el check degradaba
     # diciendo "pedi lo mismo N veces" sobre un problema que era nuevo.
     if [ -n "${2:-}" ]; then
-        fallos_sitios="$fallos_sitios ${1:-?}#$(printf '%s' "$2" | cksum | cut -d' ' -f1)"
+        # `|| true` en el pipeline: el centinela es una AYUDA, y ninguna de sus
+        # partes puede matar el check. Es la tercera vez en esta feature que un
+        # comando nuevo sin proteccion mata el script bajo `set -Eeuo pipefail`;
+        # la regla que queda es que TODO lo que el centinela agrega degrada.
+        fallos_sitios="$fallos_sitios ${1:-?}#$(printf '%s' "$2" | cksum 2>/dev/null | cut -d' ' -f1 || true)"
     else
         fallos_sitios="$fallos_sitios ${1:-?}"
     fi
@@ -650,7 +654,7 @@ if [ "$failures" -gt 0 ]; then
 
     # La firma es del CONJUNTO: si cambia lo que falla, la racha se reinicia y el
     # check vuelve a bloquear. Un problema nuevo siempre merece su vuelta.
-    firma="$(printf '%s' "$fallos_sitios" | tr ' ' '\n' | sort | tr '\n' ',')"
+    firma="$(printf '%s' "$fallos_sitios" | tr ' ' '\n' | sort | tr '\n' ',' || true)"
     # Solo `bin/harness-hook` exporta HARNESS_HOOK_EVENT. Antes se miraba si
     # HARNESS_STOP_HOOK_ACTIVE estaba DEFINIDA, y un `=0` residual en la terminal
     # del usuario convertia una corrida a mano en "evento": la segunda degradaba,

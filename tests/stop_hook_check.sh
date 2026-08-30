@@ -231,6 +231,31 @@ modo_centinela_problema_nuevo() {
     ok "centinela-problema-nuevo: arreglar uno y ensuciar otro reinicia la racha"
 }
 
+modo_herramientas_rotas() {
+    # El centinela es una AYUDA: ninguna de sus partes puede matar el check.
+    # Tres veces en esta feature un comando nuevo sin proteccion lo mato bajo
+    # `set -Eeuo pipefail`, y las tres el sintoma fue el mismo: rc=1, que en un
+    # Stop NO bloquea — el turno cierra sin veredicto, peor que cualquiera de los
+    # dos finales legitimos. Este modo rompe las herramientas que el centinela
+    # usa y exige que el check siga DECIDIENDO.
+    p="$(sembrar herramientas)"
+    fake="$TMP_ROOT/fakebin"
+    mkdir -p "$fake"
+    for t in cksum sort tr cut; do
+        printf '#!/bin/sh\nexit 1\n' > "$fake/$t"
+        chmod +x "$fake/$t"
+    done
+    rc=0
+    env PATH="$fake:$PATH" HARNESS_HOOK_EVENT=stop HARNESS_STOP_HOOK_ACTIVE=0 \
+        HARNESS_REPO_ROOT="$p" bash "$p/hp/harness_check.sh" \
+        >"$TMP_ROOT/out" 2>"$TMP_ROOT/err" || rc=$?
+    case "$rc" in
+        0|2) : ;;
+        *) fail "con las herramientas del centinela rotas el check murio (rc=$rc) en vez de decidir" ;;
+    esac
+    ok "herramientas-rotas: el centinela degrada y el check sigue decidiendo"
+}
+
 modo_a_mano_no_degrada() {
     # La promesa del spec: correr `bash harness_check.sh` a mano NUNCA degrada.
     # Sin evento no hay racha que contar, y el que lo corre quiere el veredicto.
@@ -261,6 +286,7 @@ case "$MODO" in
     estado-degrada)            modo_estado_degrada ;;
     payload-grande)            modo_payload_grande ;;
     a-mano-no-degrada)         modo_a_mano_no_degrada ;;
+    herramientas-rotas)        modo_herramientas_rotas ;;
     centinela-problema-nuevo)  modo_centinela_problema_nuevo ;;
     todos)
         modo_primera_vuelta
@@ -271,8 +297,9 @@ case "$MODO" in
         modo_centinela_problema_nuevo
         modo_estado_degrada
         modo_payload_grande
+        modo_herramientas_rotas
         modo_a_mano_no_degrada
-        ok "stop-hook: los nueve modos verdes"
+        ok "stop-hook: los diez modos verdes"
         ;;
     *) echo "Modo desconocido: $MODO" >&2; exit 1 ;;
 esac

@@ -274,6 +274,32 @@ clave-valor— con su comentario inline y la re-firma del usuario. "Sin pipe" nu
 fue la propiedad que importaba: era, otra vez, una promesa mas fuerte que el
 codigo.
 
+## Cerrar la CLASE, no los tres casos
+
+Despues del tercer bug de la misma familia hice la pregunta que correspondia
+desde el principio: **¿que otros comandos que agrego esta feature pueden matar el
+check?** Audite el diff completo de la #66 sobre `harness_check.sh` preguntando
+por cada comando nuevo "¿que pasa si esto falla?", y aparecieron **dos mas**, los
+dos pipelines sin proteccion:
+
+    fallos_sitios="... $(printf '%s' "$2" | cksum | cut -d' ' -f1)"
+    firma="$(printf '%s' "$fallos_sitios" | tr ' ' '\n' | sort | tr '\n' ',')"
+
+Medido con un `cksum` y un `sort` falsos que salen 1: los dos dan **rc=1** bajo
+`set -Eeuo pipefail`, o sea el mismo sintoma exacto de los otros tres — el check
+muere sin decidir y el Stop no bloquea. Arreglados con `|| true`, y verificado:
+con las herramientas rotas el check ahora sale **rc=2**, que es una decision.
+
+Y quedo `modo_herramientas_rotas`, que rompe `cksum`, `sort`, `tr` y `cut` a
+proposito y exige que el rc siga siendo 0 o 2. Su prueba del rojo: sacado el
+`|| true` del `cksum`, reporta *"con las herramientas del centinela rotas el
+check murio (rc=1) en vez de decidir"*.
+
+**La regla que queda escrita en el codigo**: el centinela es una AYUDA, y ninguna
+de sus partes puede matar el check. Cinco bugs de la misma clase en una sola
+feature —tres encontrados por el reviewer, dos por esta auditoria— alcanzan para
+convertir el caso puntual en un invariante.
+
 ## Compatibilidad con una instalacion vieja (medido)
 
 `HARNESS_HOOK_EVENT` es una señal NUEVA que exporta `bin/harness-hook`. Si
