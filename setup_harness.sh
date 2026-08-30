@@ -1381,11 +1381,15 @@ run_stop() {
     # (feature #52).
     stop_input=""
     [ -t 0 ] || stop_input="$(cat 2>/dev/null || true)"
-    if printf '%s' "$stop_input" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
-        HARNESS_STOP_HOOK_ACTIVE=1
-    else
-        HARNESS_STOP_HOOK_ACTIVE=0
-    fi
+    # Sin pipe a proposito (feature #66): `printf | grep -q` corre bajo
+    # `set -o pipefail`, y `grep -q` sale apenas encuentra la coincidencia. Con un
+    # payload grande, `printf` muere con EPIPE y pipefail devuelve ESE codigo, asi
+    # que el `if` tomaba el `else` y ponia el flag en 0 justo cuando el JSON decia
+    # `true` — o sea, el bucle. El case no tiene pipe y no depende del tamaño.
+    case "$stop_input" in
+        *'"stop_hook_active"'*[Tt]rue*) HARNESS_STOP_HOOK_ACTIVE=1 ;;
+        *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
+    esac
     export HARNESS_STOP_HOOK_ACTIVE
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Checkpoint automatico de avance; harness_check conserva el exit code.
@@ -1845,12 +1849,18 @@ if [ "$LAYOUT" = "subdir" ]; then
     HARNESS_SUBDIR="$(basename "$HARNESS_DIR")"
     HARNESS_EXEC='$CLAUDE_PROJECT_DIR/'"$HARNESS_SUBDIR"
     HOOK_BASE='${CLAUDE_PROJECT_DIR}/'"$HARNESS_SUBDIR"
+    # Feature #66: `bin/harness-hook` es SUPERFICIE y vive en SURFACE_DIR (la
+    # raiz), no adentro del arnes. Con HOOK_BASE la ruta apuntaba a
+    # <raiz>/<subdir>/bin/harness-hook, que no existe: el PreToolUse salia 127 y
+    # la capa de PREVENCION de rutas protegidas no corria NUNCA en layout subdir.
+    SURFACE_BASE='${CLAUDE_PROJECT_DIR}'
     HREL="$HARNESS_SUBDIR/"
 else
     REPO_ROOT="$HARNESS_DIR"
     HARNESS_SUBDIR=""
     HARNESS_EXEC='$CLAUDE_PROJECT_DIR'
     HOOK_BASE='${CLAUDE_PROJECT_DIR}'
+    SURFACE_BASE='${CLAUDE_PROJECT_DIR}'
     HREL=""
 fi
 SURFACE_DIR="$REPO_ROOT"
@@ -2542,7 +2552,7 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOOK_BASE/bin/harness-hook\" plain PreToolUse"
+            "command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain PreToolUse"
           }
         ]
       }
@@ -2563,7 +2573,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$HOOK_BASE/harness_cli\" autocheck >/dev/null 2>&1 || true; bash \"$HOOK_BASE/harness_check.sh\""
+            "command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop",
+            "timeout": 120
           }
         ]
       }
@@ -2594,7 +2605,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOOK_BASE/commit_guard.sh\""
+            "command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop",
+            "timeout": 120
           }
         ]
       }

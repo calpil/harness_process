@@ -206,6 +206,32 @@ modo_migracion_rules() {
     ok "migracion-rules: definida y llamada en los dos instaladores"
 }
 
+# Feature #66: el bug fue que habia DOS escritores de hooks y uno no se entero
+# del contrato. `.claude/settings.json` en POSIX llamaba `harness_check.sh`
+# derecho, asi que `stop_hook_active` moria antes de llegar al gate — mientras el
+# mismo backend, escrito por el .ps1, ya despachaba al runtime. Este modo impide
+# que vuelva a existir un cableado que se saltee `bin/harness-hook`.
+modo_cableado_hooks() {
+    falta=""
+    # Todo comando de hook que corra el check o el guard tiene que entrar por el
+    # runtime, que es el unico que lee el JSON del evento.
+    if grep -n '"command": "sh .*harness_cli.*autocheck.*harness_check' "$REPO_ROOT/setup_harness.sh" >/dev/null 2>&1; then
+        falta="$falta setup_harness.sh:Stop-no-pasa-por-el-runtime"
+    fi
+    if grep -n '"command": "bash .*HOOK_BASE/commit_guard' "$REPO_ROOT/setup_harness.sh" >/dev/null 2>&1; then
+        falta="$falta setup_harness.sh:Stop-sin-subagentes-no-pasa-por-el-runtime"
+    fi
+    # Y el runtime es SUPERFICIE: vive en la raiz, no adentro del arnes. Con
+    # HOOK_BASE la ruta apunta a <raiz>/<subdir>/bin/harness-hook, que en layout
+    # subdir no existe (salia 127 y la capa de prevencion no corria nunca).
+    if grep -n 'HOOK_BASE/bin/harness-hook' "$REPO_ROOT/setup_harness.sh" >/dev/null 2>&1; then
+        falta="$falta setup_harness.sh:runtime-con-HOOK_BASE-en-vez-de-SURFACE_BASE"
+    fi
+    [ -z "$falta" ] \
+        || fail "cableado-hooks: hay hooks que no pasan por bin/harness-hook:$falta"
+    ok "cableado-hooks: los hooks del check y del guard entran por el runtime"
+}
+
 modo_promesa_acotada() {
     grep -q "no ejecuta el instalador de Windows" "$REPO_ROOT/docs/verification.md" \
         || fail "promesa-acotada: verification.md no dice que el chequeo no ejecuta el instalador de Windows"
@@ -249,6 +275,7 @@ case "$MODO" in
     superficies)           modo_superficies ;;
     smokes)                modo_smokes ;;
     migracion-rules)       modo_migracion_rules ;;
+    cableado-hooks)        modo_cableado_hooks ;;
     promesa-acotada)       modo_promesa_acotada ;;
     en-harness-check)      modo_en_harness_check ;;
     sin-ps1)               modo_sin_ps1 ;;
@@ -259,10 +286,11 @@ case "$MODO" in
         modo_superficies
         modo_smokes
         modo_migracion_rules
+        modo_cableado_hooks
         modo_promesa_acotada
         modo_en_harness_check
         modo_sin_ps1
-        ok "paridad: los nueve modos verdes"
+        ok "paridad: los diez modos verdes"
         ;;
     *) fail "modo desconocido: $MODO" ;;
 esac

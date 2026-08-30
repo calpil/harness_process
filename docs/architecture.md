@@ -186,6 +186,15 @@ feature #64— y leccion declarada), `check_spec` y
 `harness_check.sh`; `autocheck` y `nudge` son best-effort y NUNCA bloquean
 (tragan errores y re-firman en segundo plano).
 
+`harness_check.sh` bloquea la PRIMERA vuelta y DEGRADA la segunda (feature #66):
+imprime todos los problemas, agrega que no los puede resolver solo y sale 0. La
+segunda vuelta se reconoce por `HARNESS_STOP_HOOK_ACTIVE` —que `bin/harness-hook`
+saca del JSON del evento— o por el centinela `progress/.stop_streak`, que corta
+cuando el mismo conjunto de fallos se repite aunque el CLI no mande nada. Correr
+`bash harness_check.sh` a mano nunca degrada. Los seis eventos `Stop` entran por
+`bin/harness-hook`, y `tests/parity_check.sh` (modo `cableado-hooks`) impide que
+vuelva a existir un cableado que se lo saltee.
+
 `nudge` corre en CADA tool-use (lo invoca el hook `PostToolUse` con matcher
 `Bash|Edit|Write|apply_patch`), asi que todo lo que hace es barato y silencioso
 salvo cuando tiene algo que decir. Su estado local vive en `progress/`:

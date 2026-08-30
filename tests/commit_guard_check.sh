@@ -187,6 +187,31 @@ modo_bloquea() {
     ok "bloquea: sin senal de stop, un repo sucio sigue bloqueando y se nombra"
 }
 
+# Feature #66: el mensaje nombraba el REPO y nada mas ("Cambios sin commitear
+# en: docs"), asi que el agente no podia saber si lo sucio era suyo y la unica
+# salida que le quedaba era commitear a ciegas trabajo que podia ser de otra
+# sesion. Ver docs/lecciones/remedios-que-la-herramienta-sugiere.md.
+modo_nombra_archivos() {
+    tmp="$(sandbox)"
+    # Un artefacto del arnes (exento) y uno ajeno. El artefacto va bajo `docs/`
+    # porque la exencion exige la UBICACION, no solo el nombre (commit_guard.sh:97-108):
+    # un `impl-notas.md` suelto dentro de un microservicio es un documento real.
+    mkdir -p "$tmp/hp/miservicio/docs"
+    : > "$tmp/hp/miservicio/docs/spec-feature-9-algo.md"
+    salida="$(cd "$tmp/hp" && bash ./commit_guard.sh </dev/null 2>&1)" && rc=0 || rc=$?
+    rm -rf "$tmp"
+    [ "$rc" = "2" ] || fail "nombra-archivos: exit $rc, esperaba 2. Dijo: $salida"
+    printf '%s' "$salida" | grep -q "pendiente.txt" \
+        || fail "nombra-archivos: no nombra el archivo ajeno. Dijo: $salida"
+    printf '%s' "$salida" | grep -q "spec-feature-9-algo.md" \
+        && fail "nombra-archivos: nombro un artefacto del arnes, que esta exento. Dijo: $salida"
+    printf '%s' "$salida" | grep -q "NO lo commitees" \
+        || fail "nombra-archivos: falta la salida 'si no es tuyo'. Dijo: $salida"
+    printf '%s' "$salida" | grep -q "para TODO el repo" \
+        || fail "nombra-archivos: no dice que \`off\` apaga el guard entero. Dijo: $salida"
+    ok "nombra-archivos: nombra los ajenos, respeta los exentos y ofrece la tercera salida"
+}
+
 case "$MODO" in
     limite)          modo_limite ;;
     no-cuelga)       modo_no_cuelga ;;
@@ -194,6 +219,7 @@ case "$MODO" in
     stop-por-env)    modo_stop_por_env ;;
     stop-por-json)   modo_stop_por_json ;;
     bloquea)         modo_bloquea ;;
+    nombra-archivos) modo_nombra_archivos ;;
     todos)
         modo_limite
         modo_no_cuelga
@@ -201,7 +227,8 @@ case "$MODO" in
         modo_stop_por_env
         modo_stop_por_json
         modo_bloquea
-        ok "commit_guard: los seis modos verdes"
+        modo_nombra_archivos
+        ok "commit_guard: los siete modos verdes"
         ;;
-    *) fail "modo desconocido: $MODO (limite | no-cuelga | prueba-del-rojo | stop-por-env | stop-por-json | bloquea | todos)" ;;
+    *) fail "modo desconocido: $MODO (limite | no-cuelga | prueba-del-rojo | stop-por-env | stop-por-json | bloquea | nombra-archivos | todos)" ;;
 esac
