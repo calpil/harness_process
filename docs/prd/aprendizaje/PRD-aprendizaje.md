@@ -184,8 +184,10 @@ sin LLM en el binario y sin dependencias nuevas de runtime.
   nuevas de runtime sin ADR (Articulo 6). Todo lo que involucre un modelo es
   backend-agnostico: override explicito -> auto-deteccion por API key -> CLI del
   backend -> skip limpio.
-- **De proceso:** `one_feature_at_a_time` sigue vigente; estos hitos se toman de a
-  uno. `templates/` y la raiz se mantienen espejados.
+- **De proceso:** estos hitos se toman de a uno, por decision de este PRD y no
+  porque el arnes lo imponga: `one_feature_at_a_time` dejo de bloquear en la #47
+  (features en paralelo, cada una en su worktree) y la #64 la borro del molde por
+  no gatear nada. `templates/` y la raiz se mantienen espejados.
 - **Supuestos:** los artefactos del arnes son texto y son pocos, asi que un
   escaneo local alcanza para `buscar` sin indice propio; el hook `PostToolUse` ya
   existe en los backends que lo soportan y es suficiente para contar escrituras;

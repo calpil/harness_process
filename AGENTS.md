@@ -18,7 +18,14 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 3. Implementer verifica `check-spec` limpio, trabaja una unidad concreta y
    escribe evidencia por AC-n en `docs/impl-<feature>.md`.
 4. Reviewer verifica spec aprobado y fresco, evidencia por AC, impacto, tests,
-   checkpoints y estado Git.
+   checkpoints y estado Git, y REGISTRA su veredicto con
+   `sh harness_cli revision --feature <id> --veredicto approved` (o
+   `changes_requested` / `blocked`): el binario estampa la linea `Revisado: ...`
+   en `docs/review-<feature>.md` y deja rastro en `progress/history.md`. Un
+   `Veredicto:` tipeado a mano NO cuenta —el gate lee solo el sello que escribe
+   el binario— y el comando se niega si el review no responde por cada AC-n del
+   spec con una fila que lo nombre y cite `archivo:linea`. Con la regla
+   `require_review` activa, `close --status done` exige ese sello en `approved`.
 5. El cierre requiere `harness_check.sh` limpio o decision explicita de bloqueo.
    El check incluye el gate de espejo de roles: los cuerpos embebidos de
    `.claude/agents/*.md`, `.gemini/agents/*.md`, `.codex/agents/*.toml` y
@@ -49,6 +56,12 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   del acuerdo) con sus AC-n (Given/When/Then); se aprueba (draft -> approved)
   antes de implementar, via `harness_cli approve-spec --yes` tras el si explicito
   del usuario.
+- `docs/review-<feature>.md`: el veredicto del reviewer, con una fila por cada
+  AC-n del spec que lo nombre y cite `archivo:linea`. No vale escrito: se
+  REGISTRA con `sh harness_cli revision --feature <id> --veredicto approved`,
+  que estampa la linea `Revisado: ...` —lo unico que el gate lee— y deja
+  bitacora. Sin `--veredicto`, `revision --feature <id>` arma el paquete de
+  revision (AC, evidencia, archivos tocados, diff) y es de solo lectura.
 - `docs/prd/COMO-ESCRIBIR-UN-PRD.md` (RAIZ): el metodo para escribir un PRD (la
   historia primero, el tamano que decide el cambio, PRDs anidados, y la regla
   dura: pseudo-codigo y explicaciones, nunca codigo final). Leela antes de

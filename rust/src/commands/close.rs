@@ -116,6 +116,16 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         let feature = feature_at(&data, idx).clone();
         crate::documentos::gate(paths, &data, status, &feature, fid)?;
     }
+    // Gate de revision (feature #64): cerrar como done exige el veredicto
+    // ESTAMPADO del reviewer. Va despues de verify (primero se prueba, despues
+    // se revisa) y antes de declarar el aprendizaje. Solo LEE: estampar es
+    // `revision --veredicto`.
+    if close_requires_spec(status) {
+        let Some(feature) = feature_at(&data, idx).as_object() else {
+            anyhow::bail!("feature_list.json: feature invalida");
+        };
+        crate::revision::gate(paths, &data, status, feature, fid)?;
+    }
     // Gate de aprendizaje (feature #17): cerrar como done declara que se
     // aprendio. Se valida tambien ANTES de mutar, por la misma razon.
     let declaracion = lecciones::gate(paths, &data, status, leccion, leccion_motivo)?;

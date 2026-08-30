@@ -473,6 +473,13 @@ run_setup "$SPEC_E2E" --root
 test -f "$SPEC_E2E/docs/constitution.md"
 # El template sembrado trae la regla activa (require_spec_approved: true).
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("rules",{}).get("require_spec_approved") is True else 1)' "$SPEC_E2E/feature_list.json"
+# Feature #64: el molde tambien trae el gate del review activo, y ya NO trae las
+# tres reglas que nadie leia (require_tests_to_close, require_impact_check,
+# one_feature_at_a_time): un proyecto nuevo no nace prometiendo enforcement que
+# no existe.
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("rules",{}).get("require_review") is True else 1)' "$SPEC_E2E/feature_list.json"
+python3 -c 'import json,sys; r=json.load(open(sys.argv[1])).get("rules",{}); sys.exit(0 if not ({"require_tests_to_close","require_impact_check","one_feature_at_a_time"} & set(r)) else 1)' "$SPEC_E2E/feature_list.json"
+
 
 spec_cli() {
     HOME="$TMP_ROOT/home" \
@@ -621,6 +628,24 @@ grep -q '1 hito | features: 0/1 done' "$TMP_ROOT/prd-tree.log" \
 
 # AC-17: cerrar como done vuelve al PRD (hito marcado + bitacora), idempotente.
 prd_cli approve-spec --feature 1 --yes >/dev/null 2>&1
+# Feature #64: el molde sembrado trae `require_review` activa, asi que cerrar
+# como done exige el veredicto ESTAMPADO. Se escribe el review con su fila por
+# AC (citando archivo:linea, que es lo que el comando verifica) y se registra
+# con el binario: el gate no lee prosa. De paso, esto ejercita el flujo del
+# review de punta a punta sobre una instalacion real, no sobre un fixture.
+# La evidencia del implementer: sin ella la vuelta al PRD no escribe el puntero
+# `impl:` (feature #60: `decidir_vuelta` descarta los punteros que no existen,
+# para no volver a dejar en el PRD rutas que no abren nada). El fixture no la
+# creaba y el assert de `impl: docs/impl-1.md` de mas abajo fallaba desde
+# entonces: se comprobo corriendo este smoke sobre el arbol limpio.
+printf '# Impl - Feature #1\n\n| AC | evidencia |\n| --- | --- |\n| AC-1 | setup_harness.sh:1 |\n' \
+    > "$PRD_E2E/docs/impl-1.md"
+printf '# Review - Feature #1\n\n| AC | evidencia |\n| --- | --- |\n| AC-1 | setup_harness.sh:1 | cubierto |\n' \
+    > "$PRD_E2E/docs/review-1.md"
+prd_cli revision --feature 1 --veredicto approved >/dev/null 2>&1 \
+    || { echo "[!] revision --veredicto fallo sobre la instalacion sembrada." >&2; exit 1; }
+grep -q '^Revisado: approved' "$PRD_E2E/docs/review-1.md" \
+    || { echo "[!] revision --veredicto no estampo el sello." >&2; exit 1; }
 prd_cli close --feature 1 --status done >/dev/null 2>&1
 grep -qE '^\| 1 \| Avisar la mora \| avisar_mora \|.*\| done \([0-9]{4}-[0-9]{2}-[0-9]{2}\) \|$' \
     "$PRD_E2E/docs/prd/cobranza/mora/PRD-cobranza-mora.md" \
@@ -1641,3 +1666,31 @@ echo "[Ok] Atlassian #16: verificacion del binding delegada al binario, flags de
 echo "[Ok] Atlassian: binding por flags y por config, apagado sin config, no-pisa, intent en la outbox y paridad ps1."
 
 echo "[Ok] setup smoke: Rust-only, gate de credenciales, layouts, reinstall, dry-run, version, reset."
+
+# --- E2E: migracion de rules a una instalacion EXISTENTE (feature #64) ------
+# El caso que motivo la migracion: un proyecto ya instalado, con una regla que
+# el usuario APAGO a proposito y una regla muerta de una version vieja. Al
+# re-correr el instalador tiene que ganar las claves que faltan SIN que le pisen
+# lo que decidio.
+MIGRATE_RULES="$TMP_ROOT/migrate-rules"
+copy_fixture "$MIGRATE_RULES"
+run_setup "$MIGRATE_RULES" --root
+python3 - "$MIGRATE_RULES/feature_list.json" <<'PYSEED'
+import json, sys
+ruta = sys.argv[1]
+json.dump(
+    {
+        "project": "demo",
+        "rules": {"require_spec_approved": False, "require_tests_to_close": True},
+        "features": [{"id": 1, "name": "vieja", "status": "done"}],
+    },
+    open(ruta, "w"),
+    indent=2,
+)
+PYSEED
+run_setup "$MIGRATE_RULES" --root
+# Gana la regla nueva...
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("rules",{}).get("require_review") is True else 1)' "$MIGRATE_RULES/feature_list.json"
+# ...pero NO le pisan el valor que el usuario habia apagado, ni le tocan las features.
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("rules",{}).get("require_spec_approved") is False else 1)' "$MIGRATE_RULES/feature_list.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if len(d.get("features",[])) == 1 else 1)' "$MIGRATE_RULES/feature_list.json"

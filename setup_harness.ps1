@@ -570,6 +570,67 @@ function Write-HarnessText {
     $script:Counters.created++
 }
 
+function Migrate-HarnessRules {
+    # Feature #64: las reglas nuevas tienen que llegar a un proyecto YA
+    # instalado. Hasta la #64 el instalador sembraba feature_list.json
+    # solo-si-falta y nunca mas lo miraba, asi que una regla nueva no llegaba a
+    # ningun proyecto existente. Paridad con migrate_rules() de setup_harness.sh.
+    #
+    # Contrato estrecho, porque toca un archivo del USUARIO: solo AGREGA claves
+    # de `rules` que faltan (jamas pisa un valor existente: si apagaste una
+    # regla, sigue apagada), no toca `features` ni ninguna otra clave, hace
+    # backup ANTES de escribir, y si no hay nada que agregar no escribe.
+    param([string]$Target)
+
+    if (-not (Test-Path -LiteralPath $Target)) { return }
+    $molde = Join-Path $script:AssetDir "feature_list.json"
+    if (-not (Test-Path -LiteralPath $molde)) { return }
+
+    try {
+        $data = Get-Content -LiteralPath $Target -Raw | ConvertFrom-Json
+        $ref = Get-Content -LiteralPath $molde -Raw | ConvertFrom-Json
+    }
+    catch {
+        # Un feature_list.json corrupto no se toca: no es trabajo del instalador.
+        # Pero se AVISA, igual que el .sh: un skip en silencio es la forma mas
+        # cara de no enterarse (era una divergencia entre las dos mitades).
+        Write-HarnessLog WARN "Could not migrate rules in ${Target}: $($_.Exception.GetType().Name). Check it by hand against $molde."
+        return
+    }
+    # Guarda alineada con la del .sh (`isinstance(reglas, dict)`): sin esto, un
+    # `"rules": "apagadas"` o `"rules": []` calculaba faltantes, hacia backup,
+    # Add-Member sobre un string (que no se serializa) y reescribia el archivo en
+    # CADA re-run — idempotencia rota, donde el .sh es no-op.
+    if ($null -eq $ref.rules -or $ref.rules -isnot [PSCustomObject]) { return }
+    if ($null -eq $data.rules -or $data.rules -isnot [PSCustomObject]) {
+        $pendientes = @($ref.rules.PSObject.Properties.Name)
+        if ($pendientes.Count -gt 0) {
+            Write-HarnessLog WARN "Could not migrate rules in ${Target}: 'rules' is not an object; $($pendientes -join ' ') were not added."
+        }
+        return
+    }
+
+    $faltantes = @()
+    foreach ($regla in $ref.rules.PSObject.Properties) {
+        if ($null -eq $data.rules.PSObject.Properties[$regla.Name]) {
+            $faltantes += $regla.Name
+        }
+    }
+    if ($faltantes.Count -eq 0) { return }
+
+    if ($DryRun) {
+        Write-HarnessLog INFO "[DRY-RUN] Would add rules to ${Target}: $($faltantes -join ' ')"
+        return
+    }
+    Backup-HarnessPath -Target $Target
+    foreach ($nombre in $faltantes) {
+        Add-Member -InputObject $data.rules -MemberType NoteProperty `
+            -Name $nombre -Value $ref.rules.$nombre
+    }
+    Write-HarnessJson -Path $Target -Value $data
+    Write-HarnessLog OK "New rules added to ${Target}: $($faltantes -join ' ') (existing values untouched)."
+}
+
 function Write-HarnessJson {
     param(
         [string]$Path,
@@ -907,7 +968,14 @@ Before changing code:
    BEFORE implementing that feature/phase/task, then record it with
    `... harness_cli.ps1 advance --nota "Decision usuario: <...>"`.
 7. Keep plans and review evidence in `docs/`; keep live state in `__HREL__progress/`.
-8. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
+8. Review with `... harness_cli.ps1 revision --feature <id>` (the minimal review
+   package) and RECORD the verdict with `... revision --feature <id> --veredicto
+   approved`: only the binary writes that stamped line, and it refuses unless the
+   review answers every AC-n of the spec with a row citing `file:line`. With the
+   `require_review` rule enabled, `close --status done` demands that stamped
+   verdict in `approved` and reads ONLY the stamp: a `Veredicto: approved` typed
+   by hand does not count as a review.
+9. Close through `... harness_cli.ps1 close --feature <id> --status <status>`.
 
 Lessons (`docs/lecciones/<class>.md`) are the project's procedural memory,
 ordered by CLASS of work instead of by feature id. Check them BEFORE designing
@@ -1927,6 +1995,8 @@ try {
         foreach ($asset in @("feature_list.json", "progress/current.md", "progress/history.md")) {
             Install-HarnessAssetIfMissing -Asset $asset
         }
+        # Feature #64: paridad con migrate_rules() de setup_harness.sh.
+        Migrate-HarnessRules -Target (Join-Path $script:HarnessDir "feature_list.json")
         # Constitution del proyecto: documento del USUARIO. Se siembra en el docs/
         # de la RAIZ (SurfaceDir) SOLO si falta; un reinstall NUNCA lo pisa (por eso
         # no esta en $generatedAssets). Install-HarnessAssetIfMissing apunta a

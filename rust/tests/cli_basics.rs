@@ -6715,3 +6715,417 @@ fn estado_archivado_sin_integrar_mantiene_la_ruta_real() {
         "y el archivo esta en el worktree, que es lo que la ruta dice"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #64: el veredicto del reviewer.
+//
+// La promesa que estos tests defienden: `close --status done` no puede decir
+// "revisado" sin que alguien haya revisado. Las barreras son dos y se prueban
+// por separado — el sello (que solo escribe el binario) y la cobertura por AC
+// (que un archivo tipeado en cinco segundos no puede satisfacer).
+// ---------------------------------------------------------------------------
+
+/// Activa el gate del review sin tocar las demas reglas.
+fn enable_review_rule(harness_dir: &Path) {
+    let path = harness_dir.join("feature_list.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let obj = data.as_object_mut().unwrap();
+    let rules = obj
+        .entry("rules".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    rules
+        .as_object_mut()
+        .unwrap()
+        .insert("require_review".to_string(), serde_json::json!(true));
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+}
+
+/// Un review cuyas citas RESUELVEN: apuntan al spec del sandbox, que existe.
+/// Desde la #64 el gate comprueba que `archivo:linea` exista de verdad, asi que
+/// una cita inventada ya no alcanza (ni en los tests).
+const CITAS_QUE_RESUELVEN: &str = "# Review\n\
+    | AC-1 | docs/spec-feature-1-demo.md:1 | cubierto |\n\
+    | AC-2 | docs/spec-feature-1-demo.md:2 | cubierto |\n";
+
+const CITAS_QUE_RESUELVEN_CON_BLOQUE: &str = "# Review\n\
+    | AC-1 | docs/spec-feature-1-demo.md:1 | cubierto |\n\
+    | AC-2 | docs/spec-feature-1-demo.md:2 | cubierto |\n\
+    ```\nRevisado: <veredicto> · <fecha>\n```\n";
+
+/// Feature 1 con dos AC y su spec ya aprobado por el usuario.
+fn feature_lista_para_revisar() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    let spec = dir.path().join("docs/spec-feature-1-demo.md");
+    escribir_acs(
+        &spec,
+        "- AC-1: Given algo, When pasa, Then otra.\n- AC-2: Given mas, When pasa, Then otra.",
+    );
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+    enable_review_rule(&dir.path().join("hp"));
+    (dir, bin, spec)
+}
+
+#[test]
+fn gate_review_should_block_close_when_the_verdict_is_missing() {
+    // AC-1: sin review, `done` se niega con el remedio exacto y NO cierra.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "[GATE] Falta el veredicto del reviewer: docs/review-1.md",
+        ))
+        .stderr(predicate::str::contains("require_review"))
+        .stderr(predicate::str::contains("--veredicto approved"));
+    let text = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    assert!(
+        text.contains("\"status\": \"in_progress\""),
+        "el gate dejo cerrar igual"
+    );
+}
+
+#[test]
+fn gate_review_should_ignore_a_handwritten_verdict() {
+    // AC-2: la barrera central. Un review con `Veredicto: approved` tipeado a
+    // mano NO pasa: el gate lee unicamente el sello que estampa el binario.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        "# Review\nVeredicto: approved\n| AC-1 | x.rs:1 |\n| AC-2 | x.rs:2 |\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lleva el sello del arnes"))
+        .stderr(predicate::str::contains("no cuenta como revision"));
+}
+
+#[test]
+fn veredicto_should_refuse_without_ac_coverage() {
+    // AC-3: la segunda barrera. Se niega nombrando CUALES AC faltan, y no
+    // escribe nada: el archivo queda tal cual estaba.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    let review = dir.path().join("docs/review-1.md");
+    let original = "# Review\nAnduvo todo bien, aprobado.\n";
+    std::fs::write(&review, original).unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no responde por 2 AC"))
+        .stderr(predicate::str::contains("AC-1, AC-2"));
+    assert_eq!(
+        std::fs::read_to_string(&review).unwrap(),
+        original,
+        "se nego pero igual escribio"
+    );
+
+    // Nombrar el AC sin citar `archivo:linea` tampoco alcanza.
+    std::fs::write(&review, "# Review\n| AC-1 | cubierto |\n| AC-2 | cubierto |\n").unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cite `archivo:linea`"));
+}
+
+#[test]
+fn veredicto_estampa_y_habilita_el_cierre() {
+    // AC-4: con la cobertura completa, estampa, deja rastro y habilita el cierre.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        CITAS_QUE_RESUELVEN,
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Veredicto registrado"));
+
+    let review = std::fs::read_to_string(dir.path().join("docs/review-1.md")).unwrap();
+    assert!(review.contains("Revisado: approved"), "no estampo el sello");
+    let history = std::fs::read_to_string(dir.path().join("hp/progress/history.md")).unwrap();
+    assert!(
+        history.contains("revision feature #1 veredicto=approved"),
+        "no dejo rastro en history.md"
+    );
+    // Y ahora si cierra.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"));
+}
+
+#[test]
+fn gate_review_should_reject_a_verdict_that_is_not_approved() {
+    // AC-5: `changes_requested` estampado NO habilita `done`, y el mensaje dice
+    // cual es el veredicto encontrado y cual es la salida honesta.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        CITAS_QUE_RESUELVEN,
+    )
+    .unwrap();
+    cmd(&bin)
+        .args([
+            "revision",
+            "--feature",
+            "1",
+            "--veredicto",
+            "changes_requested",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("el gate del cierre lo va a rechazar"));
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("es `changes_requested`, no `approved`"));
+    // Pero la valvula de escape sigue abierta: blocked no gatea.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "x"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn close_should_stay_identical_without_the_review_rule() {
+    // AC-6: sin la regla (instalacion vieja), cerrar no pide ningun review.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success();
+    assert!(!dir.path().join("docs/review-1.md").exists());
+}
+
+// --- Los bloqueantes que encontro el reviewer de la #64 --------------------
+
+#[test]
+fn gate_review_should_reject_a_forged_stamp_without_ac_coverage() {
+    // B1: el sello es texto y un agente decidido lo puede tipear. Lo que no
+    // puede fabricar es una fila por cada AC del spec con su cita, asi que el
+    // gate re-verifica la cobertura ademas del sello.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        "# Review\nRevisado: approved · 2026-08-28T00:00:00Z · estampado por `harness revision --veredicto`\nanduvo todo bien\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no responde por 2 AC del spec"))
+        .stderr(predicate::str::contains("AC-1, AC-2"));
+}
+
+#[test]
+fn gate_review_should_ignore_a_stamp_quoted_inside_a_code_block() {
+    // B2: un review que DOCUMENTA el formato del sello lo cita en un bloque ```.
+    // Esa cita no es un veredicto. Mismo hallazgo que la #23 en verificacion.rs.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        &format!(
+            "{CITAS_QUE_RESUELVEN}El formato del sello es:\n```\n\
+             Revisado: approved · 2026-01-01T00:00:00Z · estampado por x\n```\n\
+             Veredicto real: changes_requested, todavia sin estampar.\n"
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lleva el sello del arnes"));
+}
+
+#[test]
+fn veredicto_should_refuse_when_the_spec_declares_no_ac() {
+    // B3: sin AC no hay contra que medir. Antes estampaba `approved` sobre un
+    // review que decia "nada", porque 0 AC = 0 faltantes = "cubierto".
+    let (dir, bin, spec) = feature_lista_para_revisar();
+    std::fs::write(dir.path().join("docs/review-1.md"), "# Review\nnada\n").unwrap();
+    std::fs::remove_file(&spec).unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No se pudo leer el spec"));
+    let review = std::fs::read_to_string(dir.path().join("docs/review-1.md")).unwrap();
+    assert!(!review.contains("Revisado:"), "estampo sin spec");
+}
+
+#[test]
+fn estampar_should_not_touch_a_stamp_quoted_in_prose() {
+    // B2 (la otra mitad): sacar el sello anterior no puede comerse la cita que
+    // el reviewer escribio para documentar el formato.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        CITAS_QUE_RESUELVEN_CON_BLOQUE,
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .success();
+    let review = std::fs::read_to_string(dir.path().join("docs/review-1.md")).unwrap();
+    assert!(
+        review.contains("Revisado: <veredicto> · <fecha>"),
+        "borro la cita del reviewer"
+    );
+    assert!(review.contains("Revisado: approved ·"), "no estampo");
+}
+
+// --- Los bloqueantes de la SEGUNDA revision ------------------------------
+
+#[test]
+fn gate_review_should_refuse_when_the_spec_has_no_parseable_ac() {
+    // C1: el agujero por el que B1 se reabria. Con los `- AC-n:` metidos dentro
+    // de un bloque ``` DESPUES de aprobar el spec, `parsear` da 0 AC, "faltan"
+    // queda vacio y el sello tipeado a mano alcanzaba para cerrar.
+    let (dir, bin, spec) = feature_lista_para_revisar();
+    let texto = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        texto.replace(
+            "- AC-1: Given algo, When pasa, Then otra.",
+            "```\n- AC-1: Given algo, When pasa, Then otra.",
+        )
+        .replace(
+            "- AC-2: Given mas, When pasa, Then otra.",
+            "- AC-2: Given mas, When pasa, Then otra.\n```",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        "# Review\nRevisado: approved · 2026-08-28T00:00:00Z · estampado por `harness revision --veredicto`\nnada de nada\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no declara ningun AC-n"));
+}
+
+#[test]
+fn gate_review_should_refuse_when_the_spec_is_gone() {
+    // C1, la otra variante: sin spec no hay contra que medir, y "cubierto" seria
+    // una afirmacion vacia.
+    let (dir, bin, spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        "# Review\nRevisado: approved · 2026-08-28T00:00:00Z · estampado por x\n",
+    )
+    .unwrap();
+    std::fs::remove_file(&spec).unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("No se pudo leer el spec"));
+}
+
+#[test]
+fn gate_review_should_treat_tilde_fences_as_code_blocks() {
+    // `~~~` es fence valido en CommonMark; el sello citado ahi tampoco cuenta.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        &format!("{CITAS_QUE_RESUELVEN}~~~\nRevisado: approved · 2026 · x\n~~~\nVeredicto real: sin estampar.\n"),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lleva el sello del arnes"));
+}
+
+#[test]
+fn estampar_should_never_claim_a_stamp_the_gate_cannot_read() {
+    // El binario no puede decir "registrado" sobre algo que su propio gate niega:
+    // un review que arranca con un fence dejaba el sello DENTRO del bloque.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        &format!("```\nnota suelta\n```\n{CITAS_QUE_RESUELVEN}"),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .success();
+    // Y el cierre, acto seguido, tiene que verlo.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn gate_review_should_not_desync_with_mixed_fences() {
+    // Un bloque ``` que CONTIENE una linea ~~~ (un review ajeno citado entero)
+    // cerraba el bloque donde CommonMark no lo cierra, y el sello de adentro
+    // pasaba a contar como veredicto.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        &format!(
+            "{CITAS_QUE_RESUELVEN}```\n~~~\nRevisado: approved · 2026 · x\n```\n\
+             Veredicto real: sin estampar.\n"
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lleva el sello del arnes"));
+}
+
+#[test]
+fn estampar_should_not_touch_prose_quoted_in_tilde_fences() {
+    // El arreglo de `~~~` en el parser tenia que llegar tambien al loop que
+    // limpia el sello anterior: si no, estampar borraba la prosa del reviewer.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        &format!("{CITAS_QUE_RESUELVEN}~~~\nRevisado: <veredicto> · <fecha>\n~~~\n"),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .success();
+    let review = std::fs::read_to_string(dir.path().join("docs/review-1.md")).unwrap();
+    assert!(
+        review.contains("Revisado: <veredicto> · <fecha>"),
+        "borro la cita dentro del bloque ~~~"
+    );
+}

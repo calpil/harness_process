@@ -553,6 +553,104 @@ backup_path() {
 }
 
 # Registra accion y (si no dry-run) hace backup real
+# Feature #64: las reglas nuevas tienen que llegar a un proyecto YA instalado.
+#
+# Hasta la #64 el instalador sembraba `feature_list.json` solo-si-falta y nunca
+# mas lo miraba, asi que una regla nueva (`require_review`, y antes
+# `require_leccion`, `require_verify_green`, `require_docs_al_dia`) no llegaba a
+# ningun proyecto existente: habia que pegarla a mano leyendo UPDATING.md. Esta
+# funcion cierra ese hueco.
+#
+# El contrato es estrecho a proposito, porque toca un archivo del USUARIO:
+#   - solo AGREGA claves de `rules` que faltan; jamas pisa un valor existente
+#     (si apagaste una regla, sigue apagada);
+#   - jamas toca `features`, `project` ni ninguna otra clave;
+#   - hace backup ANTES de escribir;
+#   - si no hay nada que agregar, no escribe (y no ensucia el repo del usuario).
+migrate_rules() {
+    target="$1"
+    [ -f "$target" ] || return 0
+    if ! command -v python3 >/dev/null 2>&1; then
+        # Un skip silencioso seria la forma mas cara de no enterarse: se avisa
+        # con el remedio exacto (leccion criterios-de-cierre-que-se-pueden-fallar).
+        log_warn "Sin python3: no se pudieron migrar las reglas de $target."
+        log_warn "             Agregalas a mano desde $ASSET_DIR/feature_list.json (ver UPDATING.md)."
+        return 0
+    fi
+    faltantes="$(python3 - "$target" "$ASSET_DIR/feature_list.json" <<'PYRULES'
+import json, sys
+
+destino, molde = sys.argv[1], sys.argv[2]
+try:
+    # utf-8-sig: un BOM no puede decidir si un proyecto recibe las reglas nuevas
+    # (ConvertFrom-Json en Windows si lo acepta, y las dos mitades tienen que
+    # comportarse igual).
+    data = json.load(open(destino, encoding="utf-8-sig"))
+    ref = json.load(open(molde, encoding="utf-8-sig"))
+except Exception as e:
+    print(f"ILEGIBLE {e.__class__.__name__}")
+    sys.exit(0)
+if not isinstance(data, dict) or not isinstance(ref, dict):
+    print("ILEGIBLE la raiz del JSON no es un objeto")
+    sys.exit(0)
+reglas = data.get("rules")
+if not isinstance(reglas, dict):
+    nuevas = list(ref.get("rules", {}))
+    if nuevas:
+        print("ILEGIBLE `rules` no es un objeto: " + " ".join(nuevas) + " no se pudieron agregar")
+    sys.exit(0)
+print(" ".join(k for k in ref.get("rules", {}) if k not in reglas))
+PYRULES
+)"
+    case "$faltantes" in
+        ILEGIBLE*)
+            # Un skip en silencio es la forma mas cara de no enterarse: si el
+            # archivo del usuario no se pudo leer, se dice y se sigue (migrar no
+            # es motivo para abortar una instalacion).
+            log_warn "No se pudieron migrar las reglas de $target: ${faltantes#ILEGIBLE }."
+            log_warn "             Revisalo a mano contra $ASSET_DIR/feature_list.json."
+            return 0
+            ;;
+    esac
+    [ -n "$faltantes" ] || return 0
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Agregaria a $target las reglas:$faltantes"
+        return 0
+    fi
+    backup_file "$target" || true
+    # El heredoc atrapa sus propios errores: el script corre con `set -Eeuo
+    # pipefail`, asi que un traceback de Python (archivo de solo lectura, disco
+    # lleno) abortaba la instalacion ENTERA a mitad de camino, antes de sembrar
+    # progress/, la constitution y los hooks. Migrar reglas es lo menos
+    # importante que hace el instalador: si no se puede, se avisa y se sigue.
+    if ! python3 - "$target" "$ASSET_DIR/feature_list.json" <<'PYRULES2'
+import json, sys
+
+destino, molde = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(destino, encoding="utf-8-sig"))
+    ref = json.load(open(molde, encoding="utf-8-sig"))
+    reglas = data.setdefault("rules", {})
+    for k, v in ref.get("rules", {}).items():
+        reglas.setdefault(k, v)      # setdefault: nunca pisa lo que ya decidio el usuario
+    texto = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    # Se serializa ENTERO antes de abrir en escritura: si algo falla, el archivo
+    # del usuario no queda truncado a medias.
+    with open(destino, "w", encoding="utf-8") as fh:
+        fh.write(texto)
+except Exception as e:
+    print(f"{e.__class__.__name__}: {e}", file=sys.stderr)
+    sys.exit(1)
+PYRULES2
+    then
+        log_warn "No se pudieron escribir las reglas nuevas en $target (¿solo lectura?)."
+        log_warn "             Faltan:$faltantes. El archivo quedo como estaba."
+        return 0
+    fi
+    log_success "Reglas nuevas agregadas a $target:$faltantes (valores existentes intactos)."
+    track_action "migrate rules"
+}
+
 backup_file() {
     target="$1"
     if [ "$FORCE" -eq 0 ] && [ -e "$target" ]; then
@@ -1088,6 +1186,15 @@ Archivos principales:
   cerrar exige el reporte verde y mas nuevo que el spec — pero CERRAR NUNCA
   EJECUTA: lee el reporte. Al declarar un comando, cuidado con los que no pueden
   fallar (`cargo test <nombre>` sin coincidencias sale 0; `|| true` tambien).
+- `sh harness_cli revision --feature <id>`: el paquete minimo de revision (los
+  AC con su estado en verify, la tabla de evidencia, los archivos tocados, el
+  diff y las rutas protegidas). Con `--veredicto approved|changes_requested|blocked`
+  REGISTRA el veredicto del reviewer: estampa en `docs/review-<id>.md` una linea
+  que escribe SOLO el binario y deja rastro en `progress/history.md`. Se niega
+  —sin escribir nada— si el review no responde por cada AC-n del spec con una
+  fila que lo nombre y cite `archivo:linea`. Con `rules.require_review`, cerrar
+  como `done` exige ese veredicto en `approved`, y lee UNICAMENTE la linea
+  estampada: un `Veredicto: approved` tipeado a mano no cuenta como revision.
 - `sh harness_cli journey`: el mapa de lo que el proyecto aprendio (features
   cerradas, lecciones y perfil, con sus enlaces) y sus HUECOS. Es solo lectura:
   por cada hueco imprime el comando que lo corrige, y podar pasa por el comando
@@ -2691,6 +2798,8 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # features ya cargadas.
     if [ ! -f feature_list.json ]; then
         install_asset "feature_list.json"
+    else
+        migrate_rules feature_list.json
     fi
 
     # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea

@@ -94,7 +94,7 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
 
 ## Entregable
 
-- Feature activa identificada (una sola a la vez).
+- Feature activa identificada (pueden convivir varias, cada una en su worktree).
 - Spec `docs/spec-feature-<id>-<slug>.md` completo, con AC-n en Given/When/Then,
   mostrado al usuario y aprobado por el (`Estado: approved` + sello registrado
   con `approve-spec`) o explicitamente pendiente de su respuesta.

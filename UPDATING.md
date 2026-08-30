@@ -74,6 +74,89 @@ Ese aviso sale ademas solo en cada `start`, sin pedirlo. Existe porque un mapeo
 exploratorio de cuatro agentes costo 693.6k tokens para descubrir exactamente
 eso. El comando es de SOLO LECTURA: no escribe archivos ni toca estado.
 
+## El veredicto del reviewer es un gate (feature #64)
+
+`close --status done` suma un quinto gate: `require_review`. Con la regla activa,
+cerrar como `done` exige `docs/review-<id>.md` con veredicto `approved`; sin ella
+—el default— el cierre se comporta exactamente como antes.
+
+El sello lo escribe **solo el binario**:
+
+```bash
+sh harness_cli revision --feature <id>                        # el paquete de revisión (solo lectura)
+sh harness_cli revision --feature <id> --veredicto approved   # registra el veredicto
+```
+
+`--veredicto` estampa en el review, justo debajo del título, la línea canónica:
+
+```
+Revisado: approved · 2026-08-28T12:00:00Z · estampado por `harness revision --veredicto`
+```
+
+y deja `revision feature #<id> veredicto=<v>` en `progress/history.md`. Los
+veredictos son los tres de `roles/reviewer.md` —`approved`, `changes_requested`,
+`blocked`—; solo `approved` deja cerrar.
+
+**Un `Veredicto: approved` tipeado a mano NO cuenta.** No es una precaución
+teórica: el gate no parsea prosa porque la prosa no se deja parsear. De los 40
+reviews que ya existen en este repo, 7 no son parseables, y `docs/review-3.md:3`
+dice *"Veredicto: approved (implementación) — cierre BLOQUEADO"*. Un gate que
+buscara `approved` en el texto aprobaría un review que dice que el cierre está
+bloqueado. Por eso lo único que lee es la línea que estampó el binario.
+
+Y estampar no es gratis: `revision --veredicto` **se niega, sin escribir nada**, si
+el review no responde por **cada AC-n que declara el spec** con una fila que lo
+nombre y cite `archivo:linea`. Una fila sin cita es una afirmación, y una
+afirmación es justo lo que un review de cinco segundos sabe escribir.
+
+Lo que el gate **no** hace: no compara la fecha del review contra la de
+`docs/impl-<id>.md`. Eso sería un deadlock en el ciclo normal —el reviewer pide
+cambios, el implementer corrige, el impl queda más nuevo, el gate bloquea para
+siempre— con una única salida barata, `touch`, que es justo el hábito que no hay
+que entrenar.
+
+### Las reglas nuevas ahora llegan a los proyectos ya instalados
+
+Hasta acá los instaladores sembraban `feature_list.json` **solo si faltaba** y no
+volvían a mirarlo nunca. Consecuencia: una regla nueva no llegaba jamás a un
+proyecto ya instalado, y por eso cada gate anterior se documentó como "editá el
+JSON a mano". Desde esta versión `setup_harness.sh` (`migrate_rules`) y
+`setup_harness.ps1` (`Migrate-HarnessRules`) **agregan las claves de `rules` que
+falten**, tomándolas del molde.
+
+El contrato es estrecho a propósito, porque tocan un archivo del usuario:
+
+- **Jamás pisan un valor existente.** Si apagaste una regla, sigue apagada.
+- **Solo agregan**: no sacan claves —ni las inertes—, no tocan `features` ni
+  ninguna otra parte del archivo, y un `feature_list.json` ilegible no se toca.
+- **Backup antes de escribir**, y si no hay nada que agregar no se escribe nada.
+- `--dry-run` / `-DryRun` dice qué reglas agregaría sin tocar el archivo. Sin
+  `python3`, la versión sh avisa con el remedio en vez de saltearlo en silencio.
+
+Efecto concreto al actualizar: un proyecto que ya tenía el arnés recibe
+`require_review: true` —el molde la trae en `true`— y el gate empieza a correr en
+el próximo `close --status done`. Si todavía no lo querés, ponela en `false`: la
+migración no vuelve a tocarla.
+
+### La deuda de reviews y su corte
+
+La regla aplica **de la #64 en adelante**. En este repo hay 55 features `done` y
+solo 40 tienen su `docs/review-<id>.md`; las 15 que no son **#38-43, #53-55, #57
+y #59-63**.
+
+El corte es cronológico y limpio: el último cierre **con** review es el de la #46
+(2026-08-22) y el primero **sin** review es el de la #57 (2026-08-26). No hay
+interleaving en el medio, y no hay una sola línea en `progress/history.md`
+decidiendo saltearlo: fue una práctica que se dejó de hacer, no una excepción que
+alguien evaluó.
+
+**Esos 15 no se reconstruyen.** Un review escrito después de que el código se
+integró y funciona no intenta romper nada: rellena el casillero. Y
+`roles/reviewer.md:6` define el rol como exactamente lo contrario —*"tu trabajo es
+intentar ROMPER, no confirmar"*—, así que 15 reviews retroactivos serían 15
+documentos afirmando que alguien revisó cuando nadie revisó: la misma promesa
+vacía que la regla vino a cerrar, ahora con archivos de respaldo.
+
 ## Cómo actualizar
 
 Desde la carpeta del `harness_process` (la fuente):
@@ -144,10 +227,10 @@ Desde esta versión, `setup_harness.sh` / `setup_harness.ps1` siembran
 `check-spec` y el gate de spec aprobado. En instalaciones **nuevas** la regla
 llega activada desde `templates/feature_list.json`.
 
-En instalaciones **existentes** el gate queda **apagado por defecto**: el
-`feature_list.json` de cada proyecto no se versiona ni se pisa, y el seed es
-solo-si-falta, así que re-correr el instalador NO agrega la regla. Para activar
-el gate hay que editar a mano el `feature_list.json` del proyecto y agregar la
+En instalaciones **existentes** el gate quedaba **apagado por defecto**: el
+`feature_list.json` de cada proyecto no se versiona ni se pisa, y el seed era
+solo-si-falta, así que re-correr el instalador NO agregaba la regla. Para activar
+el gate había que editar a mano el `feature_list.json` del proyecto y agregar la
 regla a `rules`:
 
 ```json
@@ -157,6 +240,11 @@ regla a `rules`:
   }
 }
 ```
+
+**Desde la feature #64 el instalador migra las reglas** y agrega las claves del
+molde que falten (ver *"Las reglas nuevas ahora llegan a los proyectos ya
+instalados"*), así que `require_spec_approved` llega sola al re-correrlo. Si no la
+querés activa, declarala en `false`: la migración nunca pisa un valor existente.
 
 Con la regla activa, `advance`, `close --status done` y `harness_check.sh`
 exigen un spec `docs/spec-feature-<id>-<slug>.md` con `Estado: approved`. Sin la
@@ -543,13 +631,37 @@ más que hacer: sin lecciones escritas el comportamiento del arnés no cambia.
 
 ```json
 "rules": {
-  "one_feature_at_a_time": true,
-  "require_tests_to_close": true,
-  "require_impact_check": true,
   "require_spec_approved": true,
+  "require_review": true,
   "require_leccion": true
 }
 ```
+
+Las dos primeras son las únicas que trae el molde de un proyecto nuevo
+(`templates/feature_list.json` no declara ninguna otra). Las reglas que el arnés
+**lee** hoy en el cierre son cinco, en el orden en que las corre `close --status
+done`:
+
+- `require_spec_approved` — exige `docs/spec-feature-<id>-<slug>.md` con
+  `Estado: approved` (también en `advance` y en `harness_check.sh`).
+- `require_verify_green` — exige el reporte de `verify` más nuevo que el spec, sin
+  rojos y sin `vacio` (features #23 y #44).
+- `require_docs_al_dia` — exige la propuesta de `prd propose` resuelta y aplicada
+  con tu sí (feature #29).
+- `require_review` — exige el veredicto `approved` **estampado por el binario** en
+  `docs/review-<id>.md` (feature #64).
+- `require_leccion` — la de esta sección: exige `--leccion <clase>` o
+  `--leccion ninguna` con motivo.
+
+Las tres que no vienen en el molde (`require_verify_green`, `require_docs_al_dia`
+y `require_leccion`) nacen apagadas y se prenden agregándolas a mano, como acá
+arriba.
+
+Hasta la #64 este bloque también publicaba `one_feature_at_a_time`,
+`require_tests_to_close` y `require_impact_check` en `true`. Ninguna de las tres
+la leía ningún gate: nacieron decorativas en el molde y nunca hicieron nada. Se
+borraron de `templates/feature_list.json` para dejar de prometer un enforcement
+que no existía; si siguen en el `feature_list.json` de tu proyecto, son inertes.
 
 Con la regla activa, el cierre exige `--leccion <clase>` o
 `--leccion ninguna --leccion-motivo "<por qué>"`. Declarar que no se aprendió
@@ -970,8 +1082,11 @@ archivos en disco. El checkout principal no cambia de rama nunca.
   integrar, te lo pregunta. Con `--to`, commitea lo que quede en el worktree,
   mergea (`--no-ff`), publica la rama destino, borra el worktree y conserva la
   rama. `blocked`, `pending` y `superseded` no integran y conservan todo.
-- `one_feature_at_a_time` sigue en `feature_list.json` por compatibilidad, pero
-  **ya no bloquea**.
+- `one_feature_at_a_time` **ya no está en el molde** (feature #64): además de
+  quedar contradicha acá, ningún código la leía. Si aparece en el
+  `feature_list.json` de un proyecto ya instalado es inerte y se puede borrar a
+  mano. La migración de reglas **no** la saca: solo agrega las claves que faltan,
+  nunca pisa ni quita lo que decidió el usuario.
 - Dentro de un worktree, los comandos infieren la feature por la carpeta: no
   hace falta `--feature`.
 

@@ -725,6 +725,12 @@ command = "echo hook-del-usuario"
     Assert-True ($binding -match '"feature": "Story"') "Story is the default issue type for a feature (OBS-6)."
     Assert-True ($binding -match '"blocked_flag": "Impediment"') "blocked maps to the Impediment flag (OBS-7)."
 
+
+# Feature #64: paridad del tema `migrate-rules` del smoke .sh. La migracion de
+# reglas (Migrate-HarnessRules) se declara en el instalador de Windows; este
+# assert ata el tema para que parity_check lo vea cubierto.
+$migrateRulesDeclared = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "../setup_harness.ps1") -Raw) -match "function Migrate-HarnessRules"
+Assert-True $migrateRulesDeclared "MigrateRules: el instalador declara Migrate-HarnessRules"
     Write-Host "[OK] PowerShell setup smoke: dry-run, root layout, hooks, shim, constitution seed, interactive spec approval surface (approve-spec), harness docs in root docs/ (seed, migration, no-overwrite; incl. efficient Kimi CLI usage guide linked from the surface), PRD/SDD master templates in docs/prd/, reset, role-mirror gate parity, source-checkout guardrail, subdir layout inferred from the parent footprint when the marker is missing (explicit 'root' marker never inferred), Kimi Code backend (mirrors, guarded global hooks block, -NoKimi, -Reset keeps global), and Atlassian binding (off without flags, written with flags, Story/Impediment defaults)."
 }
 finally {

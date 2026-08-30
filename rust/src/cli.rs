@@ -192,13 +192,17 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Paquete minimo de revision de una feature (solo lectura)
+    /// Paquete minimo de revision de una feature; con --veredicto, lo estampa
     Revision {
         #[arg(long)]
         feature: Option<String>,
         /// Presupuesto de lineas del diff (default 400)
         #[arg(long = "max-lineas")]
         max_lineas: Option<usize>,
+        /// Registra el veredicto del reviewer: approved | changes_requested | blocked.
+        /// Exige una fila por cada AC-n del spec, citando `archivo:linea` (feature #64).
+        #[arg(long)]
+        veredicto: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -724,11 +728,13 @@ pub fn run() -> anyhow::Result<()> {
         Command::Revision {
             feature,
             max_lineas,
+            veredicto,
             json,
         } => commands::revision::run(
             &HarnessPaths::resolve()?,
             feature.as_deref(),
             max_lineas,
+            veredicto.as_deref(),
             json,
         ),
         Command::Graph { command } => graph::run(command),
