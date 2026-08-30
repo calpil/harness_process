@@ -96,7 +96,7 @@ fn estampar(
     }
 
     // La parte que DECIDE. Si falla, no se escribe nada.
-    let faltan = acs_sin_fila(&[&paths.repo_root, &paths.root], &spec, &review);
+    let faltan = acs_sin_fila(&crate::revision::raices_de_citas(paths), &spec, &review);
     if !faltan.is_empty() {
         anyhow::bail!(
             "{rel} no responde por {} AC del spec: {}.\n    \

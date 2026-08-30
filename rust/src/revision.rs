@@ -485,6 +485,34 @@ fn menciona(linea: &str, ac: &str) -> bool {
     false
 }
 
+/// Las raices contra las que puede resolver una cita del review.
+///
+/// La tercera es la que importa y la que faltaba: cuando la feature vive en un
+/// worktree, el review cita archivos DEL WORKTREE (`rust/src/revision.rs:602`),
+/// pero `root`/`repo_root` apuntan al checkout principal, donde ese archivo
+/// existe con otro contenido y la linea 602 no existe. Es el mismo defecto de
+/// worktree-vs-raiz que arreglaron la #60 y la #63, y aparecio la primera vez
+/// que esta feature se uso de verdad: su propio review quedo rechazado con seis
+/// AC "sin cita que resuelva", citando archivos que si estaban ahi.
+/// `paths.plans` es el `docs/` de la feature, asi que su padre es esa raiz.
+pub fn raices_de_citas(paths: &HarnessPaths) -> Vec<&Path> {
+    raices_desde(&paths.plans, &paths.repo_root, &paths.root)
+}
+
+/// La parte pura, para poder testearla sin armar un `HarnessPaths` entero.
+pub fn raices_desde<'a>(plans: &'a Path, repo_root: &'a Path, root: &'a Path) -> Vec<&'a Path> {
+    let mut out: Vec<&Path> = Vec::new();
+    if let Some(raiz_feature) = plans.parent() {
+        out.push(raiz_feature);
+    }
+    for r in [repo_root, root] {
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
 /// Los candidatos a cita `archivo:linea` de una fila, con su numero.
 fn citas_de(linea: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
@@ -650,7 +678,7 @@ pub fn gate(
             )),
         });
     }
-    let faltan = acs_sin_fila(&[&paths.repo_root, &paths.root], &spec, &texto);
+    let faltan = acs_sin_fila(&raices_de_citas(paths), &spec, &texto);
     if !faltan.is_empty() {
         return Err(Exit {
             code: 2,
@@ -905,6 +933,25 @@ mod tests {
         assert!(!fila_responde(&[root], "| AC-1 | linea 101 |", "AC-1"));
         // Y no confunde un AC con otro.
         assert!(!fila_responde(&[root], "| AC-11 | close.rs:101 |", "AC-1"));
+    }
+
+    #[test]
+    fn las_citas_resuelven_contra_la_raiz_de_la_FEATURE_primero() {
+        // El bug que aparecio la primera vez que la feature se uso de verdad:
+        // el review de la #64 citaba `rust/src/revision.rs:602`, que existe en
+        // el worktree (927 lineas) y no en el checkout principal (507). El gate
+        // resolvia contra el principal y rechazaba seis AC con citas correctas.
+        let feature_root = Path::new("/tmp/wt/64-algo");
+        let plans = feature_root.join("docs");
+        let principal = Path::new("/tmp/principal");
+        let raices = raices_desde(&plans, principal, principal);
+        assert_eq!(
+            raices.first().copied(),
+            Some(feature_root),
+            "la raiz de la feature tiene que ir PRIMERO"
+        );
+        // Y no se duplica cuando root == repo_root.
+        assert_eq!(raices.len(), 2);
     }
 
     #[test]

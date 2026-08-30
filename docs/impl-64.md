@@ -204,6 +204,38 @@ que ahora se recuerda **cual** fence abrio; y el tope de `cita_resuelve` contaba
 lineas y no bytes, de modo que un blob de 200 MB en una sola linea costaba 211 MB
 de RSS — ahora cuenta saltos por bytes con tope de 8 MB.
 
+## El bug que aparecio al USAR la feature por primera vez
+
+El review aprobado se fue a estampar y el gate lo **rechazo**: "docs/review-64.md
+no responde por 6 AC del spec: AC-1, AC-3, AC-4, AC-5, AC-9, AC-13". Las citas
+eran correctas. Lo que fallaba era el gate.
+
+`rust/src/revision.rs:602` existe en el worktree (927 lineas) y NO en el checkout
+principal (507): son dos versiones del mismo archivo. Las raices candidatas eran
+`repo_root` y `root`, las dos apuntando al principal, asi que **una feature que
+vive en un worktree citaba archivos que el gate resolvia contra otro arbol**. Es
+el mismo defecto de worktree-vs-raiz que arreglaron la #60 (el PRD escrito en la
+copia del worktree) y la #63 (el mensaje que nombraba un worktree ya borrado);
+esta es la tercera vez que la misma confusion produce un bug.
+
+Arreglado con `raices_de_citas` (`revision.rs:498`): la raiz de la FEATURE —el
+padre de `paths.plans`, que es el `docs/` de la feature— va primero, y despues
+las otras dos sin duplicar. La parte pura (`raices_desde`) se testea sin armar un
+`HarnessPaths`.
+
+Vale la pena decir COMO aparecio: no lo encontro un test ni una revision, sino
+**usar la feature contra si misma**. Cuatro rondas de revision adversarial no lo
+vieron porque todas corrieron en sandboxes de un solo arbol; el unico escenario
+que lo expone es el real, y el arnes trabaja en worktrees desde la #47. La
+leccion `probar-contra-datos-reales` ya lo dice ("una fixture prueba la mecanica,
+no la calibracion") y aca se cumplio literal.
+
+Y un segundo hallazgo del mismo momento: el binario instalado en la raiz
+(`/Users/alan/harness_process/harness`, gitignored) era el viejo y no conocia
+`--veredicto`, asi que el comando que el gate exige en su propio mensaje de
+remedio no existia hasta reinstalarlo. Cerrar una feature que agrega un
+subcomando necesita ese paso; el arnes no lo hace solo.
+
 ## Lo que NO se hizo, y por que
 
 - **No se reconstruyeron los 15 reviews faltantes** (decision del usuario
