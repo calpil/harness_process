@@ -32,3 +32,6 @@ Nucleo del gate listo y verde: require_review + veredicto_estampado + acs_sin_fi
 
 ### Avance 2026-08-29T00:42:37Z
 Rutas protegidas tocadas con el SI EXPLICITO del usuario (2026-08-28, en el chat): docs/prd/SDD-master.md via prd apply --yes (el texto prometia que un review de cinco segundos no se puede fabricar, y el reviewer lo desmintio con un printf de 4 lineas) y docs/prd/aprendizaje/PRD-aprendizaje.md:187 (afirmaba one_feature_at_a_time vigente; dejo de bloquear en la #47 y la #64 la borro del molde).
+
+---
+Cerrado: 2026-08-30T18:08:19Z - status=done - 
