@@ -201,6 +201,33 @@ extraer"; si cambia el regex dejando la forma, falla nombrando el payload exacto
 (`flag=1 esperaba=0 con: {"stop_hook_active":false,"cwd":".../truenorth"}`). Y
 mide el tiempo: 200 KB en menos de 5 s o falla.
 
+## Las ocho observaciones, y el bug que aparecio al arreglarlas
+
+Decision del usuario 2026-08-30: se arreglan **todas**, no solo las de riesgo.
+
+| # | Que era | Como quedo |
+| --- | --- | --- |
+| 1 | `.stop_streak` como symlink: el check escribia A TRAVES y pisaba un archivo del usuario | Se reemplaza el symlink por el archivo real antes de escribir. Verificado: el contenido del usuario queda intacto |
+| 2 | Estado ilegible (chmod 000, directorio, `progress/` no creable) mataba el centinela EN SILENCIO: la racha quedaba clavada en 1 y el caso P1 —un CLI que no manda la señal— se quedaba sin proteccion | Avisa una vez: "la proteccion contra el bucle queda solo en manos del CLI" |
+| 3 | Un `HARNESS_STOP_HOOK_ACTIVE=0` residual en la terminal convertia una corrida A MANO en "evento", y la segunda degradaba | Señal nueva `HARNESS_HOOK_EVENT`, que **solo** exporta `bin/harness-hook`. A mano: rc=2,2,2 aun con el flag residual |
+| 4 | `cableado-hooks` engañable con el literal en un COMENTARIO | Filtra comentarios. Y al probarlo aparecio algo peor: el grep positivo matcheaba el `plain stop` **de Kimi** y daba por buenos los dos Stops de Claude rotos. Ahora exige `"command":` y CUENTA los dos |
+| 5 | Clave JSON duplicada: ganaba la PRIMERA; los parsers toman la ultima | Gana la ultima, con la matriz completa verde en los dos ordenes |
+| 6 | La firma incluia las lineas `[i] <repo>: solo artefactos` de repos que NO fallan, asi que commitear artefactos en otro repo reiniciaba la racha del problema de siempre | Solo lo que falla entra en la firma |
+| 7 | El fix de B2 no tenia test: `centinela-reinicia` fabrica la firma a mano | Modo nuevo `centinela-problema-nuevo` con el escenario real. **Probado**: con la regresion de B2 sembrada, el modo viejo queda VERDE y el nuevo la detecta |
+| 8 | El sello del spec no se re-estampo tras las correcciones | Es diseño: `approve_spec` es idempotente sobre el archivo y la re-firma va a la firma + `history.md` (:389 y :391 del repo principal). No hay nada que arreglar; queda dicho |
+
+**Y un bug serio que introduje arreglando la #5, que el test pesco de inmediato.**
+Para que ganara la ultima ocurrencia use `grep -oE ... | tail -1`. `bin/harness-hook`
+corre con `set -Eeuo pipefail`, asi que cuando el payload **no trae la clave**
+—el caso NORMAL de la primera vuelta— `grep` sale 1 y **mataba el hook antes de
+decidir nada**. Habria roto el Stop en todas las sesiones. Arreglado con
+`|| true`, y el comentario dice por que no es decorativo.
+
+Lo encontro `modo_payload_grande`: el mismo modo que el reviewer marco como
+inutil por verificar una copia inline del patron. Al hacerlo ejercitar el matcher
+REAL, encontro esto en su primera corrida. Un test que verifica el instrumento
+adyacente no es un test debil: es un test que no existe.
+
 ## Lo que NO se hizo, y por que
 
 - **La linea de base de suciedad por sesion** (que el guard solo cuente lo que

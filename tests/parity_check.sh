@@ -213,16 +213,28 @@ modo_migracion_rules() {
 # que vuelva a existir un cableado que se saltee `bin/harness-hook`.
 modo_cableado_hooks() {
     falta=""
-    sh_file="$REPO_ROOT/setup_harness.sh"
+    # Se greppea el instalador SIN sus comentarios: un literal
+    # `bin/harness-hook\" plain stop` dejado en un comentario —por ejemplo al
+    # comentar el bloque viejo mientras se edita— dejaba este modo en verde con
+    # el cableado roto. Es el limite de greppear la fuente; la asercion de
+    # sustancia contra el settings.json GENERADO vive en tests/setup_smoke.sh.
+    sh_file="$(mktemp "${TMPDIR:-/tmp}/harness-parity-sh.XXXXXX")"
+    grep -v '^[[:space:]]*#' "$REPO_ROOT/setup_harness.sh" > "$sh_file"
+    trap 'rm -f "$sh_file"' RETURN
     # AFIRMACION POSITIVA, no denylist. La primera version eran tres grep
     # NEGATIVOS de las formas historicas, y el reviewer la paso por arriba con
     # tres mutantes que rompian el cableado dejando la forma nueva: el Stop
     # apuntando al check directo pero con SURFACE_BASE, el PreToolUse
     # despachando el evento equivocado, y un typo (harness-hookk) que sale 127.
     # Un chequeo que solo prohibe tres formas conocidas no afirma nada.
-    grep -qF 'bin/harness-hook\" plain stop' "$sh_file" \
-        || falta="$falta Stop:no-invoca-el-runtime-con-su-evento"
-    grep -qF 'bin/harness-hook\" plain PreToolUse' "$sh_file" \
+    # Se exige `"command":` para que el match sea del hook de CLAUDE y no de
+    # cualquier `plain stop` del archivo: el de Kimi (TOML, `exec ... plain stop`)
+    # hacia pasar este chequeo aunque los dos Stops de Claude estuvieran rotos.
+    # Y se cuentan: son DOS bloques de settings.json (con y sin subagentes).
+    stops_claude="$(grep -cF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop"' "$sh_file" || true)"
+    [ "$stops_claude" -eq 2 ] \
+        || falta="$falta Stop:esperaba-2-hooks-al-runtime-y-hay-$stops_claude"
+    grep -qF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain PreToolUse"' "$sh_file" \
         || falta="$falta PreToolUse:no-invoca-el-runtime-con-su-evento"
     # Y NINGUN comando de hook corre el check o el guard por su cuenta: ahi es
     # donde muere el JSON del evento.

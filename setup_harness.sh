@@ -1399,12 +1399,26 @@ run_stop() {
     # y es lineal, con la unica mejora que si valia: here-string en vez de pipe,
     # asi no hay pipeline del que preocuparse. La leccion, cara: no se "endurece"
     # codigo que funciona contra un bug que no se pudo reproducir.
-    if grep -qE '"stop_hook_active"[[:space:]]*:[[:space:]]*[Tt]rue' <<<"$stop_input"; then
-        HARNESS_STOP_HOOK_ACTIVE=1
-    else
-        HARNESS_STOP_HOOK_ACTIVE=0
-    fi
+    # Se mira la ULTIMA ocurrencia de la clave, que es la que gana en cualquier
+    # parser JSON: con `{"stop_hook_active":false,...,"stop_hook_active":true}` un
+    # match de la primera daba lo contrario de lo que el CLI quiso decir. Ningun
+    # CLI real duplica claves, pero la direccion del error importaba.
+    # El `|| true` NO es decorativo: `bin/harness-hook` corre con
+    # `set -Eeuo pipefail`, y cuando el payload no trae la clave —el caso NORMAL
+    # de la primera vuelta— `grep` sale 1 y mataba el hook antes de decidir nada.
+    ultimo_valor="$(grep -oE '"stop_hook_active"[[:space:]]*:[[:space:]]*[A-Za-z]+' <<<"$stop_input" | tail -1 || true)"
+    case "$ultimo_valor" in
+        *[Tt]rue) HARNESS_STOP_HOOK_ACTIVE=1 ;;
+        *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
+    esac
     export HARNESS_STOP_HOOK_ACTIVE
+    # Feature #66: la señal de "vengo de un evento" es esta, no la presencia de
+    # HARNESS_STOP_HOOK_ACTIVE. Un `HARNESS_STOP_HOOK_ACTIVE=0` que quedo
+    # exportado en la terminal del usuario (tras debuggear un hook) hacia que una
+    # corrida A MANO contara como evento y degradara en la segunda vuelta, contra
+    # la promesa del spec. El evento lo declara el hook, y solo el hook.
+    HARNESS_HOOK_EVENT=stop
+    export HARNESS_HOOK_EVENT
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Checkpoint automatico de avance; harness_check conserva el exit code.
         HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" autocheck 1>&2 || true

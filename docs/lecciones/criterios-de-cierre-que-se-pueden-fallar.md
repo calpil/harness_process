@@ -154,6 +154,52 @@ verifica **lo que el AC promete** (que ningun rol afirme lo que el arnes ya no
 hace, y que los espejos coincidan bajo la expansion correcta), con su prueba del
 rojo: sembrada la afirmacion falsa, rc=1.
 
+## Un AC que nace de una hipotesis NO REPRODUCIDA arrastra el error hasta el final
+
+Es el caso mas caro medido hasta ahora, y no lo produjo un bug: lo produjo un
+hallazgo teorico que nadie cerro antes de convertirlo en criterio.
+
+En la #66, una revision teorizo que `printf '%s' "$x" | grep -q ...` bajo
+`set -o pipefail` podia devolver el EPIPE de `printf` y dar un falso negativo. Se
+escribio el AC-11 sobre esa hipotesis. Lo que siguio:
+
+| vuelta | que se hizo | que costo |
+| --- | --- | --- |
+| 0 | el codigo era `printf \| grep -q`. **Funcionaba.** | — |
+| 1 | se midio la hipotesis: **no se reproduce** (200 KB, 1 MB, 8 MB; `rc=0` siempre) | — |
+| 2 | se cambio igual "por robustez" a un `case *'"clave"'*true*` | **falso positivo**: el JSON real trae `cwd`, y un `/Users/alan/truenorth` ponia el flag en 1 con el JSON diciendo `false`. La primera vuelta dejo de bloquear |
+| 3 | se arreglo recortando el prefijo (`${x#*"clave"}`) | **cuadratico en bash**: 200 KB = 20.5 s contra 0.032 s del `grep`; 1 MB no termino en 2 minutos, con un timeout de hook de 120 s |
+| 4 | se volvio al `grep`, con here-string en vez de pipe | lo unico que valia del cambio |
+
+Tres vueltas de revision adversarial para volver, casi exactamente, a donde
+estaba. Y cada arreglo fue **consecuencia del anterior**: el falso positivo nacio
+de arreglar un bug inexistente, y el cuadratico nacio de arreglar el falso
+positivo.
+
+## Procedimiento: cerrar la hipotesis ANTES de escribir el AC
+
+1. **Reproducila primero.** Un hallazgo que dice "puede pasar X" no es un
+   hallazgo hasta que hay una corrida que muestra X. Si no se reproduce, el
+   resultado de la investigacion es *"no se reproduce"*, y eso se escribe — no se
+   escribe un AC.
+2. **Si no se reproduce, no toques el codigo.** "Ya que estoy, lo endurezco" es
+   la frase que arranca la cadena. Codigo que funciona y no tiene bug demostrado
+   se deja quieto: el riesgo de la edicion es real y el beneficio es hipotetico.
+3. **Si igual hay que cambiarlo** (porque simplifica de verdad, no "por las
+   dudas"), el reemplazo se prueba contra la MATRIZ del original, no solo contra
+   el caso que motivo el cambio. El `case` nunca se probo contra un payload real
+   con `cwd`; el `grep` lo manejaba bien desde siempre.
+4. **Medi el costo, no solo la correccion.** El recorte de prefijo era correcto y
+   640 veces mas lento. En un hook con timeout, "correcto pero lento" es
+   incorrecto: **un hook que no termina es peor que uno que decide mal.**
+5. **Y el AC se corrige, no se cumple a la fuerza.** Cuando la premisa cae, lo
+   honesto es reescribir el criterio diciendo lo que se midio. Ver
+   [[promesas-estructurales-vs-disciplina]] y
+   [[reglas-que-se-aplican-a-si-mismas]].
+
+Regla corta: **no se endurece codigo que funciona contra un bug que no se pudo
+reproducir.** El bug hipotetico cuesta cero; el que introduce el arreglo, no.
+
 ## La herramienta externa que no esta convierte el test en un placebo
 
 Un criterio puede nacer bien y volverse imposible de fallar **sin que nadie lo

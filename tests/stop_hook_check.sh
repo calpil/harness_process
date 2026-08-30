@@ -29,14 +29,19 @@ sembrar() {
 }
 
 # Corre el check como lo corre el hook. $2 = valor de HARNESS_STOP_HOOK_ACTIVE
-# ("" = corrida a mano, sin evento).
+# ("" = corrida A MANO, sin evento).
+#
+# Un hook declara HARNESS_HOOK_EVENT ademas del flag: esa es la señal de "vengo
+# de un evento" desde la #66. Antes se miraba si HARNESS_STOP_HOOK_ACTIVE estaba
+# definida, y un `=0` residual en la terminal del usuario convertia una corrida a
+# mano en evento.
 correr() {
     proyecto="$1"
     if [ -n "${2:-}" ]; then
-        env HARNESS_STOP_HOOK_ACTIVE="$2" HARNESS_REPO_ROOT="$proyecto" \
+        env HARNESS_HOOK_EVENT=stop HARNESS_STOP_HOOK_ACTIVE="$2" HARNESS_REPO_ROOT="$proyecto" \
             bash "$proyecto/hp/harness_check.sh" >"$TMP_ROOT/out" 2>"$TMP_ROOT/err" || return $?
     else
-        env -u HARNESS_STOP_HOOK_ACTIVE HARNESS_REPO_ROOT="$proyecto" \
+        env -u HARNESS_HOOK_EVENT -u HARNESS_STOP_HOOK_ACTIVE HARNESS_REPO_ROOT="$proyecto" \
             bash "$proyecto/hp/harness_check.sh" >"$TMP_ROOT/out" 2>"$TMP_ROOT/err" || return $?
     fi
     return 0
@@ -130,7 +135,7 @@ modo_payload_grande() {
     # rompe ruidosamente, que es lo que queremos.
     matcher="$TMP_ROOT/matcher.sh"
     awk '/^run_stop\(\) \{/,/^\}/' "$REPO_ROOT/setup_harness.sh" \
-        | sed -n '/if grep -qE/,/^    fi$/p' > "$matcher"
+        | sed -n '/ultimo_valor=/,/^    esac$/p' > "$matcher"
     grep -q 'stop_hook_active' "$matcher" \
         || fail "payload-grande: no se pudo extraer el matcher de run_stop; ¿cambio su forma?"
 
@@ -158,6 +163,9 @@ modo_payload_grande() {
     probar '{"stop_hook_active": true}' 1
     probar '{"stop_hook_active" : true}' 1
     probar '{"stop_hook_active":True}' 1
+    # Clave duplicada: gana la ULTIMA, como en cualquier parser JSON.
+    probar '{"stop_hook_active":false,"stop_hook_active":true}' 1
+    probar '{"stop_hook_active":true,"stop_hook_active":false}' 0
 
     # Y que no dependa del tamaño NI se vuelva lento: el arreglo intermedio
     # (recorte de prefijo, cuadratico en bash) tardaba 20 s con 200 KB y ~8 min
@@ -172,6 +180,30 @@ modo_payload_grande() {
         || fail "payload-grande: 200 KB tardo $((fin - inicio))s; el matcher volvio a ser no-lineal"
     ok "payload-grande: adyacencia clave-valor, sin falsos positivos y lineal (200 KB en $((fin - inicio))s)"
 }
+modo_centinela_problema_nuevo() {
+    # AC-6, el escenario de verdad. `centinela-reinicia` fabrica la firma a mano,
+    # asi que no protege el mecanismo: si alguien borra el DETALLE que
+    # `sumar_fallo` mete en la firma (la regresion exacta de B2), aquel modo
+    # sigue verde. Este hace lo que pasa en la vida real: se arregla un archivo y
+    # aparece OTRO.
+    p="$(sembrar problema_nuevo)"
+    rc=0; correr "$p" 0 || rc=$?
+    [ "$rc" -eq 2 ] || fail "la primera vuelta no bloqueo (rc=$rc)"
+    rc=0; correr "$p" 0 || rc=$?
+    [ "$rc" -eq 0 ] || fail "el mismo problema repetido no degrado (rc=$rc)"
+    # Se arregla lo viejo y aparece algo nuevo: tiene que volver a bloquear.
+    ( cd "$p/ajeno" \
+        && git add -A >/dev/null 2>&1 \
+        && git -c user.email=t@t -c user.name=t commit -qm "arreglado" >/dev/null 2>&1 \
+        && : > PROBLEMA-NUEVO.md )
+    rc=0; correr "$p" 0 || rc=$?
+    [ "$rc" -eq 2 ] \
+        || fail "un problema NUEVO no volvio a bloquear (rc=$rc): la firma no mira el contenido"
+    grep -q "PROBLEMA-NUEVO.md" "$TMP_ROOT/err" \
+        || fail "no nombro el archivo nuevo"
+    ok "centinela-problema-nuevo: arreglar uno y ensuciar otro reinicia la racha"
+}
+
 modo_a_mano_no_degrada() {
     # La promesa del spec: correr `bash harness_check.sh` a mano NUNCA degrada.
     # Sin evento no hay racha que contar, y el que lo corre quiere el veredicto.
@@ -180,7 +212,17 @@ modo_a_mano_no_degrada() {
         rc=0; correr "$p" "" || rc=$?
         [ "$rc" -eq 2 ] || fail "una corrida a mano degrado (rc=$rc): el veredicto se perdio"
     done
-    ok "a-mano-no-degrada: sin evento, el check bloquea siempre"
+    # Y con un HARNESS_STOP_HOOK_ACTIVE=0 RESIDUAL en el entorno —lo que queda
+    # tras debuggear un hook— tampoco: el evento lo declara el hook, no una
+    # variable que quedo colgada.
+    for _ in 1 2 3; do
+        rc=0
+        env -u HARNESS_HOOK_EVENT HARNESS_STOP_HOOK_ACTIVE=0 HARNESS_REPO_ROOT="$p" \
+            bash "$p/hp/harness_check.sh" >"$TMP_ROOT/out" 2>"$TMP_ROOT/err" || rc=$?
+        [ "$rc" -eq 2 ] \
+            || fail "con HARNESS_STOP_HOOK_ACTIVE=0 residual, una corrida a mano degrado (rc=$rc)"
+    done
+    ok "a-mano-no-degrada: sin evento el check bloquea siempre, aun con el flag residual"
 }
 
 case "$MODO" in
@@ -192,16 +234,18 @@ case "$MODO" in
     estado-degrada)            modo_estado_degrada ;;
     payload-grande)            modo_payload_grande ;;
     a-mano-no-degrada)         modo_a_mano_no_degrada ;;
+    centinela-problema-nuevo)  modo_centinela_problema_nuevo ;;
     todos)
         modo_primera_vuelta
         modo_segunda_vuelta
         modo_degrada_todos_los_gates
         modo_centinela_sin_flag
         modo_centinela_reinicia
+        modo_centinela_problema_nuevo
         modo_estado_degrada
         modo_payload_grande
         modo_a_mano_no_degrada
-        ok "stop-hook: los ocho modos verdes"
+        ok "stop-hook: los nueve modos verdes"
         ;;
     *) echo "Modo desconocido: $MODO" >&2; exit 1 ;;
 esac

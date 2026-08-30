@@ -158,7 +158,10 @@ if ! guard_salida="$(HARNESS_STOP_HOOK_ACTIVE=0 bash "$HARNESS_DIR/commit_guard.
     printf '%s\n' "$guard_salida" >&2
     # El detalle entra en la firma: si cambia QUE esta sucio, la racha se
     # reinicia y el problema nuevo se gana su vuelta de bloqueo.
-    sumar_fallo "$LINENO" "$guard_salida"
+    # Solo lo que FALLA entra en la firma: las lineas `[i] <repo>: solo
+    # artefactos del arnes` son de repos que NO fallan, y commitear artefactos en
+    # otro repo cambiaba la firma y reiniciaba la racha del problema de siempre.
+    sumar_fallo "$LINENO" "$(printf '%s\n' "$guard_salida" | grep -v '^\[i\] ' || true)"
 elif [ -n "$guard_salida" ]; then
     printf '%s\n' "$guard_salida" >&2
 fi
@@ -648,16 +651,30 @@ if [ "$failures" -gt 0 ]; then
     # La firma es del CONJUNTO: si cambia lo que falla, la racha se reinicia y el
     # check vuelve a bloquear. Un problema nuevo siempre merece su vuelta.
     firma="$(printf '%s' "$fallos_sitios" | tr ' ' '\n' | sort | tr '\n' ',')"
+    # Solo `bin/harness-hook` exporta HARNESS_HOOK_EVENT. Antes se miraba si
+    # HARNESS_STOP_HOOK_ACTIVE estaba DEFINIDA, y un `=0` residual en la terminal
+    # del usuario convertia una corrida a mano en "evento": la segunda degradaba,
+    # contra la promesa de que a mano nunca degrada.
     en_evento=0
-    [ -n "${HARNESS_STOP_HOOK_ACTIVE:-}" ] && en_evento=1
+    [ -n "${HARNESS_HOOK_EVENT:-}" ] && en_evento=1
     if [ "$en_evento" -eq 1 ]; then
         racha="$(racha_de "$firma")"
         # Se escribe solo si cambio algo: reescribir el mismo valor tambien
         # corre el mtime, y este archivo es estado, no reloj.
         nuevo="$firma:$racha"
-        [ "$(cat "$streak_file" 2>/dev/null || true)" = "$nuevo" ] \
-            || { mkdir -p "$REPO_ROOT/progress" 2>/dev/null || true
-                 printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null || true; }
+        if [ "$(cat "$streak_file" 2>/dev/null || true)" != "$nuevo" ]; then
+            mkdir -p "$REPO_ROOT/progress" 2>/dev/null || true
+            # NUNCA escribir a traves de un symlink: el centinela es estado
+            # interno y no tiene por que tocar un archivo del usuario. Si alguien
+            # dejo un symlink ahi, se reemplaza por el archivo real.
+            [ -L "$streak_file" ] && rm -f "$streak_file" 2>/dev/null
+            if ! printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null; then
+                # Un skip en silencio deja al centinela clavado en 1 para siempre:
+                # el caso P1 del spec (un CLI que no manda la señal) se queda sin
+                # proteccion y nadie se entera.
+                echo "[i] No se pudo escribir $streak_file: la proteccion contra el bucle queda solo en manos del CLI." >&2
+            fi
+        fi
     else
         racha=0
     fi
