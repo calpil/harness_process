@@ -206,6 +206,66 @@ modo_migracion_rules() {
     ok "migracion-rules: definida y llamada en los dos instaladores"
 }
 
+# Feature #66: el bug fue que habia DOS escritores de hooks y uno no se entero
+# del contrato. `.claude/settings.json` en POSIX llamaba `harness_check.sh`
+# derecho, asi que `stop_hook_active` moria antes de llegar al gate — mientras el
+# mismo backend, escrito por el .ps1, ya despachaba al runtime. Este modo impide
+# que vuelva a existir un cableado que se saltee `bin/harness-hook`.
+modo_cableado_hooks() {
+    falta=""
+    # Se greppea el instalador SIN sus comentarios: un literal
+    # `bin/harness-hook\" plain stop` dejado en un comentario —por ejemplo al
+    # comentar el bloque viejo mientras se edita— dejaba este modo en verde con
+    # el cableado roto. Es el limite de greppear la fuente; la asercion de
+    # sustancia contra el settings.json GENERADO vive en tests/setup_smoke.sh.
+    sh_file="$(mktemp "${TMPDIR:-/tmp}/harness-parity-sh.XXXXXX")"
+    grep -v '^[[:space:]]*#' "$REPO_ROOT/setup_harness.sh" > "$sh_file"
+    trap 'rm -f "$sh_file"' RETURN
+    # AFIRMACION POSITIVA, no denylist. La primera version eran tres grep
+    # NEGATIVOS de las formas historicas, y el reviewer la paso por arriba con
+    # tres mutantes que rompian el cableado dejando la forma nueva: el Stop
+    # apuntando al check directo pero con SURFACE_BASE, el PreToolUse
+    # despachando el evento equivocado, y un typo (harness-hookk) que sale 127.
+    # Un chequeo que solo prohibe tres formas conocidas no afirma nada.
+    # Se exige `"command":` para que el match sea del hook de CLAUDE y no de
+    # cualquier `plain stop` del archivo: el de Kimi (TOML, `exec ... plain stop`)
+    # hacia pasar este chequeo aunque los dos Stops de Claude estuvieran rotos.
+    # Y se cuentan: son DOS bloques de settings.json (con y sin subagentes).
+    stops_claude="$(grep -cF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop"' "$sh_file" || true)"
+    [ "$stops_claude" -eq 2 ] \
+        || falta="$falta Stop:esperaba-2-hooks-al-runtime-y-hay-$stops_claude"
+    grep -qF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain PreToolUse"' "$sh_file" \
+        || falta="$falta PreToolUse:no-invoca-el-runtime-con-su-evento"
+    # Y NINGUN comando de hook corre el check o el guard por su cuenta: ahi es
+    # donde muere el JSON del evento.
+    # Sin clase negada: el comando trae comillas ESCAPADAS (\") y un `[^"]*` se
+    # corta en la primera, dejando pasar `"command": "bash \"$X/harness_check.sh\""`
+    # — que es exactamente el mutante con el que el reviewer paso por arriba la
+    # primera version de este modo.
+    if grep -E '"command":.*(harness_check|commit_guard)' "$sh_file" >/dev/null 2>&1; then
+        falta="$falta comando-de-hook-sin-pasar-por-el-runtime"
+    fi
+    # El runtime es SUPERFICIE y vive en la raiz: con HOOK_BASE la ruta apunta a
+    # <raiz>/<subdir>/bin/harness-hook, que en layout subdir no existe (127).
+    grep -qF 'HOOK_BASE/bin/harness-hook' "$sh_file" \
+        && falta="$falta runtime-con-HOOK_BASE-en-vez-de-SURFACE_BASE"
+    # Cada Stop declara su timeout, como las otras cuatro superficies (AC-12).
+    stops="$(grep -cF 'bin/harness-hook\" plain stop' "$sh_file" || true)"
+    # JSON usa `"timeout":`, TOML (Kimi) usa `timeout =`: se aceptan los dos.
+    timeouts="$(grep -A1 -F 'bin/harness-hook\" plain stop' "$sh_file" | grep -cE '"timeout"|timeout *=' || true)"
+    if [ "$stops" -eq 0 ] || [ "$timeouts" -ne "$stops" ]; then
+        falta="$falta Stop-sin-timeout-declarado[$timeouts-de-$stops]"
+    fi
+    # Los DOS instaladores, para el MISMO backend, despachan al runtime.
+    if [ -f "$REPO_ROOT/setup_harness.ps1" ]; then
+        grep -qF 'harness-hook.ps1" plain stop' "$REPO_ROOT/setup_harness.ps1" \
+            || falta="$falta ps1:Stop-no-despacha-al-runtime"
+    fi
+    [ -z "$falta" ] \
+        || fail "cableado-hooks: el cableado no cumple el contrato:$falta"
+    ok "cableado-hooks: cada evento invoca el runtime con SU evento, con timeout, en los dos instaladores"
+}
+
 modo_promesa_acotada() {
     grep -q "no ejecuta el instalador de Windows" "$REPO_ROOT/docs/verification.md" \
         || fail "promesa-acotada: verification.md no dice que el chequeo no ejecuta el instalador de Windows"
@@ -249,6 +309,7 @@ case "$MODO" in
     superficies)           modo_superficies ;;
     smokes)                modo_smokes ;;
     migracion-rules)       modo_migracion_rules ;;
+    cableado-hooks)        modo_cableado_hooks ;;
     promesa-acotada)       modo_promesa_acotada ;;
     en-harness-check)      modo_en_harness_check ;;
     sin-ps1)               modo_sin_ps1 ;;
@@ -259,10 +320,11 @@ case "$MODO" in
         modo_superficies
         modo_smokes
         modo_migracion_rules
+        modo_cableado_hooks
         modo_promesa_acotada
         modo_en_harness_check
         modo_sin_ps1
-        ok "paridad: los nueve modos verdes"
+        ok "paridad: los diez modos verdes"
         ;;
     *) fail "modo desconocido: $MODO" ;;
 esac

@@ -76,6 +76,33 @@ turno en cada documento que el arnes escribia. Dos decisiones:
   cubierto.
 - **Cuando un gate se saltea algo, lo dice.** Una linea `[i]` con el repo y la
   razon. Un guard que se calla en silencio es indistinguible de uno apagado.
+- **Y cuando bloquea, ofrece una salida que el que lee PUEDA tomar** (feature
+  #66). El guard nombraba el repo y nada mas ("Cambios sin commitear en: docs"),
+  con dos remedios: commitear —trabajo que puede ser de otra sesion, a ciegas— o
+  apagar el guard para todo el repo. Ahora nombra los archivos no exentos y
+  agrega la salida que faltaba: si no es tuyo, decilo y no lo commitees.
+
+**Un gate del fin de turno no puede quedarse sin salida** (feature #66). La
+diferencia entre un gate y una trampa es si existe una accion que lo satisfaga.
+Cuando lo que falla no depende del agente —un repo hermano sucio de otra sesion,
+un espejo de rol cuyo remedio es re-correr el instalador, un spec en draft que
+EXIGE el si del usuario— cada intento de cerrar el turno lo volvia a disparar.
+`harness_check.sh` bloquea la PRIMERA vuelta —la unica chance del agente de
+arreglar lo que SI es suyo— y degrada la segunda: imprime TODO (mas, no menos),
+dice que no lo puede resolver solo, y deja cerrar.
+
+La señal de "segunda vuelta" llega por dos caminos, y el segundo existe porque el
+primero es prestado: `HARNESS_STOP_HOOK_ACTIVE`, que sale del JSON del evento
+pero lo manda el CLI (de Claude y Kimi hay evidencia; de Codex, Gemini y Grok no
+hay ninguna), y `progress/.stop_streak`, el centinela propio que se da cuenta
+solo cuando el MISMO conjunto de fallos se repite. La firma es del conjunto y no
+de la cantidad, asi que un problema nuevo reinicia la racha y vuelve a bloquear.
+
+**Una defensa que depende de que el otro se acuerde de avisar no es una
+defensa.** Y el bug de origen fue de la misma familia: habia DOS escritores de
+hooks y uno no se entero del contrato —cinco superficies pasaban por
+`bin/harness-hook` y `.claude/settings.json` en POSIX no—, asi que
+`tests/parity_check.sh` gana un modo que lo impide.
 
 **El material se entrega y el vacio se dice** (feature #56). La #51 dejo de
 hacer que el REVISOR explorara; esta hace lo mismo con el que IMPLEMENTA, y

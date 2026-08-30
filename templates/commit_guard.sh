@@ -116,19 +116,34 @@ es_artefacto_del_arnes() {
 }
 
 # 0 solo si hubo cambios y TODOS son artefactos del arnes.
+# Feature #66: ademas de decidir, junta los archivos que NO estan exentos. El
+# mensaje nombraba solo el repo ("Cambios sin commitear en: docs"), y con eso el
+# agente no puede saber si lo sucio es suyo: la unica salida que le quedaba era
+# commitear a ciegas trabajo que puede ser de otra sesion. Ver
+# docs/lecciones/remedios-que-la-herramienta-sugiere.md.
+AJENOS=""
 solo_artefactos_del_arnes() {
     hubo=1
+    ajenos_del_repo=""
     while IFS= read -r linea; do
         [ -n "$linea" ] || continue
         ruta=${linea#???}                                   # XY + espacio
         case "$ruta" in *" -> "*) ruta=${ruta##* -> } ;; esac  # renombrados
         ruta=${ruta#\"}
         ruta=${ruta%\"}
-        es_artefacto_del_arnes "$ruta" "$(basename "$1")" || return 1
-        hubo=0
+        if es_artefacto_del_arnes "$ruta" "$(basename "$1")"; then
+            hubo=0
+        else
+            ajenos_del_repo="$ajenos_del_repo
+    $(basename "$1")/$ruta"
+        fi
     done <<EOF
 $(git -C "$1" status --porcelain 2>/dev/null)
 EOF
+    if [ -n "$ajenos_del_repo" ]; then
+        AJENOS="$AJENOS$ajenos_del_repo"
+        return 1
+    fi
     return $hubo
 }
 
@@ -157,7 +172,17 @@ done
 
 if [ -n "$DIRTY" ]; then
     echo "Cambios sin commitear en:$DIRTY" >&2
-    echo "Haz commit por microservicio con Conventional Commits o usa HARNESS_COMMIT_GUARD_MODE=warn/off." >&2
+    if [ -n "$AJENOS" ]; then
+        echo "Archivos que no son artefactos del arnes:$AJENOS" >&2
+    fi
+    {
+        echo "Tres salidas, en este orden:"
+        echo "  1. Si el cambio es TUYO: commitealo por microservicio con Conventional Commits."
+        echo "  2. Si NO es tuyo (otra sesion, otro repo, trabajo del usuario): NO lo commitees."
+        echo "     Decilo y segui: commitear trabajo ajeno a medio hacer es peor que dejarlo sucio."
+        echo "  3. Solo si molesta de forma sostenida: HARNESS_COMMIT_GUARD_MODE=warn"
+        echo "     (avisa sin bloquear). \`off\` apaga el guard para TODO el repo, incluido tu codigo."
+    } >&2
     if [ "$MODE" = "warn" ] || [ "$STOP_HOOK_ACTIVE" -eq 1 ]; then
         exit 0
     fi

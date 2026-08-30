@@ -1,0 +1,359 @@
+# Impl - Feature #66: el_stop_hook_no_entra_en_bucle
+
+Spec: docs/spec-feature-66-el-stop-hook-no-entra-en-bucle.md
+Plan: docs/plan-feature-66-el-stop-hook-no-entra-en-bucle.md
+
+## El diagnostico, y lo que la investigacion le corrigio
+
+El reporte de Alan fue "esto esta pasando seguido", con el mensaje del guard. El
+primer diagnostico —el que yo le di en el chat— decia que **nadie** cumplia el
+contrato de `harness_check.sh:120-127`. Era falso, y la mitad falsa era la que
+decide el diseño:
+
+- `bin/harness-hook` (`run_stop`, `setup_harness.sh:1374-1397`) **si** lo cumple
+  desde la #52: lee el JSON una vez, con `[ -t 0 ]` para no colgarse, y exporta
+  el env. Lo cumplen **cinco de seis** superficies: Codex, Gemini, Grok, Kimi, y
+  el `.claude/settings.json` que escribe el instalador de **PowerShell**.
+- El unico roto era `.claude/settings.json` en **POSIX** —el default, el de
+  Alan—, que llamaba `harness_check.sh` derecho porque ese bloque es anterior a
+  `bin/harness-hook` y nadie lo migro cuando la #52 lo creo. Dos escritores de
+  hooks, uno no se entero.
+
+Y lo que cambio el alcance: **`HARNESS_STOP_HOOK_ACTIVE` tenia un solo
+consumidor**, `commit_guard.sh:161`. En `harness_check.sh` la variable aparecia
+unicamente en un comentario (`:127`); el cuerpo no la leia y salia 2 por
+cualquiera de sus otros ~25 sitios de fallo. Medido en este mismo worktree, sin
+el guard de por medio: `current.md` vacio y tres divergencias de espejo, todas
+con el remedio "re-corre el instalador". Cablear el hook y nada mas habria dejado
+el bug abierto con otro texto.
+
+## Que cambio
+
+| Archivo | Cambio |
+| --- | --- |
+| `setup_harness.sh` | `SURFACE_BASE` (nuevo): las rutas de SUPERFICIE apuntan a la raiz, no al arnes. `Stop` (los dos modos) y `PreToolUse` pasan por `bin/harness-hook`. `timeout: 120` en el Stop de Claude. `run_stop` detecta el flag con `case`, sin pipe |
+| `harness_check.sh` (+ template) | `sumar_fallo` acumula QUE fallo; degradacion en la segunda vuelta; centinela `progress/.stop_streak` |
+| `commit_guard.sh` (+ template) | nombra los archivos no exentos y ofrece tres salidas |
+| `tests/stop_hook_check.sh` | NUEVO: ocho modos |
+| `tests/commit_guard_check.sh` | modo `nombra-archivos` |
+| `tests/parity_check.sh` | modo `cableado-hooks` |
+
+**La firma del conjunto de fallos** usa `$LINENO` expandido en el sitio de la
+llamada. Identifica el gate sin obligar a etiquetar 30 sitios a mano, cuenta
+repeticiones (tres divergencias de espejo ≠ dos), y si el script cambia de
+version la firma cambia y la racha se reinicia — que es el comportamiento
+correcto.
+
+**El centinela** sigue `docs/lecciones/estado-local-en-progress.md` al pie: un
+dotfile por concepto, una linea `<firma>:<n>`, toda lectura degradando al
+default, y no se reescribe si el valor no cambio (reescribir corre el mtime).
+
+## Evidencia por AC
+
+| AC | Evidencia / test | Estado |
+| --- | --- | --- |
+| AC-1 | `setup_harness.sh:2572` (Stop -> runtime); `tests/parity_check.sh` modo `cableado-hooks` | cubierto |
+| AC-2 | `tests/stop_hook_check.sh:primera-vuelta`; `harness_check.sh` (rama `exit 2`) | cubierto |
+| AC-3 | `tests/stop_hook_check.sh:segunda-vuelta` — verifica que imprime MAS, no menos | cubierto |
+| AC-4 | `tests/stop_hook_check.sh:degrada-todos-los-gates` (proyecto sin nada sucio, otro gate en rojo) | cubierto |
+| AC-5 | `tests/stop_hook_check.sh:centinela-sin-flag` | cubierto |
+| AC-6 | `tests/stop_hook_check.sh:centinela-reinicia` | cubierto |
+| AC-7 | `tests/stop_hook_check.sh:estado-degrada` (vacio, basura, multilinea, ausente) | cubierto (ver nota) |
+| AC-8 | `tests/commit_guard_check.sh:nombra-archivos`; `commit_guard.sh` (bloque del mensaje) | cubierto |
+| AC-9 | `setup_harness.sh:2551` (PreToolUse -> `SURFACE_BASE`); `parity_check.sh` modo `cableado-hooks` | cubierto |
+| AC-10 | `tests/parity_check.sh` modo `cableado-hooks`, con prueba del rojo de sus tres chequeos | cubierto |
+| AC-11 | `tests/stop_hook_check.sh:payload-grande` | cubierto, con la premisa CORREGIDA (abajo) |
+| AC-12 | `setup_harness.sh:2573` (`"timeout": 120`) | cubierto |
+| AC-13 | prueba del rojo, abajo | cubierto |
+
+**Nota sobre el AC-7**: el spec declaraba `cargo test stop_streak`, asumiendo que
+el centinela seria Rust. Se implemento en **shell**, dentro de `harness_check.sh`,
+porque ahi es donde estan los fallos y donde se decide el exit code; ponerlo en
+Rust habria obligado a un comando nuevo (peldaño mas bajo) solo para consultarlo.
+El AC se cubre con `tests/stop_hook_check.sh:estado-degrada`, que prueba lo mismo
+que el AC pide. **Esto cambia el comando declarado y necesita la re-firma del
+usuario.**
+
+## La prueba del rojo (AC-13)
+
+Cada mecanismo se rompio a proposito y se comprobo que el test lo detecta:
+
+| Mecanismo roto | Lo que reporto el test |
+| --- | --- |
+| degradacion desactivada (`if false`) | `segunda-vuelta: la segunda vuelta siguio bloqueando (rc=2): el bucle sigue` y `centinela-sin-flag: ... sigue en bucle (rc=2)` |
+| centinela ignorando la firma (`if true`) | `centinela-reinicia: con una firma distinta no volvio a bloquear (rc=0)` |
+| `Stop` revertido al comando viejo | `cableado-hooks: ... Stop-no-pasa-por-el-runtime` |
+| `Stop --no-subagents` revertido | `cableado-hooks: ... Stop-sin-subagentes-no-pasa-por-el-runtime` |
+| `PreToolUse` con `HOOK_BASE` | `cableado-hooks: ... runtime-con-HOOK_BASE-en-vez-de-SURFACE_BASE` |
+
+Y restaurado, todo vuelve a verde.
+
+## Lo que el propio trabajo encontro
+
+- **El AC-11 nacio de un bug que no existe.** La premisa era que
+  `printf | grep -q` bajo `set -o pipefail` devuelve el EPIPE de `printf` cuando
+  `grep -q` sale temprano, dejando el flag en 0 con el JSON diciendo `true`.
+  Medido en bash de macOS con 200 KB, 1 MB y 8 MB, y el `rc` crudo del pipeline:
+  **detecta SI en los tres casos, rc=0 siempre**. El cambio a `case` se hizo
+  igual —es mas simple y saca una dependencia del buffer del pipe— pero quedo
+  declarado como ROBUSTEZ, y el AC se reescribio para decir eso. Dejarlo con la
+  redaccion original habria sido cerrar una feature afirmando lo que no se pudo
+  comprobar, que es exactamente lo que la #63 se prohibio.
+- **Mi primera prueba del rojo dio verde falso.** Al revertir el cableado para
+  ver si `parity_check` se ponia rojo, siguio verde: mi patron pedia una comilla
+  final que la linea real no tiene (termina en comillas escapadas). Lo detecte
+  porque el rojo NO aparecio, no porque lo verificara. Es la misma clase de error
+  que la #64 (verificar el instrumento equivocado), una vuelta antes.
+- **Un test mio estaba mal, no el codigo.** El modo `nombra-archivos` fallaba
+  diciendo que el guard nombraba un artefacto exento. Era cierto: yo habia puesto
+  el `spec-feature-9-algo.md` dentro de `miservicio/`, y la exencion exige la
+  UBICACION ademas del nombre (`commit_guard.sh:97-108`) — un `impl-notas.md`
+  suelto en un microservicio es un documento real. El test tenia razon.
+
+## La revision adversarial, y el bug que introdujo mi propio arreglo
+
+El reviewer la rechazo con cinco bloqueantes. El peor era mio, y nacio de la
+"robustez" del AC-11:
+
+**B4 — el `case` que introduje era PEOR que el `grep` que saque.** El patron
+`*'"stop_hook_active"'*[Tt]rue*` acepta cualquier `true` POSTERIOR a la clave, y
+el JSON real del Stop trae `cwd`. Reproducido en frio con un payload real:
+
+    {"stop_hook_active":false,"cwd":"/Users/alan/truenorth"}
+                                                  ^^^^
+
+El flag salia 1 con el JSON diciendo `false`, o sea que **la primera vuelta no
+bloqueaba y el agente perdia su unica chance de arreglar lo suyo**. El `grep` que
+reemplace exigia adyacencia clave-valor y no tenia ese fallo. Tambien caian
+`"note":"construed"`, `"verbose":true` y `"msg":"True story"`.
+
+La leccion, que es mas cara que el bug: **quise arreglar un bug que no existia y
+en el intento cree uno que si.** El AC-11 nacio de un hallazgo teorico, no
+reproducible; en vez de dejar el codigo como estaba, lo "mejore". Ahora el match
+recorta hasta la clave y mira SOLO lo que sigue, verificado contra los doce casos
+de la matriz del reviewer (incluidos sus cuatro falsos positivos).
+
+Los otros cuatro:
+
+| # | Que rompio | Arreglo |
+| --- | --- | --- |
+| B1 | Con el guard como UNICO gate en rojo —el escenario exacto que reporto Alan— el check salia 0 pero imprimia `[Ok] Harness Check limpio` debajo del detalle del repo sucio, y nunca la linea prometida. El guard se auto-degradaba (`commit_guard.sh:186`) antes de que el check lo contara | El check invoca el guard con la señal APAGADA: la degradacion vive en UN solo lugar. El guard sigue degradando solo cuando corre sin check (modo `--no-subagents`) |
+| B2 | La firma por `$LINENO` identifica el GATE, no el contenido: el guard colapsa todos los archivos sucios en un `sumar_fallo`, asi que arreglar A y ensuciar B dejaba la racha corriendo y el mensaje decia "no cambio nada" sobre un problema nuevo | `sumar_fallo` acepta un DETALLE que entra en la firma; el guard aporta su salida. Verificado con el escenario exacto: A sucio -> rc=2, mismo -> rc=0, A commiteado + B nuevo -> **rc=2** |
+| B3 | Mi modo `cableado-hooks` eran tres grep NEGATIVOS de las formas historicas. Tres mutantes reales lo pasaban por arriba | Reescrito como afirmacion POSITIVA: cada evento invoca el runtime con SU evento, con timeout, en los dos instaladores |
+| B5 | El comando del AC-12 no podia fallar: borrar el `timeout` dejaba `parity_check` verde | Asercion del timeout, que acepta JSON (`"timeout":`) y TOML (`timeout =`, Kimi) |
+
+Ademas, el comentario del codigo afirmaba el bug del EPIPE como HECHO mientras el
+spec y este archivo lo declaraban no reproducido: el mismo commit decia una cosa
+en el codigo y la contraria en los docs. Corregido.
+
+**Y una tercera vez me pase por arriba mi propia prueba del rojo.** Los mutantes
+M1 y M3 "pasaban" porque mis reemplazos con `python3 -c` y escapes anidados no
+mutaban nada. Recien al imprimir `cambio el archivo=True` antes de correr el test
+aparecio la verdad: M3 SI se detectaba, y M1 era un agujero real (mi regex
+`"command": "[^"]*(harness_check|...)` se corta en la comilla escapada del
+comando). La regla que me llevo: **una prueba del rojo empieza por demostrar que
+la mutacion existe.**
+
+**Un test ajeno se rompio y tenia razon.** `commit_guard_check.sh:prueba-del-rojo`
+reconstruye la invocacion previa del guard para probar que el modo `no-cuelga`
+mide algo; al cambiar yo esa invocacion, dejo de reconstruirla y **fallo
+ruidosamente**. Es exactamente lo que `criterios-de-cierre-que-se-pueden-fallar`
+dice que tiene que pasar ("si tu prueba del rojo empieza a fallar, la primera
+hipotesis es que el instrumento dejo de medir"). Se actualizo el `sed` a la
+invocacion nueva.
+
+## Tercera vuelta sobre el AC-11: el codigo original estaba bien
+
+El reviewer volvio a rechazarla, con UN bloqueante, y otra vez fue mi arreglo.
+El recorte de prefijo con el que arregle el falso positivo es **cuadratico** en
+bash. Medido en esta maquina, con la clave al final del payload:
+
+| tamaño | `grep` (original) | recorte de prefijo (mi arreglo) |
+| --- | --- | --- |
+| 200 KB | **0.032 s** | **20.5 s** |
+| 1 MB | 0.05 s | no termino en 2 minutos (~8 min estimados) |
+
+El timeout del hook es 120 s: un payload de 1 MB habria matado el Stop y el turno
+cerraba SIN check. Un hook que no termina es peor que uno que decide mal.
+
+**La secuencia completa de este AC, que es la leccion:**
+
+1. El codigo era `printf | grep -q`. Funcionaba.
+2. Una revision teorizo un EPIPE bajo `pipefail`. **No se reproduce** (medido
+   hasta 8 MB).
+3. Lo cambie igual "por robustez" a un `case`, que introdujo un falso positivo
+   con el `cwd` real del JSON: **la primera vuelta dejo de bloquear**.
+4. Lo arregle recortando el prefijo: **640 veces mas lento**, por encima del
+   timeout.
+5. Volvi al `grep`, con la unica mejora que si valia: here-string en vez de pipe.
+
+Tres vueltas de revision para volver, casi exactamente, a donde estaba. **No se
+endurece codigo que funciona contra un bug que no se pudo reproducir.** Y el AC
+que nace de una hipotesis no verificada arrastra el error hasta el final: cada
+"arreglo" fue una consecuencia del anterior.
+
+La otra mitad del hallazgo: `modo_payload_grande` **inlineaba una copia del
+patron**, asi que cuando el patron real cambio dos veces, el modo siguio verde
+probando codigo muerto — el comando declarado del AC-11 no podia fallar por nada
+que le pasara a `run_stop`. Ahora extrae el matcher REAL del instalador y lo
+ejercita, con dos pruebas del rojo: si cambia la forma, falla por "no se pudo
+extraer"; si cambia el regex dejando la forma, falla nombrando el payload exacto
+(`flag=1 esperaba=0 con: {"stop_hook_active":false,"cwd":".../truenorth"}`). Y
+mide el tiempo: 200 KB en menos de 5 s o falla.
+
+## Las ocho observaciones, y el bug que aparecio al arreglarlas
+
+Decision del usuario 2026-08-30: se arreglan **todas**, no solo las de riesgo.
+
+| # | Que era | Como quedo |
+| --- | --- | --- |
+| 1 | `.stop_streak` como symlink: el check escribia A TRAVES y pisaba un archivo del usuario | Se reemplaza el symlink por el archivo real antes de escribir. Verificado: el contenido del usuario queda intacto |
+| 2 | Estado ilegible (chmod 000, directorio, `progress/` no creable) mataba el centinela EN SILENCIO: la racha quedaba clavada en 1 y el caso P1 —un CLI que no manda la señal— se quedaba sin proteccion | Avisa una vez: "la proteccion contra el bucle queda solo en manos del CLI" |
+| 3 | Un `HARNESS_STOP_HOOK_ACTIVE=0` residual en la terminal convertia una corrida A MANO en "evento", y la segunda degradaba | Señal nueva `HARNESS_HOOK_EVENT`, que **solo** exporta `bin/harness-hook`. A mano: rc=2,2,2 aun con el flag residual |
+| 4 | `cableado-hooks` engañable con el literal en un COMENTARIO | Filtra comentarios. Y al probarlo aparecio algo peor: el grep positivo matcheaba el `plain stop` **de Kimi** y daba por buenos los dos Stops de Claude rotos. Ahora exige `"command":` y CUENTA los dos |
+| 5 | Clave JSON duplicada: ganaba la PRIMERA; los parsers toman la ultima | Gana la ultima, con la matriz completa verde en los dos ordenes |
+| 6 | La firma incluia las lineas `[i] <repo>: solo artefactos` de repos que NO fallan, asi que commitear artefactos en otro repo reiniciaba la racha del problema de siempre | Solo lo que falla entra en la firma |
+| 7 | El fix de B2 no tenia test: `centinela-reinicia` fabrica la firma a mano | Modo nuevo `centinela-problema-nuevo` con el escenario real. **Probado**: con la regresion de B2 sembrada, el modo viejo queda VERDE y el nuevo la detecta |
+| 8 | El sello del spec no se re-estampo tras las correcciones | Es diseño: `approve_spec` es idempotente sobre el archivo y la re-firma va a la firma + `history.md` (:389 y :391 del repo principal). No hay nada que arreglar; queda dicho |
+
+**Y un bug serio que introduje arreglando la #5, que el test pesco de inmediato.**
+Para que ganara la ultima ocurrencia use `grep -oE ... | tail -1`. `bin/harness-hook`
+corre con `set -Eeuo pipefail`, asi que cuando el payload **no trae la clave**
+—el caso NORMAL de la primera vuelta— `grep` sale 1 y **mataba el hook antes de
+decidir nada**. Habria roto el Stop en todas las sesiones. Arreglado con
+`|| true`, y el comentario dice por que no es decorativo.
+
+Lo encontro `modo_payload_grande`: el mismo modo que el reviewer marco como
+inutil por verificar una copia inline del patron. Al hacerlo ejercitar el matcher
+REAL, encontro esto en su primera corrida. Un test que verifica el instrumento
+adyacente no es un test debil: es un test que no existe.
+
+## Lo que NO se hizo, y por que
+
+- **La linea de base de suciedad por sesion** (que el guard solo cuente lo que
+  ensucio ESTA sesion). Es el arreglo estructural del caso "no es mio", pero
+  cambia la semantica del gate y tiene su propio spec. Aca solo se arreglo el
+  REMEDIO.
+- **Reclasificar gate por gate** en auto-reparable vs decision-del-usuario. La
+  #66 degrada el check entero en la segunda vuelta.
+- **Medir que manda cada CLI** en el JSON del Stop. El centinela existe
+  justamente para no depender de ese dato.
+
+## Tercera revision: repeti, en el archivo de al lado, el error que acababa de pescar
+
+El reviewer cerro las ocho observaciones y R1, y encontro **un bloqueante nuevo,
+introducido por mi arreglo del symlink**:
+
+    [ -L "$streak_file" ] && rm -f "$streak_file" 2>/dev/null
+
+Bajo `set -Eeuo pipefail` esa lista es el ULTIMO comando del bloque, asi que con
+`progress/` en solo-lectura el `rm` falla y **mata el check con rc=1**. Un Stop
+con rc=1 **no bloquea**: el turno cierra sin veredicto, que es peor que
+cualquiera de los dos finales legitimos. Antes de mi arreglo ese caso daba rc=2.
+
+Es **exactamente** la trampa del `|| true` que yo mismo habia encontrado una
+vuelta antes, en `setup_harness.sh`, y documentado en este archivo. La arregle
+ahi y la volvi a introducir en `harness_check.sh`. Tres bugs mios en esta
+feature, los tres de la misma clase: **un endurecimiento que agrega una muerte
+por `set -e`**.
+
+Y al verificar el arreglo aparecio que estaba incompleto: si el `rm` falla, el
+symlink SIGUE y el `printf` escribe igual a traves de el —escribir a traves de un
+symlink no necesita permiso en el directorio, solo en el destino—, asi que el
+archivo del usuario quedaba pisado con un rc=2 tranquilizador. Ahora se detecta y
+NO se escribe.
+
+Los dos casos entraron a `estado-degrada`, que el AC-7 nombraba ("sin permisos")
+y el test no cubria. Prueba del rojo: devuelto el `&&`, el modo reporta
+`symlink + progress solo-lectura mato el check (rc=1): un Stop con rc=1 no bloquea`.
+
+**C1** (sin codigo): el Then del AC-11 decia "la deteccion no pasa por un pipe" y
+el mecanismo final ES un pipeline (`grep -oE ... | tail -1`). Se corrigio la
+letra por lo que importa y esta medido —lineal (1 MB en 0.48 s) y con adyacencia
+clave-valor— con su comentario inline y la re-firma del usuario. "Sin pipe" nunca
+fue la propiedad que importaba: era, otra vez, una promesa mas fuerte que el
+codigo.
+
+## Cerrar la CLASE, no los tres casos
+
+Despues del tercer bug de la misma familia hice la pregunta que correspondia
+desde el principio: **¿que otros comandos que agrego esta feature pueden matar el
+check?** Audite el diff completo de la #66 sobre `harness_check.sh` preguntando
+por cada comando nuevo "¿que pasa si esto falla?", y aparecieron **dos mas**, los
+dos pipelines sin proteccion:
+
+    fallos_sitios="... $(printf '%s' "$2" | cksum | cut -d' ' -f1)"
+    firma="$(printf '%s' "$fallos_sitios" | tr ' ' '\n' | sort | tr '\n' ',')"
+
+Medido con un `cksum` y un `sort` falsos que salen 1: los dos dan **rc=1** bajo
+`set -Eeuo pipefail`, o sea el mismo sintoma exacto de los otros tres — el check
+muere sin decidir y el Stop no bloquea. Arreglados con `|| true`, y verificado:
+con las herramientas rotas el check ahora sale **rc=2**, que es una decision.
+
+Y quedo `modo_herramientas_rotas`, que rompe `cksum`, `sort`, `tr` y `cut` a
+proposito y exige que el rc siga siendo 0 o 2. Su prueba del rojo: sacado el
+`|| true` del `cksum`, reporta *"con las herramientas del centinela rotas el
+check murio (rc=1) en vez de decidir"*.
+
+**La regla que queda escrita en el codigo**: el centinela es una AYUDA, y ninguna
+de sus partes puede matar el check. Cinco bugs de la misma clase en una sola
+feature —tres encontrados por el reviewer, dos por esta auditoria— alcanzan para
+convertir el caso puntual en un invariante.
+
+## La sexta y septima: cerrar la clase no alcanzo, porque mi heuristica era angosta
+
+Cerre "la clase" buscando **pipelines sin proteccion**. El reviewer encontro la
+sexta muerte, y no era un pipeline: era **aritmetica**.
+
+    progress/.stop_streak con  <firma-actual>:08
+
+`08` son digitos puros, asi que pasa el filtro `''|*[!0-9]*`, pero bash lo lee
+como OCTAL en `$((n_previo + 1))` y muere: *"value too great for base"*. rc=1, el
+mismo sintoma de las otras cinco. Arreglo: `n_previo=$((10#$n_previo))`.
+
+Y con el FIFO paso algo peor, que aprendi arreglandolo mal tres veces seguidas:
+
+1. Puse `[ -f ]` en el `cat` de `racha_de`. **El test se colgo igual.**
+2. Habia OTRO `cat`. Lo protegi. **Se colgo igual.**
+3. Abrir un FIFO para **escritura** tambien bloquea: era el `printf >`.
+
+Cada arreglo parcial dejaba el siguiente, y el sintoma no era un error sino un
+CUELGUE — o sea que el modo `estado-degrada` no fallaba, se quedaba esperando.
+La unica salida fue dejar de tapar casos y preguntar UNA vez, arriba de todo:
+**¿es esto un archivo regular que puedo usar como estado?** Un solo guard
+(`-L` primero, porque `-f` sigue symlinks; despues `-e && ! -f`) cierra symlink,
+FIFO, directorio y device de una.
+
+**El balance de la feature: siete bugs mios, todos de la misma familia.** Cinco
+por `set -e`, uno por octal, uno por cuelgue. Tres los encontro el reviewer, dos
+una auditoria mia, dos el test que el reviewer me hizo escribir. La leccion que
+queda no es "revisa mas": es que **una heuristica ("busca pipelines") cierra los
+casos que la heuristica ve, y por eso el invariante hay que escribirlo como
+propiedad** —ninguna parte del centinela puede matar ni colgar el check— **y
+defenderlo con un test que rompa las herramientas de verdad**, no con una lista
+de casos conocidos.
+
+## Compatibilidad con una instalacion vieja (medido)
+
+`HARNESS_HOOK_EVENT` es una señal NUEVA que exporta `bin/harness-hook`. Si
+alguien actualiza `harness_check.sh` sin re-correr el instalador —o sea, con un
+`harness-hook` viejo que no la exporta— pasa esto, medido en sandbox:
+
+| escenario | resultado |
+| --- | --- |
+| hook viejo, `HARNESS_STOP_HOOK_ACTIVE=1` (el CLI dice "segunda vuelta") | **rc=0**: la degradacion por flag sigue funcionando |
+| hook viejo, `=0` repetido (el centinela) | rc=2, 2, 2: **el centinela no corre** |
+
+O sea: degradacion elegante, no regresion total. Se conserva la defensa principal
+(la señal del CLI) y se pierde la red (el centinela), que es justo la que cubre a
+los backends que NO mandan el flag. La combinacion solo se da copiando archivos
+sueltos: el instalador escribe los dos juntos. Queda dicho para que nadie asuma
+que el centinela protege una instalacion a medio actualizar.
+
+## Lo que no se pudo verificar en esta maquina
+
+- Nada de PowerShell: no hay `pwsh`. El `.ps1` no se toco en esta feature salvo
+  por lo que ya cumplia; la paridad declarativa si corre (`parity_check`, diez
+  modos verdes).
+- El comportamiento real de cada CLI ante un Stop que falla: el centinela se
+  probo simulando el env, no con los CLIs de verdad.

@@ -1381,12 +1381,44 @@ run_stop() {
     # (feature #52).
     stop_input=""
     [ -t 0 ] || stop_input="$(cat 2>/dev/null || true)"
-    if printf '%s' "$stop_input" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
-        HARNESS_STOP_HOOK_ACTIVE=1
-    else
-        HARNESS_STOP_HOOK_ACTIVE=0
-    fi
+    # Historia de este bloque, porque costo tres vueltas de revision y la
+    # conclusion es que el codigo ORIGINAL estaba bien:
+    #
+    # 1. Era `printf '%s' "$stop_input" | grep -q '...'`. Una revision teorizo que
+    #    el EPIPE de `printf` bajo `pipefail` podia dar un falso negativo. NO se
+    #    reproduce: medido hasta 8 MB, rc=0 siempre.
+    # 2. Se cambio igual "por robustez" a un `case *'"stop_hook_active"'*[Tt]rue*`,
+    #    que acepta cualquier `true` POSTERIOR a la clave. El JSON del Stop trae
+    #    `cwd`, asi que con `"stop_hook_active":false` y un cwd como
+    #    `/Users/alan/truenorth` el flag salia 1: la primera vuelta no bloqueaba.
+    # 3. Se arreglo recortando el prefijo (`${stop_input#*...}`), que en bash es
+    #    CUADRATICO: 200 KB tardaba 19.6 s y 1 MB ~8 min, contra un timeout de
+    #    120 s. Un hook que no termina es peor que uno que decide mal.
+    #
+    # Vuelve el `grep`, que exige adyacencia clave-valor (sin el falso positivo)
+    # y es lineal, con la unica mejora que si valia: here-string en vez de pipe,
+    # asi no hay pipeline del que preocuparse. La leccion, cara: no se "endurece"
+    # codigo que funciona contra un bug que no se pudo reproducir.
+    # Se mira la ULTIMA ocurrencia de la clave, que es la que gana en cualquier
+    # parser JSON: con `{"stop_hook_active":false,...,"stop_hook_active":true}` un
+    # match de la primera daba lo contrario de lo que el CLI quiso decir. Ningun
+    # CLI real duplica claves, pero la direccion del error importaba.
+    # El `|| true` NO es decorativo: `bin/harness-hook` corre con
+    # `set -Eeuo pipefail`, y cuando el payload no trae la clave —el caso NORMAL
+    # de la primera vuelta— `grep` sale 1 y mataba el hook antes de decidir nada.
+    ultimo_valor="$(grep -oE '"stop_hook_active"[[:space:]]*:[[:space:]]*[A-Za-z]+' <<<"$stop_input" | tail -1 || true)"
+    case "$ultimo_valor" in
+        *[Tt]rue) HARNESS_STOP_HOOK_ACTIVE=1 ;;
+        *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
+    esac
     export HARNESS_STOP_HOOK_ACTIVE
+    # Feature #66: la señal de "vengo de un evento" es esta, no la presencia de
+    # HARNESS_STOP_HOOK_ACTIVE. Un `HARNESS_STOP_HOOK_ACTIVE=0` que quedo
+    # exportado en la terminal del usuario (tras debuggear un hook) hacia que una
+    # corrida A MANO contara como evento y degradara en la segunda vuelta, contra
+    # la promesa del spec. El evento lo declara el hook, y solo el hook.
+    HARNESS_HOOK_EVENT=stop
+    export HARNESS_HOOK_EVENT
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
         # Checkpoint automatico de avance; harness_check conserva el exit code.
         HARNESS_REPO_ROOT="$ROOT" sh "$HARNESS_DIR/harness_cli" autocheck 1>&2 || true
@@ -1845,12 +1877,18 @@ if [ "$LAYOUT" = "subdir" ]; then
     HARNESS_SUBDIR="$(basename "$HARNESS_DIR")"
     HARNESS_EXEC='$CLAUDE_PROJECT_DIR/'"$HARNESS_SUBDIR"
     HOOK_BASE='${CLAUDE_PROJECT_DIR}/'"$HARNESS_SUBDIR"
+    # Feature #66: `bin/harness-hook` es SUPERFICIE y vive en SURFACE_DIR (la
+    # raiz), no adentro del arnes. Con HOOK_BASE la ruta apuntaba a
+    # <raiz>/<subdir>/bin/harness-hook, que no existe: el PreToolUse salia 127 y
+    # la capa de PREVENCION de rutas protegidas no corria NUNCA en layout subdir.
+    SURFACE_BASE='${CLAUDE_PROJECT_DIR}'
     HREL="$HARNESS_SUBDIR/"
 else
     REPO_ROOT="$HARNESS_DIR"
     HARNESS_SUBDIR=""
     HARNESS_EXEC='$CLAUDE_PROJECT_DIR'
     HOOK_BASE='${CLAUDE_PROJECT_DIR}'
+    SURFACE_BASE='${CLAUDE_PROJECT_DIR}'
     HREL=""
 fi
 SURFACE_DIR="$REPO_ROOT"
@@ -2542,7 +2580,7 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOOK_BASE/bin/harness-hook\" plain PreToolUse"
+            "command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain PreToolUse"
           }
         ]
       }
@@ -2563,7 +2601,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$HOOK_BASE/harness_cli\" autocheck >/dev/null 2>&1 || true; bash \"$HOOK_BASE/harness_check.sh\""
+            "command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop",
+            "timeout": 120
           }
         ]
       }
@@ -2594,7 +2633,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOOK_BASE/commit_guard.sh\""
+            "command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop",
+            "timeout": 120
           }
         ]
       }

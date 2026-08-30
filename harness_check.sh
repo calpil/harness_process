@@ -67,11 +67,35 @@ MODE="${HARNESS_CHECK_MODE:-block}" # block | warn | off
 [ "$MODE" = "off" ] && exit 0
 
 failures=0
+# Feature #66: ademas de contar, se registra QUE fallo. La firma del conjunto es
+# lo que le permite al check darse cuenta de que esta pidiendo lo mismo una y
+# otra vez sin que nadie pueda resolverlo. Se usa el numero de linea del sitio
+# ($LINENO se expande en el LLAMADOR, no aca): identifica el gate sin obligar a
+# etiquetar veinticinco sitios a mano, y si el script cambia de version la firma
+# cambia y la racha se reinicia, que es el comportamiento correcto.
+fallos_sitios=""
+sumar_fallo() {
+    failures=$((failures + 1))
+    # El segundo argumento es el DETALLE, y entra en la firma resumido. Sin el,
+    # la firma identifica el GATE y no el contenido: el guard colapsa todos los
+    # archivos sucios en un solo sitio, asi que arreglar uno y ensuciar otro
+    # dejaba la firma igual, la racha seguia corriendo y el check degradaba
+    # diciendo "pedi lo mismo N veces" sobre un problema que era nuevo.
+    if [ -n "${2:-}" ]; then
+        # `|| true` en el pipeline: el centinela es una AYUDA, y ninguna de sus
+        # partes puede matar el check. Es la tercera vez en esta feature que un
+        # comando nuevo sin proteccion mata el script bajo `set -Eeuo pipefail`;
+        # la regla que queda es que TODO lo que el centinela agrega degrada.
+        fallos_sitios="$fallos_sitios ${1:-?}#$(printf '%s' "$2" | cksum 2>/dev/null | cut -d' ' -f1 || true)"
+    else
+        fallos_sitios="$fallos_sitios ${1:-?}"
+    fi
+}
 
 echo "== Harness Check =="
 
 if [ -f "$HARNESS_DIR/feature_list.json" ]; then
-    sh "$HARNESS_DIR/harness_cli" status || failures=$((failures + 1))
+    sh "$HARNESS_DIR/harness_cli" status || sumar_fallo "$LINENO"
 
     # Gate de frescura del plan (multi-LLM).
     # check-plan sale con:
@@ -85,7 +109,7 @@ if [ -f "$HARNESS_DIR/feature_list.json" ]; then
         rc=$?
         if [ "$rc" -eq 2 ]; then
             echo "[!] Plan desactualizado (modificado por otro LLM). Ejecuta 'sh harness_cli check-plan' y re-lee el plan antes de continuar." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
         # rc=1 (sin feature) u otros: no incrementamos failures para este gate
     fi
@@ -101,7 +125,7 @@ if [ -f "$HARNESS_DIR/feature_list.json" ]; then
         rc=$?
         if [ "$rc" -eq 2 ]; then
             echo "[!] Spec sin aprobar o modificado. Ejecuta 'sh harness_cli check-spec'; si esta en draft, mostrale el spec al USUARIO, preguntale si lo aprueba y con su SI registra 'sh harness_cli approve-spec --yes'." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
         # rc=1 (sin feature) u otros: no incrementamos failures para este gate
     fi
@@ -109,12 +133,12 @@ fi
 
 if [ -f "$HARNESS_DIR/CHECKPOINTS.md" ] && [ ! -s "$HARNESS_DIR/progress/current.md" ]; then
     echo "[!] progress/current.md esta vacio; registra estado antes de cerrar." >&2
-    failures=$((failures + 1))
+    sumar_fallo "$LINENO"
 fi
 
 if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
     echo "[!] graphify-out/.graphify_stale existe; corre /graphify --update cuando aplique." >&2
-    failures=$((failures + 1))
+    sumar_fallo "$LINENO"
 fi
 
 # El guard arranca con `INPUT=$(cat)` porque su uso normal es COMO hook: el
@@ -125,8 +149,25 @@ fi
 # #52). Se le cierra la entrada. El unico dato que ese JSON traia
 # —`stop_hook_active`— viaja por entorno: quien SI es un hook lo lee una vez y
 # exporta HARNESS_STOP_HOOK_ACTIVE antes de llamar al check.
-if ! bash "$HARNESS_DIR/commit_guard.sh" </dev/null; then
-    failures=$((failures + 1))
+# Feature #66: el guard se invoca con la señal APAGADA a proposito. El guard
+# tiene su propia degradacion (commit_guard.sh:186), que era la unica que existia
+# antes de esta feature; si se la dejamos actuar aca, el guard sale 0 por su
+# cuenta, el check no cuenta el fallo y termina imprimiendo "[Ok] Harness Check
+# limpio" DEBAJO del detalle de un repo sucio — contradiciendo su propio stderr.
+# La degradacion es del check entero y vive en UN solo lugar: el final de este
+# archivo. El guard sigue degradando por su cuenta cuando corre solo (modo
+# --no-subagents, donde no hay check que decida por el).
+guard_salida=""
+if ! guard_salida="$(HARNESS_STOP_HOOK_ACTIVE=0 bash "$HARNESS_DIR/commit_guard.sh" </dev/null 2>&1)"; then
+    printf '%s\n' "$guard_salida" >&2
+    # El detalle entra en la firma: si cambia QUE esta sucio, la racha se
+    # reinicia y el problema nuevo se gana su vuelta de bloqueo.
+    # Solo lo que FALLA entra en la firma: las lineas `[i] <repo>: solo
+    # artefactos del arnes` son de repos que NO fallan, y commitear artefactos en
+    # otro repo cambiaba la firma y reiniciaba la racha del problema de siempre.
+    sumar_fallo "$LINENO" "$(printf '%s\n' "$guard_salida" | grep -v '^\[i\] ' || true)"
+elif [ -n "$guard_salida" ]; then
+    printf '%s\n' "$guard_salida" >&2
 fi
 
 # Integridad del mapa de agentes (solo si la capa de subagentes esta instalada).
@@ -154,36 +195,36 @@ if [ -d "$HARNESS_DIR/roles" ]; then
     for role in leader implementer reviewer; do
         if [ ! -f "$HARNESS_DIR/roles/$role.md" ]; then
             echo "[!] Falta roles/$role.md; el mapa de agentes esta incompleto." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
         agent_md="$REPO_ROOT/.claude/agents/$role.md"
         if [ -f "$agent_md" ]; then
             if [ "$(head -n1 "$agent_md")" != "---" ]; then
                 echo "[!] .claude/agents/$role.md sin frontmatter YAML; Claude Code no lo registrara como subagente." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             elif ! grep -q '^name:' "$agent_md" || ! grep -q '^description:' "$agent_md"; then
                 echo "[!] .claude/agents/$role.md: frontmatter sin name: o description:." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
         fi
         codex_toml="$REPO_ROOT/.codex/agents/$role.toml"
         if [ -f "$codex_toml" ] && ! grep -q '^developer_instructions' "$codex_toml"; then
             echo "[!] .codex/agents/$role.toml sin developer_instructions." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
         gemini_md="$REPO_ROOT/.gemini/agents/$role.md"
         if [ -f "$gemini_md" ] && [ "$(head -n1 "$gemini_md")" != "---" ]; then
             echo "[!] .gemini/agents/$role.md sin frontmatter YAML." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
         kimi_md="$REPO_ROOT/.kimi-code/agents/$role.md"
         if [ -f "$kimi_md" ]; then
             if [ "$(head -n1 "$kimi_md")" != "---" ]; then
                 echo "[!] .kimi-code/agents/$role.md sin frontmatter YAML; Kimi Code no lo registrara como subagente." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             elif ! grep -q '^name:' "$kimi_md" || ! grep -q '^description:' "$kimi_md"; then
                 echo "[!] .kimi-code/agents/$role.md: frontmatter sin name: o description:." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
         fi
 
@@ -197,19 +238,19 @@ if [ -d "$HARNESS_DIR/roles" ]; then
             role_body="$(cat "$HARNESS_DIR/roles/$role.md")"
             if [ -f "$agent_md" ] && [ "$(extract_agent_body "$agent_md")" != "$role_body" ]; then
                 echo "[!] Espejo desincronizado: .claude/agents/$role.md (leido por Claude y Grok) no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
             if [ -f "$gemini_md" ] && [ "$(extract_agent_body "$gemini_md")" != "$role_body" ]; then
                 echo "[!] Espejo desincronizado: .gemini/agents/$role.md no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
             if [ -f "$kimi_md" ] && [ "$(extract_agent_body "$kimi_md")" != "$role_body" ]; then
                 echo "[!] Espejo desincronizado: .kimi-code/agents/$role.md (leido por Kimi Code) no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
             if [ -f "$codex_toml" ] && [ "$(extract_codex_body "$codex_toml")" != "$role_body" ]; then
                 echo "[!] Espejo desincronizado: .codex/agents/$role.toml no coincide con roles/$role.md. Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para regenerarlo; si lo que editaste fue el espejo, propaga el cambio a roles/$role.md." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
         fi
     done
@@ -226,14 +267,14 @@ if [ -d "$HARNESS_DIR/roles" ]; then
             role_tpl="$HARNESS_DIR/templates/roles/$role_file.md"
             if [ ! -f "$role_src" ] || [ ! -f "$role_tpl" ]; then
                 echo "[!] Espejo roles/ <-> templates/roles/ incompleto: falta roles/$role_file.md o templates/roles/$role_file.md." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
                 continue
             fi
             role_src_body="$(cat "$role_src")"
             if [ "$role_src_body" != "$(sed "s|__HREL__|$harness_hrel|g" "$role_tpl")" ] \
                 && [ "$role_src_body" != "$(sed "s|__HREL__||g" "$role_tpl")" ]; then
                 echo "[!] Divergencia roles/$role_file.md vs templates/roles/$role_file.md (modulo __HREL__). Propaga el cambio al otro lado en el mismo commit (regla de espejo del Articulo 6)." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
         done
     fi
@@ -245,7 +286,7 @@ fi
 # minimas sin esa capa.
 if [ -d "$HARNESS_DIR/roles" ] && [ ! -f "$REPO_ROOT/docs/constitution.md" ]; then
     echo "[!] Falta docs/constitution.md (principios del proyecto). Re-corre el instalador (setup_harness.sh / setup_harness.ps1) para sembrarla." >&2
-    failures=$((failures + 1))
+    sumar_fallo "$LINENO"
 fi
 
 # Integridad del arbol de PRDs anidados (docs/prd/ de la RAIZ). La identidad de
@@ -275,7 +316,7 @@ if [ -d "$prd_root" ]; then
         prd_want="$(prd_expected_file "$prd_chain")"
         if [ "$prd_base" != "$prd_want" ]; then
             echo "[!] PRD fuera de lugar: docs/prd/$prd_rel deberia llamarse $prd_want segun su carpeta. Movelo a docs/prd/$(printf '%s' "${prd_base#PRD-}" | sed 's/\.md$//' | tr '-' '/')/$prd_base o renombralo." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
             continue
         fi
         # 3) El `Padre:` declarado tiene que coincidir con la ubicacion real.
@@ -287,7 +328,7 @@ if [ -d "$prd_root" ]; then
             fi
             if [ "$prd_declared" != "$prd_parent" ]; then
                 echo "[!] docs/prd/$prd_rel declara 'Padre: $prd_declared' pero su lugar en el arbol dice '$prd_parent'. Corregi el encabezado o mové el archivo." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
         fi
         # 5) Un PRD sin hitos avisa, pero NO bloquea: puede estar recien creado.
@@ -316,7 +357,7 @@ EOF
         prd_want="$(prd_expected_file "$prd_rel")"
         if [ ! -f "$prd_dir/$prd_want" ]; then
             echo "[!] docs/prd/$prd_rel no contiene su $prd_want: es una carpeta del arbol sin PRD. Crealo con 'sh harness_cli prd add' o borra la carpeta." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
     done <<EOF
 $(find "$prd_root" -mindepth 1 -type d | sort)
@@ -333,7 +374,7 @@ EOF
             fi
             if [ ! -f "$prd_target" ]; then
                 echo "[!] feature_list.json declara 'prd: $prd_ref' y ese PRD no existe. Crealo con 'sh harness_cli prd add' o corregi la feature." >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
             fi
         done <<EOF
 $(grep -o '"prd"[[:space:]]*:[[:space:]]*"[^"]*"' "$HARNESS_DIR/feature_list.json" 2>/dev/null | sed -E 's/.*"([^"]*)"$/\1/' | sort -u)
@@ -357,23 +398,23 @@ if [ -d "$lec_root" ]; then
         lec_name="${lec_base%.md}"
         if [ "$(head -n 1 "$lec_file")" != "---" ]; then
             echo "[!] docs/lecciones/$lec_base no empieza con el frontmatter '---'. Formato en docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
             continue
         fi
         lec_close="$(awk 'NR > 1 && /^---[[:space:]]*$/ { print NR; exit }' "$lec_file")"
         if [ -z "$lec_close" ]; then
             echo "[!] docs/lecciones/$lec_base tiene el frontmatter sin cerrar (falta el '---' de cierre)." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
             continue
         fi
         lec_head="$(sed -n "2,${lec_close}p" "$lec_file")"
         lec_decl="$(printf '%s\n' "$lec_head" | sed -n 's/^nombre:[[:space:]]*//p' | head -n 1)"
         if [ -z "$lec_decl" ]; then
             echo "[!] docs/lecciones/$lec_base no declara 'nombre:' en su frontmatter." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         elif [ "$lec_decl" != "$lec_name" ]; then
             echo "[!] docs/lecciones/$lec_base declara 'nombre: $lec_decl' y el archivo se llama '$lec_name.md'. Corregi el frontmatter o renombra el archivo." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
         fi
         lec_trig="$(printf '%s\n' "$lec_head" | sed -n 's/^triggers:[[:space:]]*//p' | head -n 1 | tr -d '[] ')"
         if [ -z "$lec_trig" ]; then
@@ -411,7 +452,7 @@ if [ -f "$REPO_ROOT/docs/perfil-usuario.md" ]; then
                 ;;
             *)
                 printf '%s\n' "$perfil_out" >&2
-                failures=$((failures + 1))
+                sumar_fallo "$LINENO"
                 ;;
         esac
     elif [ -n "$perfil_out" ]; then
@@ -513,7 +554,7 @@ if [ "$rutas_rc" -ne 0 ]; then
             done
             echo "    Son documentos del USUARIO (docs/rutas-protegidas.md). Si el cambio es tuyo y" >&2
             echo "    querias hacerlo, commitealo; si no, revertilo con el comando de arriba." >&2
-            failures=$((failures + 1))
+            sumar_fallo "$LINENO"
             ;;
     esac
 fi
@@ -563,10 +604,138 @@ if [ -f "$HARNESS_DIR/setup_harness.ps1" ] && [ -f "$HARNESS_DIR/tests/parity_ch
     fi
 fi
 
+# --- El fin de turno no puede quedar sin salida (feature #66) ----------------
+#
+# Hasta la #66 el check salia 2 sin importar si era la primera vuelta o la
+# quinta. Cuando lo que falla no lo puede resolver el agente —un repo hermano
+# sucio de otra sesion, un espejo de rol cuyo remedio es re-correr el instalador,
+# un spec en draft que EXIGE el si del usuario— cada intento de terminar el turno
+# lo volvia a disparar: bucle sin accion posible. Alan lo reporto asi: "esto esta
+# pasando seguido".
+#
+# La primera vuelta sigue bloqueando: es la unica chance del agente de arreglar
+# lo que SI es suyo. Lo que cambia es la segunda: se imprime TODO (mas, no menos)
+# y se deja cerrar el turno diciendo de quien es la decision.
+#
+# Dos señales, porque una sola no alcanza:
+#   - `HARNESS_STOP_HOOK_ACTIVE`, que `bin/harness-hook` saca del JSON del
+#     evento. Es la señal correcta cuando llega... pero la manda el CLI, y de
+#     Codex, Gemini y Grok no hay evidencia de que la manden. El arnes es
+#     multi-LLM: no puede depender de eso.
+#   - El centinela propio: si el MISMO conjunto de fallos se repite, el check se
+#     da cuenta solo. Funciona aunque el backend no mande nada.
+#
+# Correr `bash harness_check.sh` a mano NUNCA degrada: sin evento no hay racha
+# que contar, y el usuario que lo corre quiere el veredicto entero.
+STREAK_TOPE=2
+streak_file="$REPO_ROOT/progress/.stop_streak"
+
+# Estado local en progress/, siguiendo docs/lecciones/estado-local-en-progress.md:
+# un dotfile por concepto, una linea `<firma>:<n>`, y TODA lectura degrada al
+# default. Este estado no puede hacer fallar un comando jamas.
+racha_de() {
+    firma_actual="$1"
+    # `[ -f ]` es falso para FIFOs y directorios: un FIFO no hacia fallar el
+    # `cat`, lo COLGABA esperando un escritor que no existe (como hook, hasta que
+    # el timeout de 120 s mata el turno; a mano, para siempre).
+    linea=""
+    [ -f "$streak_file" ] && linea="$(cat "$streak_file" 2>/dev/null || true)"
+    firma_previa="${linea%%:*}"
+    n_previo="${linea##*:}"
+    case "$n_previo" in
+        ''|*[!0-9]*) n_previo=0 ;;
+    esac
+    # Base 10 EXPLICITA: `08` y `09` son digitos puros, asi que pasan el filtro de
+    # arriba, pero bash los lee como OCTAL en `$(( ))` y muere con "value too
+    # great for base" — rc=1, que en un Stop no bloquea y cierra el turno sin
+    # veredicto. Es la sexta muerte de esta clase en la feature y la primera que
+    # no es un pipeline: por eso el barrido de `|| true` no la encontro.
+    n_previo=$((10#$n_previo))
+    if [ "$firma_previa" = "$firma_actual" ] && [ -n "$firma_previa" ]; then
+        echo $((n_previo + 1))
+    else
+        echo 1
+    fi
+}
+
 if [ "$failures" -gt 0 ]; then
     echo "[Harness] Check fallo con $failures problema(s)." >&2
     [ "$MODE" = "warn" ] && exit 0
+
+    # La firma es del CONJUNTO: si cambia lo que falla, la racha se reinicia y el
+    # check vuelve a bloquear. Un problema nuevo siempre merece su vuelta.
+    firma="$(printf '%s' "$fallos_sitios" | tr ' ' '\n' | sort | tr '\n' ',' || true)"
+    # Solo `bin/harness-hook` exporta HARNESS_HOOK_EVENT. Antes se miraba si
+    # HARNESS_STOP_HOOK_ACTIVE estaba DEFINIDA, y un `=0` residual en la terminal
+    # del usuario convertia una corrida a mano en "evento": la segunda degradaba,
+    # contra la promesa de que a mano nunca degrada.
+    en_evento=0
+    [ -n "${HARNESS_HOOK_EVENT:-}" ] && en_evento=1
+    if [ "$en_evento" -eq 1 ]; then
+        racha="$(racha_de "$firma")"
+        # Se escribe solo si cambio algo: reescribir el mismo valor tambien
+        # corre el mtime, y este archivo es estado, no reloj.
+        nuevo="$firma:$racha"
+        # UN solo guard para todo lo que no es un archivo regular. Se llego
+        # aca arreglando de a un caso —primero el symlink, despues un `cat` que
+        # colgaba con un FIFO, despues el OTRO `cat`— y cada arreglo parcial
+        # dejaba el siguiente. Abrir un FIFO para ESCRITURA tambien bloquea, asi
+        # que la unica forma de cerrarlo es preguntar una vez, arriba de todo:
+        # ¿es esto un archivo regular que puedo usar como estado?
+        #
+        # `-L` va primero porque `-f` sigue los symlinks: un symlink a un archivo
+        # regular pasa `-f`, y escribir ahi es escribir en el archivo del USUARIO.
+        usable=1
+        if [ -L "$streak_file" ]; then
+            rm -f "$streak_file" 2>/dev/null || true
+            if [ -L "$streak_file" ]; then
+                echo "[i] $streak_file es un symlink y no se pudo reemplazar: no escribo a traves de el." >&2
+                usable=0
+            fi
+        fi
+        if [ "$usable" -eq 1 ] && [ -e "$streak_file" ] && [ ! -f "$streak_file" ]; then
+            # FIFO, directorio, device: leerlo puede COLGAR y escribirlo tambien.
+            echo "[i] $streak_file no es un archivo regular: no lo uso como estado." >&2
+            usable=0
+        fi
+        if [ "$usable" -eq 0 ]; then
+            echo "    La proteccion contra el bucle queda solo en manos del CLI." >&2
+        else
+            actual=""
+            [ -f "$streak_file" ] && actual="$(cat "$streak_file" 2>/dev/null || true)"
+            # Se escribe solo si cambio algo: reescribir el mismo valor tambien
+            # corre el mtime, y este archivo es estado, no reloj.
+            if [ "$actual" != "$nuevo" ]; then
+                mkdir -p "$REPO_ROOT/progress" 2>/dev/null || true
+                if ! printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null; then
+                    echo "[i] No se pudo escribir $streak_file: la proteccion contra el bucle queda solo en manos del CLI." >&2
+                fi
+            fi
+        fi
+    else
+        racha=0
+    fi
+
+    if [ "${HARNESS_STOP_HOOK_ACTIVE:-0}" = "1" ] || [ "$racha" -ge "$STREAK_TOPE" ]; then
+        if [ "${HARNESS_STOP_HOOK_ACTIVE:-0}" = "1" ]; then
+            motivo="este turno ya es consecuencia de un bloqueo mio"
+        else
+            motivo="pedi lo mismo $racha veces seguidas y no cambio nada"
+        fi
+        {
+            echo "[Harness] No bloqueo el cierre del turno: $motivo."
+            echo "    Los $failures problema(s) de arriba SIGUEN ahi y ninguno lo puedo"
+            echo "    resolver yo: decidilos vos. Si alguno era mio, ya tuve mi vuelta"
+            echo "    para arreglarlo."
+            echo "    Para verlos con el veredicto completo: bash harness_check.sh"
+        } >&2
+        exit 0
+    fi
     exit 2
 fi
+
+# Turno limpio: la racha se corta. Un archivo que sobrevive a un check verde
+# haria que la proxima falla arranque con historia ajena.
+rm -f "$streak_file" 2>/dev/null || true
 
 echo "[Ok] Harness Check limpio."
