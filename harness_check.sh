@@ -667,8 +667,22 @@ if [ "$failures" -gt 0 ]; then
             # NUNCA escribir a traves de un symlink: el centinela es estado
             # interno y no tiene por que tocar un archivo del usuario. Si alguien
             # dejo un symlink ahi, se reemplaza por el archivo real.
-            [ -L "$streak_file" ] && rm -f "$streak_file" 2>/dev/null
-            if ! printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null; then
+            # El `|| true` es obligatorio, no cosmetico: bajo `set -Eeuo
+            # pipefail` esta lista `&&` es el ULTIMO comando del bloque, asi que
+            # un `rm` que falla (progress/ en solo-lectura) mataba el check con
+            # rc=1 — y un Stop con rc=1 no bloquea: el turno cerraba SIN
+            # veredicto, peor que cualquiera de los dos finales legitimos. Es la
+            # misma trampa que el `grep | tail -1` de unas lineas mas arriba.
+            if [ -L "$streak_file" ]; then rm -f "$streak_file" 2>/dev/null || true; fi
+            if [ -L "$streak_file" ]; then
+                # El `rm` no pudo (progress/ en solo-lectura, por ejemplo) y el
+                # symlink sigue ahi: escribir ahora seria escribir en el archivo
+                # del USUARIO, que es exactamente lo que este bloque evita.
+                # Escribir a traves de un symlink no necesita permiso en el
+                # directorio, solo en el destino: por eso no alcanza con intentar.
+                echo "[i] $streak_file es un symlink y no se pudo reemplazar: no escribo a traves de el." >&2
+                echo "    La proteccion contra el bucle queda solo en manos del CLI." >&2
+            elif ! printf '%s\n' "$nuevo" > "$streak_file" 2>/dev/null; then
                 # Un skip en silencio deja al centinela clavado en 1 para siempre:
                 # el caso P1 del spec (un CLI que no manda la señal) se queda sin
                 # proteccion y nadie se entera.

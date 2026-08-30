@@ -145,8 +145,8 @@ PreToolUse (layout subdir)                PreToolUse
   Comando: `bash tests/parity_check.sh`
 
 - AC-11: Given el JSON del Stop con un payload grande, When `run_stop` busca
-  `stop_hook_active`, Then lo detecta sin depender del tamaño: la deteccion no
-  pasa por un pipe.
+  `stop_hook_active`, Then lo detecta **en tiempo lineal** y exigiendo adyacencia
+  clave-valor: ni el tamaño ni un `true` en otro campo cambian el resultado.
   Comando: `bash tests/stop_hook_check.sh payload-grande`
   <!-- CORRECCION (2026-08-30, al implementar): este AC nacio de un hallazgo que
        NO se pudo reproducir. La premisa era que `printf | grep -q` bajo
@@ -157,7 +157,16 @@ PreToolUse (layout subdir)                PreToolUse
        da 0. El cambio a `case` se hace igual —es mas simple y saca una
        dependencia sutil del tamaño del buffer del pipe— pero queda declarado
        como ROBUSTEZ, no como correccion de un bug observado. Dejar el AC con la
-       redaccion original habria sido afirmar lo que no se pudo comprobar. -->
+       redaccion original habria sido afirmar lo que no se pudo comprobar.
+
+       SEGUNDA CORRECCION (2026-08-30, tras la tercera revision): el Then decia
+       "la deteccion no pasa por un pipe", y el mecanismo final SI es un pipeline
+       (`grep -oE ... | tail -1`). Se cambio la letra por lo que de verdad
+       importa y esta medido: **lineal** (1 MB en 0.48 s, contra los 19.6 s por
+       200 KB del intento intermedio) y **con adyacencia clave-valor** (sin el
+       falso positivo del `cwd`). El `tail` lee toda la entrada, asi que no hay
+       early-close ni EPIPE posible; "sin pipe" nunca fue la propiedad que
+       importaba, y escribirla asi era otra promesa mas fuerte que el codigo. -->
 
 - AC-12: Given el `Stop` de Claude, When se lee su declaracion, Then tiene
   `timeout` como las otras cuatro superficies (era la unica sin declararlo, y es

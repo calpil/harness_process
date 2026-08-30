@@ -239,6 +239,58 @@ adyacente no es un test debil: es un test que no existe.
 - **Medir que manda cada CLI** en el JSON del Stop. El centinela existe
   justamente para no depender de ese dato.
 
+## Tercera revision: repeti, en el archivo de al lado, el error que acababa de pescar
+
+El reviewer cerro las ocho observaciones y R1, y encontro **un bloqueante nuevo,
+introducido por mi arreglo del symlink**:
+
+    [ -L "$streak_file" ] && rm -f "$streak_file" 2>/dev/null
+
+Bajo `set -Eeuo pipefail` esa lista es el ULTIMO comando del bloque, asi que con
+`progress/` en solo-lectura el `rm` falla y **mata el check con rc=1**. Un Stop
+con rc=1 **no bloquea**: el turno cierra sin veredicto, que es peor que
+cualquiera de los dos finales legitimos. Antes de mi arreglo ese caso daba rc=2.
+
+Es **exactamente** la trampa del `|| true` que yo mismo habia encontrado una
+vuelta antes, en `setup_harness.sh`, y documentado en este archivo. La arregle
+ahi y la volvi a introducir en `harness_check.sh`. Tres bugs mios en esta
+feature, los tres de la misma clase: **un endurecimiento que agrega una muerte
+por `set -e`**.
+
+Y al verificar el arreglo aparecio que estaba incompleto: si el `rm` falla, el
+symlink SIGUE y el `printf` escribe igual a traves de el —escribir a traves de un
+symlink no necesita permiso en el directorio, solo en el destino—, asi que el
+archivo del usuario quedaba pisado con un rc=2 tranquilizador. Ahora se detecta y
+NO se escribe.
+
+Los dos casos entraron a `estado-degrada`, que el AC-7 nombraba ("sin permisos")
+y el test no cubria. Prueba del rojo: devuelto el `&&`, el modo reporta
+`symlink + progress solo-lectura mato el check (rc=1): un Stop con rc=1 no bloquea`.
+
+**C1** (sin codigo): el Then del AC-11 decia "la deteccion no pasa por un pipe" y
+el mecanismo final ES un pipeline (`grep -oE ... | tail -1`). Se corrigio la
+letra por lo que importa y esta medido —lineal (1 MB en 0.48 s) y con adyacencia
+clave-valor— con su comentario inline y la re-firma del usuario. "Sin pipe" nunca
+fue la propiedad que importaba: era, otra vez, una promesa mas fuerte que el
+codigo.
+
+## Compatibilidad con una instalacion vieja (medido)
+
+`HARNESS_HOOK_EVENT` es una señal NUEVA que exporta `bin/harness-hook`. Si
+alguien actualiza `harness_check.sh` sin re-correr el instalador —o sea, con un
+`harness-hook` viejo que no la exporta— pasa esto, medido en sandbox:
+
+| escenario | resultado |
+| --- | --- |
+| hook viejo, `HARNESS_STOP_HOOK_ACTIVE=1` (el CLI dice "segunda vuelta") | **rc=0**: la degradacion por flag sigue funcionando |
+| hook viejo, `=0` repetido (el centinela) | rc=2, 2, 2: **el centinela no corre** |
+
+O sea: degradacion elegante, no regresion total. Se conserva la defensa principal
+(la señal del CLI) y se pierde la red (el centinela), que es justo la que cubre a
+los backends que NO mandan el flag. La combinacion solo se da copiando archivos
+sueltos: el instalador escribe los dos juntos. Queda dicho para que nadie asuma
+que el centinela protege una instalacion a medio actualizar.
+
 ## Lo que no se pudo verificar en esta maquina
 
 - Nada de PowerShell: no hay `pwsh`. El `.ps1` no se toco en esta feature salvo

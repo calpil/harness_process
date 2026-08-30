@@ -124,7 +124,34 @@ modo_estado_degrada() {
             *) fail "un .stop_streak con basura hizo fallar el check (rc=$rc)" ;;
         esac
     done
-    ok "estado-degrada: ausente, vacio o con basura no rompe nada"
+    # Los casos que el AC nombra y el test NO cubria ("sin permisos"), y que
+    # escondian un bloqueante: con el .stop_streak como symlink y progress/ en
+    # solo-lectura, el `rm` fallaba y —por ser el ultimo comando de una lista
+    # `&&` bajo pipefail— MATABA el check con rc=1. Un Stop con rc=1 no bloquea:
+    # el turno cerraba sin veredicto.
+    rm -f "$p/progress/.stop_streak" 2>/dev/null || true
+    printf 'CONTENIDO DEL USUARIO\n' > "$p/notas-del-usuario.txt"
+    ln -s "$p/notas-del-usuario.txt" "$p/progress/.stop_streak"
+    chmod 555 "$p/progress"
+    rc=0; correr "$p" 0 || rc=$?
+    chmod 755 "$p/progress"
+    case "$rc" in
+        0|2) : ;;
+        *) fail "symlink + progress solo-lectura mato el check (rc=$rc): un Stop con rc=1 no bloquea" ;;
+    esac
+    [ "$(cat "$p/notas-del-usuario.txt")" = "CONTENIDO DEL USUARIO" ] \
+        || fail "escribio A TRAVES del symlink y piso un archivo del usuario"
+
+    # Y el symlink que SI se puede reemplazar: el archivo apuntado queda intacto.
+    rm -f "$p/progress/.stop_streak"
+    ln -s "$p/notas-del-usuario.txt" "$p/progress/.stop_streak"
+    rc=0; correr "$p" 0 || rc=$?
+    [ "$(cat "$p/notas-del-usuario.txt")" = "CONTENIDO DEL USUARIO" ] \
+        || fail "reemplazando el symlink igual piso el archivo del usuario"
+    [ -L "$p/progress/.stop_streak" ] \
+        && fail "no reemplazo el symlink por el archivo real"
+
+    ok "estado-degrada: ausente, vacio, basura, symlink y sin permisos: decide siempre y no toca nada del usuario"
 }
 
 modo_payload_grande() {
