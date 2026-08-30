@@ -254,3 +254,4 @@ con su fecha.>
 - #62 el_cierre_no_declara_hecho_lo_que_no_hizo -> done 2026-08-27 · spec: docs/spec-feature-62-el-cierre-no-declara-hecho-lo-que-no-hizo.md · impl: docs/impl-62.md
 - #59 cmd_smoke_real_en_windows -> done 2026-08-27 · spec: docs/spec-feature-59-cmd-smoke-real-en-windows.md · impl: docs/impl-59.md
 - #63 el_arnes_no_afirma_lo_que_no_puede_comprobar -> done 2026-08-27 · spec: docs/spec-feature-63-el-arnes-no-afirma-lo-que-no-puede-comprobar.md · impl: docs/impl-63.md
+- #64 el_arnes_no_promete_enforcement_que_no_hace -> done 2026-08-30 · spec: docs/spec-feature-64-el-arnes-no-promete-enforcement-que-no-hace.md · impl: docs/impl-64.md
