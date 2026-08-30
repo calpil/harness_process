@@ -1,4 +1,5 @@
 # Review de la feature #66 - el stop hook no entra en bucle
+Revisado: approved · 2026-08-30T23:57:04Z · estampado por `harness revision --veredicto`
 
 **Veredicto global: approved** (quinta vuelta). Approved aca significa una sola
 cosa, y conviene decirla sin adorno: **no se pudo romper con los casos probados**.
