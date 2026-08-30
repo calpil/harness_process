@@ -30,6 +30,20 @@ estados muy distintos.
 2. **Busca la primera violacion existente y pagala en la misma feature.** No la
    dejes para "un backlog de limpieza": una regla que se estrena con una deuda
    sin pagar es una recomendacion.
+
+   **Pero hay deudas que no se pueden pagar honestamente, y ahi lo que se paga
+   es el CORTE** (feature #64). `require_review` se estreno con 15 cierres sin
+   review (#38-43, #53-55, #57, #59-63). Reconstruirlos habria sido escribir 15
+   veredictos sobre codigo ya integrado y funcionando: un review es "intentar
+   ROMPER" (`roles/reviewer.md:6`), y lo que se escribe despues de que todo
+   anduvo no rompe nada — llena el casillero, que es peor que dejarlo vacio
+   porque despues se cita como si fuera revision. Lo que se hizo en su lugar:
+   documentar el corte con los ids, las dos fechas (ultimo con review #46
+   2026-08-22, primero sin #57 2026-08-26) y el argumento, en `UPDATING.md`.
+   El corte pretende separar: **¿pagar la deuda produce la senal que la regla
+   busca, o solo el artefacto?** Si solo el artefacto, la deuda se declara, no
+   se paga. Y se declara con la lista completa: un corte sin los ids es una
+   amnistia.
 3. **No declares excepcion en la primera aplicacion.** Es la decision mas cara de
    toda la feature. La primera excepcion no exime un caso: crea el precedente que
    van a citar todas las siguientes. Si el caso realmente merece excepcion, lo
@@ -68,6 +82,29 @@ estados muy distintos.
 - **Ejemplos inventados.** Una escalera con ejemplos hipoteticos es una lista que
   nadie sabe aplicar. Cada peldano con un caso real del repo, citando su feature,
   se usa; sin eso, se lee una vez.
+
+## Cuando la regla te rechaza a vos, ya funciono
+
+En la #64 la prediccion de esta leccion se cumplio dos veces en la misma tarde, y
+las dos veces el rechazo fue la evidencia de que la regla servia:
+
+1. Al encender `require_review` en el molde, el E2E de PRD de
+   `tests/setup_smoke.sh` **dejo de pasar**: cerraba `done` sin review. Era
+   correcto que lo rechazara. Se pago haciendo que el test pase por el flujo
+   completo, y de paso quedo ejercitado el review de punta a punta sobre una
+   instalacion real en vez de sobre un fixture.
+2. El **reviewer adversarial de la propia feature la rechazo**
+   (`changes_requested`) con ocho bloqueantes, incluido el mas caro: el spec
+   afirmaba que el sello era "imposible de fabricar escribiendo el archivo a
+   mano" y **no era cierto** — la linea se puede tipear. La feature se llamaba
+   "el arnes no promete enforcement que no hace" y su propio spec prometia de
+   mas. El arreglo no fue bajar la promesa: fue subir el enforcement (el gate
+   re-verifica la cobertura por AC, que es lo que no se fabrica en cinco
+   segundos) Y corregir la afirmacion.
+
+Corolario para la proxima: **la regla se prueba contra la feature que la
+introduce, con un revisor que no sea el que la escribio.** Si el autor firma su
+propia regla, lo unico que se probo es que sabe escribirla.
 
 ## Verificacion
 

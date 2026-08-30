@@ -157,6 +157,25 @@ evidencia o test) ademas del veredicto global:
 - `changes_requested` (con lista accionable)
 - `blocked` (con causa y desbloqueo propuesto)
 
+**El veredicto no vale escrito: hay que REGISTRARLO** (feature #64). Cuando
+terminaste, corre:
+
+```
+sh "harness_process/harness_cli" revision --feature <id> --veredicto approved
+```
+
+El binario estampa la linea `Revisado: <veredicto> · <fecha> · ...` y deja el
+rastro en `progress/history.md`. Con la regla `require_review` activa,
+`close --status done` lee **unicamente** esa linea: un `Veredicto: approved`
+tipeado a mano no cuenta como revision, por mas que lo diga el archivo.
+
+Y el comando se niega —sin escribir nada— si tu veredicto no responde por
+**cada AC-n del spec** con una fila que lo nombre y **cite `archivo:linea`**.
+Es la misma exigencia que ya te pide esta guia ("citá, no pegues"), ahora
+comprobable: una fila sin cita es una afirmacion, no una verificacion. Si un AC
+no se pudo verificar, decilo en su fila y el veredicto global es
+`changes_requested` o `blocked` — no lo dejes sin fila.
+
 ## Reglas
 
 - Solo lectura mas ejecucion de validaciones. No edites codigo fuente.

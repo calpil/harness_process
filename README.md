@@ -900,6 +900,75 @@ corriendo esto sobre su propio spec:
 El reporte muestra el comando de cada AC precisamente para que el reviewer pueda
 juzgar si prueba algo.
 
+## revision: el veredicto que el cierre puede leer (feature #64)
+
+`docs/review-<id>.md` existe desde la primera feature, pero cerrar nunca lo miro:
+40 de los 55 cierres `done` tienen review, los otros 15 no, y nadie se entero. La
+regla `require_review` lo convierte en el quinto gate de `close --status done`:
+
+```json
+{ "rules": { "require_review": true } }
+```
+
+Con la regla activa, cerrar como `done` exige que `docs/review-<id>.md` **exista**,
+lleve el **sello del binario** y que ese sello diga **`approved`**; si no, exit 2
+con un mensaje `[GATE]` que nombra cual de las tres cosas falta. Sin la regla
+(ausente o en `false`, el default de las cinco) cerrar se comporta exactamente
+como siempre. El molde de `feature_list.json` la trae en `true`, y los
+instaladores AGREGAN al `rules` de un proyecto ya instalado las claves que le
+falten **sin pisar jamas un valor existente**: si la apagaste, sigue apagada.
+
+El sello lo estampa el unico comando que escribe en el review:
+
+```bash
+sh harness_cli revision --feature 64                       # el paquete de revision: SOLO lee
+sh harness_cli revision --feature 64 --veredicto approved  # lo unico que escribe
+```
+
+La linea canonica queda tras el titulo del review, donde se lee sin scrollear:
+
+```
+Revisado: approved · 2026-08-28T13:05:41Z · estampado por `harness revision --veredicto`
+```
+
+Los tres veredictos son los de `roles/reviewer.md` (`approved`,
+`changes_requested`, `blocked`), estampar es idempotente (reemplaza el sello
+anterior si ya habia) y deja el rastro `revision feature #64 veredicto=approved`
+en `progress/history.md`.
+
+### Por que el sello lo escribe el binario y no el reviewer
+
+Porque el gate **no parsea prosa**, y no la parsea porque los reviews reales no
+se dejan: de los 40 que ya existen, 7 no tienen ninguna linea parseable, y
+`docs/review-3.md:3` dice
+
+> Veredicto: approved (implementación) — cierre BLOQUEADO por una acción humana
+> pendiente (aprobación del spec por el usuario).
+
+Un `contains("approved")` habria aprobado el cierre de un review que dice que el
+cierre esta bloqueado. Por eso el gate lee **unicamente** la linea que estampo el
+binario: un `Veredicto: approved` tipeado a mano no cuenta como revision.
+
+### Una fila por AC, y con cita
+
+`revision --veredicto` se niega —sin escribir nada— si el review no responde por
+**cada AC-n que declara el spec** con una fila que lo nombre y cite
+`archivo:linea`. La lista sale del SPEC, no del review: si saliera del review, un
+review vacio estaria "completo". Y el corte es la **cita**, porque una fila sin
+`archivo:linea` es una afirmacion, y una afirmacion es justo lo que un review de
+cinco segundos sabe escribir.
+
+Lo que el gate **no** hace: comparar el review contra `docs/impl-<id>.md`. El
+ciclo normal es reviewer pide cambios -> implementer corrige, asi que el impl
+queda mas nuevo casi siempre; esa regla bloquearia para siempre con una unica
+salida barata, `touch`, y lo que entrenaria es el `touch`.
+
+Los 15 cierres viejos sin review **no se reconstruyen**: la regla aplica de la
+#64 en adelante. Un review escrito despues de que el codigo se integro y funciona
+no intenta romper nada, solo llena el casillero, y `roles/reviewer.md` define el
+rol como exactamente lo contrario, con un titulo de seccion: "Tu trabajo es
+intentar ROMPER, no confirmar".
+
 ## journey: el mapa de lo aprendido (feature #22)
 
 Los tres almacenes juntos, con sus enlaces y —lo que de verdad importa— **sus

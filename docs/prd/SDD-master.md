@@ -194,12 +194,43 @@ el detalle a su propio ADR y enlazalo aqui.>
 ## 5. Datos
 
 **Los estados de una feature** (`feature_list.json`). Son cinco y significan
-cosas distintas: `pending` (sin empezar, `next` la ofrece), `in_progress` (una
-sola a la vez), `done` (hecha, con spec aprobado y su evidencia), `blocked`
-(trabada por algo externo) y `superseded` (el trabajo se hizo en OTRA feature,
-que se nombra en `superseded_by` y se valida al cerrar). Solo `done` pasa por los
-cuatro gates de cierre; `superseded` no cuenta ni en el numerador ni en el
-denominador de `prd tree`, porque no es trabajo hecho ni pendiente.
+cosas distintas: `pending` (sin empezar, `next` la ofrece), `in_progress`
+(pueden convivir varias, cada una en su worktree, desde la #47), `done` (hecha,
+con spec aprobado y su evidencia), `blocked` (trabada por algo externo) y
+`superseded` (el trabajo se hizo en OTRA feature, que se nombra en
+`superseded_by` y se valida al cerrar). Solo `done` pasa por los cinco gates de
+cierre; `superseded` no cuenta ni en el numerador ni en el denominador de
+`prd tree`, porque no es trabajo hecho ni pendiente.
+
+**El quinto gate: el veredicto del reviewer** (feature #64). `require_review`
+exige que `docs/review-<id>.md` lleve la linea que estampa
+`revision --veredicto`, y que esa linea diga `approved`. La decision estructural
+es CUAL es la prueba: el gate no parsea la prosa del review, porque la escribe el
+mismo agente que quiere cerrar —y ya habia un `Veredicto: approved (implementacion)
+- cierre BLOQUEADO` en disco, que un `contains("approved")` habria aprobado. Dos
+Y conviene ser exacto sobre cuanto aguanta cada barrera, porque la primera
+version de este texto prometia de mas y el reviewer lo desmintio con un `printf`
+de cuatro lineas:
+
+- **El sello** lo escribe solo el binario, pero es texto: un agente decidido lo
+  tipea. **Filtra el descuido, no la mala fe.**
+- **La cobertura por AC** es la que aguanta: una fila por cada AC-n del spec,
+  cada una citando `archivo:linea` **que resuelve** (el archivo existe y tiene
+  esa linea), verificada al estampar Y de nuevo en el cierre. Eso sube el costo
+  de fabricar un review falso de cinco segundos a leer el codigo. No lo vuelve
+  imposible: lo que el arnes NO comprueba es que la cita sea PERTINENTE al AC.
+
+El corolario general, que vale mas que el mecanismo: **una barrera se documenta
+por lo que filtra, no por lo que uno quisiera que filtrara.** Un gate descrito de
+mas es un gate en el que se confia de mas.
+
+**Y una regla que no gatea no se queda en `rules`** (feature #64).
+`require_tests_to_close`, `require_impact_check` y `one_feature_at_a_time`
+estuvieron en `true` sin que ningun codigo las leyera —ni en Rust ni en el
+Python previo al port: nacieron decorativas— y la tercera ademas contradecia a
+`start.rs` desde la #47. Se borraron del molde. El corolario para el futuro: una
+clave en `rules` es una promesa de enforcement, y el arnes no promete lo que no
+hace.
 
 - Entidades principales y su dueno: <...>
 - Migraciones: <como se aplican y como se revierten>

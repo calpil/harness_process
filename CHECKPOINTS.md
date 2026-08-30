@@ -19,9 +19,16 @@ Antes de cerrar una tarea:
 - [ ] Si existe `graphify-out/graph.json`, se consulto `graphify query`.
 - [ ] Tests relevantes ejecutados por cada microservicio afectado.
 - [ ] Frontends validados con `validate_ui.sh <url>` cuando aplique.
-- [ ] `docs/review-<feature>.md` contiene veredicto del reviewer.
+- [ ] **Veredicto del reviewer sellado**: `docs/review-<feature>.md` lleva la
+  linea que estampa el binario con
+  `sh harness_cli revision --feature <id> --veredicto approved`. Con la regla
+  `require_review` activa el cierre lo exige. Un `Veredicto: approved` tipeado a
+  mano NO cuenta: el gate no lee prosa, y ya hubo reviews que decian "approved"
+  y a la vez "cierre BLOQUEADO".
 - [ ] **Evidencia por AC-n**: `docs/impl-<feature>.md` y `docs/review-<feature>.md`
   mapean cada AC-n del spec a su evidencia/test; el veredicto lista AC-1..AC-n.
+  `revision --veredicto` se niega a sellar si algun AC-n del spec no tiene fila
+  propia que lo nombre y cite `archivo:linea`.
 - [ ] **Documentos al dia**: el PRD de origen, sus padres, `docs/prd/SDD-master.md`
       y `docs/architecture.md` reflejan lo implementado. Se siembra la propuesta
       con `sh harness_cli prd propose --feature <id>`, se contesta cada bloque

@@ -358,6 +358,355 @@ fn git_lineas(dir: &Path, args: &[&str]) -> Vec<String> {
         .collect()
 }
 
+
+// ===========================================================================
+// El veredicto del reviewer (feature #64)
+// ===========================================================================
+//
+// La promesa: `close --status done` no puede decir "revisado" sin que alguien
+// haya revisado. Dos piezas la sostienen, y ninguna es disciplina:
+//
+// 1. **El sello lo escribe el binario.** El gate lee UNICAMENTE la linea
+//    `Revisado:` que estampa `revision --veredicto`; la prosa del archivo
+//    —incluido un `Veredicto: approved` tipeado a mano— no cuenta. De los 40
+//    reviews que ya existen, 7 no son parseables y `docs/review-3.md:3` dice
+//    "approved" y "cierre BLOQUEADO" en la misma linea: parsear prosa de un
+//    agente es leer, no verificar.
+// 2. **La cobertura por AC.** Estampar exige una fila por cada AC-n que declara
+//    el SPEC (no el review), y cada fila tiene que citar `archivo:linea`. Un
+//    review escrito en cinco segundos no puede citar lineas que existan.
+//
+// Lo que NO hace, y por que: no compara mtime contra `docs/impl-<id>.md`.
+// `documentos.rs:23-26` ya rechazo esa comparacion por deadlock, y aca el
+// deadlock es el ciclo normal (el reviewer pide cambios -> el implementer
+// corrige -> el impl queda mas nuevo -> el gate bloquea para siempre), con una
+// unica salida barata: `touch`. La regla entrenaria el `touch`. Ademas no
+// detecta nada: de los 40 pares existentes, cero tienen el review mas viejo.
+
+/// Prefijo de la linea que estampa el binario. Es lo UNICO que el gate lee.
+pub const SELLO_REVIEW: &str = "Revisado:";
+
+/// Los tres veredictos de `roles/reviewer.md`.
+pub const VEREDICTOS: [&str; 3] = ["approved", "changes_requested", "blocked"];
+
+/// Lee `rules.require_review` (default false: la regla nace apagada, como las
+/// otras cuatro, para no romper instalaciones existentes).
+pub fn require_review(data: &Value) -> bool {
+    data.get("rules")
+        .and_then(|r| r.get("require_review"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// `docs/review-<id>.md`, relativo (para los mensajes).
+pub fn review_rel(fid: &str) -> String {
+    format!("docs/review-{fid}.md")
+}
+
+/// `docs/review-<id>.md`, absoluto.
+pub fn review_path(paths: &HarnessPaths, fid: &str) -> std::path::PathBuf {
+    paths.plans.join(format!("review-{fid}.md"))
+}
+
+/// El veredicto ESTAMPADO, o `None` si el archivo no lleva sello del binario.
+///
+/// Deliberadamente NO mira ninguna linea `Veredicto:` en prosa (AC-2).
+pub fn veredicto_estampado(texto: &str) -> Option<String> {
+    for linea in lineas_fuera_de_bloque(texto) {
+        let Some(resto) = linea.trim_start().strip_prefix(SELLO_REVIEW) else {
+            continue;
+        };
+        let v = resto.trim().split(['·', ' ']).find(|p| !p.is_empty())?;
+        if VEREDICTOS.contains(&v) {
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
+/// Las lineas que NO estan dentro de un bloque ```.
+///
+/// `verificacion::parsear` (verificacion.rs:157-164) aprendio esto en la #23: un
+/// documento que EXPLICA un formato lo cita dentro de un bloque, y el parser se
+/// lo comia como si fuera el formato real. Aca es peor: el propio
+/// `docs/review-64.md` cita la linea del sello para documentarla, y sin este
+/// filtro esa cita valdria como veredicto.
+pub fn lineas_fuera_de_bloque(texto: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    // Se recuerda CUAL fence abrio: un bloque ``` que contiene una linea ~~~
+    // (por ejemplo, un review ajeno citado entero) cerraba el bloque donde
+    // CommonMark no lo cierra, y un sello que estaba DENTRO pasaba a contar.
+    let mut abierto_con: Option<&str> = None;
+    for linea in texto.lines() {
+        let t = linea.trim_start();
+        let fence = if t.starts_with("```") {
+            Some("```")
+        } else if t.starts_with("~~~") {
+            Some("~~~")
+        } else {
+            None
+        };
+        match (abierto_con, fence) {
+            (None, Some(f)) => {
+                abierto_con = Some(f);
+                continue;
+            }
+            (Some(abierto), Some(f)) if abierto == f => {
+                abierto_con = None;
+                continue;
+            }
+            _ => {}
+        }
+        if abierto_con.is_none() {
+            out.push(linea);
+        }
+    }
+    out
+}
+
+/// La linea canonica del sello. La escribe SOLO el binario.
+pub fn linea_sello(veredicto: &str, stamp: &str) -> String {
+    format!("{SELLO_REVIEW} {veredicto} · {stamp} · estampado por `harness revision --veredicto`")
+}
+
+/// `AC-1` no lo menciona una fila de `AC-12`: el match es de token completo.
+///
+/// Sin esto, un spec de 12 AC daba por cubierto el AC-1 con la fila del AC-10,
+/// que es un gate que aprueba lo que no reviso.
+fn menciona(linea: &str, ac: &str) -> bool {
+    let mut desde = 0;
+    while let Some(i) = linea[desde..].find(ac) {
+        let fin = desde + i + ac.len();
+        if !linea[fin..].starts_with(|c: char| c.is_ascii_digit()) {
+            return true;
+        }
+        desde = fin;
+    }
+    false
+}
+
+/// Las raices contra las que puede resolver una cita del review.
+///
+/// La tercera es la que importa y la que faltaba: cuando la feature vive en un
+/// worktree, el review cita archivos DEL WORKTREE (`rust/src/revision.rs:602`),
+/// pero `root`/`repo_root` apuntan al checkout principal, donde ese archivo
+/// existe con otro contenido y la linea 602 no existe. Es el mismo defecto de
+/// worktree-vs-raiz que arreglaron la #60 y la #63, y aparecio la primera vez
+/// que esta feature se uso de verdad: su propio review quedo rechazado con seis
+/// AC "sin cita que resuelva", citando archivos que si estaban ahi.
+/// `paths.plans` es el `docs/` de la feature, asi que su padre es esa raiz.
+pub fn raices_de_citas(paths: &HarnessPaths) -> Vec<&Path> {
+    raices_desde(&paths.plans, &paths.repo_root, &paths.root)
+}
+
+/// La parte pura, para poder testearla sin armar un `HarnessPaths` entero.
+pub fn raices_desde<'a>(plans: &'a Path, repo_root: &'a Path, root: &'a Path) -> Vec<&'a Path> {
+    let mut out: Vec<&Path> = Vec::new();
+    if let Some(raiz_feature) = plans.parent() {
+        out.push(raiz_feature);
+    }
+    for r in [repo_root, root] {
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+/// Los candidatos a cita `archivo:linea` de una fila, con su numero.
+fn citas_de(linea: &str) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    for token in linea.split(|c: char| c.is_whitespace() || c == '|' || c == '`') {
+        let Some((ruta, num)) = token.rsplit_once(':') else {
+            continue;
+        };
+        let num: String = num.chars().take_while(char::is_ascii_digit).collect();
+        let Ok(n) = num.parse::<usize>() else { continue };
+        let ruta = ruta.trim_matches(|c: char| c == '(' || c == ')' || c == ',' || c == '`');
+        if n > 0 && !ruta.is_empty() {
+            out.push((ruta.to_string(), n));
+        }
+    }
+    out
+}
+
+/// ¿La cita RESUELVE? El archivo existe bajo `root` y tiene esa linea.
+///
+/// Sin esto, `inventado.rs:99999` valia como evidencia y `3.14:15` matcheaba el
+/// patron de cita: el gate comprobaba la FORMA de la cita, no que apuntara a
+/// algo. Lo encontro el reviewer de la #64 y el usuario decidio cerrarlo aca.
+fn cita_resuelve(raices: &[&Path], ruta: &str, linea: usize) -> bool {
+    if ruta.contains("..") || Path::new(ruta).is_absolute() {
+        return false;
+    }
+    // Se prueban las dos raices porque una cita valida puede ser relativa a la
+    // raiz del repo (`rust/src/revision.rs:490`) o a la del arnes cuando esta
+    // instalado como subdirectorio.
+    raices.iter().any(|r| {
+        let candidato = r.join(ruta);
+        // `is_file()` antes de abrir: un FIFO (`mkfifo`) dejaba el proceso
+        // colgado para siempre esperando datos que nadie escribe, y un symlink a
+        // /dev/zero agotaba la memoria. Un archivo regular es lo unico que puede
+        // ser evidencia.
+        if !std::fs::metadata(&candidato).is_ok_and(|m| m.is_file()) {
+            return false;
+        }
+        // Se cuentan lineas SIN cargar el archivo entero: una cita a un blob de
+        // 300 MB no puede costar 300 MB de RSS por fila del review.
+        let Ok(f) = std::fs::File::open(&candidato) else {
+            return false;
+        };
+        // Se cuentan saltos de linea por BYTES, con tope: `lines()` materializa
+        // cada linea entera, asi que un blob de 200 MB en UNA sola linea costaba
+        // 211 MB de RSS aunque solo hiciera falta saber si existe la linea 1.
+        const TOPE: u64 = 8 * 1024 * 1024;
+        let mut leidos = 0u64;
+        let mut saltos = 0usize;
+        let mut buf = [0u8; 64 * 1024];
+        let mut r = std::io::BufReader::new(f);
+        loop {
+            let Ok(n) = std::io::Read::read(&mut r, &mut buf) else {
+                return false;
+            };
+            if n == 0 {
+                // Sin salto final, la ultima linea cuenta igual.
+                return saltos + 1 >= linea;
+            }
+            saltos += buf[..n].iter().filter(|b| **b == b'\n').count();
+            if saltos >= linea {
+                return true;
+            }
+            leidos += n as u64;
+            if leidos > TOPE {
+                return false;
+            }
+        }
+    })
+}
+
+/// ¿Una fila responde por este AC con una cita que resuelve?
+///
+/// El corte es la CITA: sin un `archivo:linea` que exista de verdad, la fila es
+/// una afirmacion, y una afirmacion es justo lo que un review de cinco segundos
+/// sabe escribir.
+fn fila_responde(raices: &[&Path], linea: &str, ac: &str) -> bool {
+    menciona(linea, ac)
+        && citas_de(linea)
+            .iter()
+            .any(|(ruta, n)| cita_resuelve(raices, ruta, *n))
+}
+
+/// Los AC del SPEC que el review no responde con una cita. Vacio = cubierto.
+///
+/// La lista sale del spec, no del review: si saliera del review, un review
+/// vacio estaria "completo".
+pub fn acs_sin_fila(raices: &[&Path], spec: &str, review: &str) -> Vec<String> {
+    let filas: Vec<&str> = lineas_fuera_de_bloque(review);
+    crate::verificacion::parsear(spec)
+        .into_iter()
+        .map(|v| v.ac)
+        .filter(|ac| !filas.iter().any(|l| fila_responde(raices, l, ac)))
+        .collect()
+}
+
+/// Gate de cierre: con la regla activa, `done` exige un review estampado y
+/// `approved`. Solo LEE; estampar es `revision --veredicto`.
+pub fn gate(
+    paths: &HarnessPaths,
+    data: &Value,
+    status: &str,
+    feature: &serde_json::Map<String, Value>,
+    fid: &str,
+) -> Result<(), crate::exit::Exit> {
+    use crate::exit::Exit;
+    if status != "done" || !require_review(data) {
+        return Ok(());
+    }
+    let rel = review_rel(fid);
+    let Ok(texto) = std::fs::read_to_string(review_path(paths, fid)) else {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "[GATE] Falta el veredicto del reviewer: {rel}.\n    \
+                 La regla require_review esta activa: cerrar como done exige que\n    \
+                 alguien haya revisado, con una fila por cada AC-n del spec.\n    \
+                 Arranca por el paquete: sh harness_cli revision --feature {fid}\n    \
+                 y registra el veredicto: sh harness_cli revision --feature {fid} --veredicto approved"
+            )),
+        });
+    };
+    let Some(veredicto) = veredicto_estampado(&texto) else {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "[GATE] {rel} no lleva el sello del arnes.\n    \
+                 El gate lee unicamente la linea `{SELLO_REVIEW} ...` que estampa el\n    \
+                 binario; un `Veredicto:` escrito a mano no cuenta como revision.\n    \
+                 Registralo con: sh harness_cli revision --feature {fid} --veredicto approved"
+            )),
+        });
+    };
+    // El sello dice QUE se decidio; la cobertura dice que se MIRO. El gate
+    // re-verifica las dos, y no le alcanza con la primera: la linea del sello es
+    // texto y un agente decidido la puede tipear (lo encontro el reviewer de
+    // esta misma feature). Lo que no puede fabricar en cinco segundos es una
+    // fila por cada AC del spec con su cita. Por eso la barrera que sostiene la
+    // promesa es esta, y se comprueba de nuevo aca aunque `revision --veredicto`
+    // ya la haya comprobado al estampar.
+    // La misma guarda que `estampar` (commands/revision.rs:84): un spec ilegible
+    // o sin AC no es "todo cubierto", es que no hay contra que medir. Sin esto,
+    // `unwrap_or_default()` + 0 AC = 0 faltantes, y el cierre pasaba con el
+    // sello solo — o sea que B1 se reabria por otra puerta.
+    let spec_path = crate::spec::spec_path(paths, feature);
+    let Ok(spec) = std::fs::read_to_string(&spec_path) else {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "[GATE] No se pudo leer el spec de la feature #{fid}: {}.\n    \
+                 Sin spec no hay AC contra que medir el review, asi que el\n    \
+                 veredicto no se puede comprobar.",
+                spec_path.display()
+            )),
+        });
+    };
+    if crate::verificacion::parsear(&spec).is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "[GATE] El spec de la feature #{fid} no declara ningun AC-n.\n    \
+                 Sin AC, comprobar la cobertura del review no comprueba nada."
+            )),
+        });
+    }
+    let faltan = acs_sin_fila(&raices_de_citas(paths), &spec, &texto);
+    if !faltan.is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "[GATE] {rel} no responde por {} AC del spec: {}.\n    \
+                 Cada AC-n necesita una fila que lo nombre y cite `archivo:linea`;\n    \
+                 una fila sin cita es una afirmacion, no una verificacion.\n    \
+                 Completa el review y volve a registrarlo:\n      \
+                 sh harness_cli revision --feature {fid} --veredicto approved",
+                faltan.len(),
+                faltan.join(", ")
+            )),
+        });
+    }
+    if veredicto != "approved" {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!(
+                "[GATE] El veredicto de {rel} es `{veredicto}`, no `approved`.\n    \
+                 Un cierre `done` exige un review aprobado. Si el trabajo quedo trabado,\n    \
+                 cerra con --status blocked; si lo absorbio otra feature, con\n    \
+                 --status superseded --absorbida-por <id>."
+            )),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -504,4 +853,122 @@ mod tests {
         assert_eq!(j["protegidas"][0], "docs/prd/PRD-master.md");
         assert!(j["tamano"]["tokens_estimados"].as_u64().unwrap_or(0) > 0);
     }
+
+    // ---- El veredicto del reviewer (feature #64) ----------------------------
+
+    #[test]
+    fn require_review_default_false() {
+        // AC-6: una instalacion vieja sin la clave no se rompe.
+        assert!(!require_review(&json!({})));
+        assert!(!require_review(&json!({"rules": {}})));
+        assert!(!require_review(&json!({"rules": {"require_review": false}})));
+        assert!(require_review(&json!({"rules": {"require_review": true}})));
+    }
+
+    #[test]
+    fn gate_review_ignora_prosa() {
+        // AC-2: la prosa no cuenta, por mas que diga approved.
+        assert_eq!(veredicto_estampado("Veredicto: approved"), None);
+        assert_eq!(veredicto_estampado("**Veredicto: APROBADO para cierre.**"), None);
+        // El falso positivo real de docs/review-3.md:3.
+        assert_eq!(
+            veredicto_estampado("Veredicto: approved (implementacion) - cierre BLOQUEADO"),
+            None
+        );
+        // Solo el sello del binario cuenta.
+        let sello = linea_sello("approved", "2026-08-28T00:00:00Z");
+        assert_eq!(veredicto_estampado(&sello), Some("approved".into()));
+    }
+
+    #[test]
+    fn gate_review_solo_approved() {
+        // AC-5: el gate distingue los tres veredictos.
+        for v in ["approved", "changes_requested", "blocked"] {
+            let t = linea_sello(v, "2026-08-28T00:00:00Z");
+            assert_eq!(veredicto_estampado(&t), Some(v.to_string()), "veredicto {v}");
+        }
+        // Un veredicto inventado no se acepta ni aunque venga con el prefijo.
+        assert_eq!(veredicto_estampado("Revisado: aprobadisimo · 2026"), None);
+    }
+
+    /// Repo de mentira con dos archivos reales, para que las citas RESUELVAN.
+    fn repo_de_prueba() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("close.rs"), "a\n".repeat(200)).unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/revision.rs"), "b\n".repeat(500)).unwrap();
+        dir
+    }
+
+    #[test]
+    fn veredicto_exige_cobertura_de_ac() {
+        // AC-3: la lista sale del SPEC, no del review.
+        let dir = repo_de_prueba();
+        let root = dir.path();
+        let spec = "- AC-1: Given a, When b, Then c.\n- AC-2: Given d, When e, Then f.\n";
+
+        // Review vacio: faltan los dos (si saliera del review, estaria "completo").
+        assert_eq!(acs_sin_fila(&[root], spec, ""), vec!["AC-1", "AC-2"]);
+
+        // Fila que nombra el AC pero NO cita: no responde.
+        let sin_cita = "| AC-1 | cubierto, anda bien |\n| AC-2 | idem |\n";
+        assert_eq!(acs_sin_fila(&[root], spec, sin_cita), vec!["AC-1", "AC-2"]);
+
+        // Fila con cita que RESUELVE: responde.
+        let con_cita = "| AC-1 | close.rs:101 | cubierto |\n| AC-2 | src/revision.rs:469 | cubierto |\n";
+        assert!(acs_sin_fila(&[root], spec, con_cita).is_empty());
+
+        // Cobertura parcial: nombra solo el que falta.
+        let parcial = "| AC-1 | close.rs:101 | cubierto |\n";
+        assert_eq!(acs_sin_fila(&[root], spec, parcial), vec!["AC-2"]);
+    }
+
+    #[test]
+    fn la_cita_necesita_archivo_y_linea() {
+        let dir = repo_de_prueba();
+        let root = dir.path();
+        // El corte es `algo:N` que RESUELVE: ni el numero suelto ni el archivo solo.
+        assert!(fila_responde(&[root], "| AC-1 | close.rs:101 |", "AC-1"));
+        assert!(!fila_responde(&[root], "| AC-1 | close.rs |", "AC-1"));
+        assert!(!fila_responde(&[root], "| AC-1 | linea 101 |", "AC-1"));
+        // Y no confunde un AC con otro.
+        assert!(!fila_responde(&[root], "| AC-11 | close.rs:101 |", "AC-1"));
+    }
+
+    #[test]
+    fn las_citas_resuelven_contra_la_raiz_de_la_FEATURE_primero() {
+        // El bug que aparecio la primera vez que la feature se uso de verdad:
+        // el review de la #64 citaba `rust/src/revision.rs:602`, que existe en
+        // el worktree (927 lineas) y no en el checkout principal (507). El gate
+        // resolvia contra el principal y rechazaba seis AC con citas correctas.
+        let feature_root = Path::new("/tmp/wt/64-algo");
+        let plans = feature_root.join("docs");
+        let principal = Path::new("/tmp/principal");
+        let raices = raices_desde(&plans, principal, principal);
+        assert_eq!(
+            raices.first().copied(),
+            Some(feature_root),
+            "la raiz de la feature tiene que ir PRIMERO"
+        );
+        // Y no se duplica cuando root == repo_root.
+        assert_eq!(raices.len(), 2);
+    }
+
+    #[test]
+    fn la_cita_tiene_que_apuntar_a_algo_que_existe() {
+        // Lo que encontro el reviewer de la #64: el gate comprobaba la FORMA de
+        // la cita, no que apuntara a algo.
+        let dir = repo_de_prueba();
+        let root = dir.path();
+        // Archivo inexistente.
+        assert!(!fila_responde(&[root], "| AC-1 | inventado.rs:99 |", "AC-1"));
+        // Archivo real, linea que no existe (close.rs tiene 200).
+        assert!(!fila_responde(&[root], "| AC-1 | close.rs:99999 |", "AC-1"));
+        assert!(fila_responde(&[root], "| AC-1 | close.rs:200 |", "AC-1"));
+        // El falso positivo de un numero de version.
+        assert!(!fila_responde(&[root], "| AC-1 | version 3.14:15 |", "AC-1"));
+        // Y no se sale del repo.
+        assert!(!fila_responde(&[root], "| AC-1 | ../../etc/passwd:1 |", "AC-1"));
+    }
+
 }

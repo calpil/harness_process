@@ -167,7 +167,7 @@ modo_superficies() {
 # y el .ps1 usa 132 `Assert-True` sin secciones nombradas—, asi que contar
 # bloques no compara nada. Lo que si compara es la COBERTURA: cada tema que el
 # .sh declara tiene que aparecer, por su palabra clave, en el .ps1.
-TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian"
+TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian migrate-rules|MigrateRules"
 
 modo_smokes() {
     [ -f "$REPO_ROOT/tests/setup_smoke.ps1" ] || { ok "smokes: no hay smoke ps1, nada que comparar"; return; }
@@ -184,6 +184,26 @@ modo_smokes() {
     [ "$asserts_ps1" -ge 20 ] \
         || fail "smokes: el smoke ps1 solo tiene $asserts_ps1 aserciones; ¿quedo atras?"
     ok "smokes: los temas del .sh estan cubiertos en el .ps1 ($asserts_ps1 aserciones)"
+}
+
+# Feature #64: la migracion de `rules` toca el feature_list.json del USUARIO, y
+# tiene que existir en los DOS instaladores. El modo `smokes` no lo detectaba:
+# el reviewer de la #64 borro `Migrate-HarnessRules` entero del .ps1 y los ocho
+# modos seguian en verde, o sea que el criterio del AC-9 no podia fallar.
+modo_migracion_rules() {
+    falta=""
+    grep -q "^migrate_rules() {" "$REPO_ROOT/setup_harness.sh" || falta="$falta setup_harness.sh:migrate_rules"
+    grep -q "migrate_rules feature_list.json" "$REPO_ROOT/setup_harness.sh" \
+        || falta="$falta setup_harness.sh:llamada"
+    if [ -f "$REPO_ROOT/setup_harness.ps1" ]; then
+        grep -q "function Migrate-HarnessRules" "$REPO_ROOT/setup_harness.ps1" \
+            || falta="$falta setup_harness.ps1:Migrate-HarnessRules"
+        grep -q "Migrate-HarnessRules -Target" "$REPO_ROOT/setup_harness.ps1" \
+            || falta="$falta setup_harness.ps1:llamada"
+    fi
+    [ -z "$falta" ] \
+        || fail "migracion-rules: la migracion de reglas no esta en los dos lados:$falta"
+    ok "migracion-rules: definida y llamada en los dos instaladores"
 }
 
 modo_promesa_acotada() {
@@ -228,6 +248,7 @@ case "$MODO" in
     asimetrias-declaradas) modo_asimetrias_declaradas ;;
     superficies)           modo_superficies ;;
     smokes)                modo_smokes ;;
+    migracion-rules)       modo_migracion_rules ;;
     promesa-acotada)       modo_promesa_acotada ;;
     en-harness-check)      modo_en_harness_check ;;
     sin-ps1)               modo_sin_ps1 ;;
@@ -237,10 +258,11 @@ case "$MODO" in
         modo_asimetrias_declaradas
         modo_superficies
         modo_smokes
+        modo_migracion_rules
         modo_promesa_acotada
         modo_en_harness_check
         modo_sin_ps1
-        ok "paridad: los ocho modos verdes"
+        ok "paridad: los nueve modos verdes"
         ;;
     *) fail "modo desconocido: $MODO" ;;
 esac

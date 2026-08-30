@@ -110,6 +110,50 @@ grep -n "Comando:" docs/spec-feature-<id>-*.md   # y leelos: ¿alguno no puede f
 Regla practica: si no podes escribir la corrida que lo pondria en rojo, todavia
 no es un criterio.
 
+## El PIPE que se traga el exit code (feature #64)
+
+El caso mas barato de "comando que no puede fallar", y el mas facil de escribir
+sin darse cuenta:
+
+```
+Comando: `bash tests/setup_smoke.sh 2>&1 | tail -5`
+```
+
+`verify` ejecuta con `sh -c` y **sin `pipefail`** (`verificacion.rs:228`), asi
+que el rc del pipeline es el de `tail`: **siempre 0**. Comprobado:
+`sh -c 'false | tail -5'` sale 0. El smoke podia romperse entero y el AC seguia
+verde. Dos AC de la #64 nacieron asi (`| tail -5` y `| tail -3`) y los encontro
+el reviewer, no el autor.
+
+El agravante es que el pipe se agrega por una razon buena —"que no me llene la
+pantalla"— y el costo no se ve: el reporte queda igual de verde.
+
+Regla corta: **en un `Comando:` el ultimo proceso del pipeline es el que decide
+si el AC esta verde.** Si lo que te importa es el rc del PRIMERO, no uses pipe:
+manda la salida a `/dev/null` (`cmd >/dev/null 2>&1`) o antepone
+`set -o pipefail;`. Y `grep` como ultimo eslabon si sirve, porque `grep` falla
+cuando no encuentra: `... | grep -E "[1-9][0-9]* passed"` es un buen criterio
+justamente porque su rc significa algo.
+
+Al corregir los dos comandos de la #64, uno de ellos **paso a rojo de
+inmediato**: `harness_check.sh` fallaba y el `| tail -3` lo venia tapando. Ese
+rojo era el valor de la correccion.
+
+## El criterio que no se puede correr desde donde se implementa
+
+Corolario del anterior, tambien de la #64. El AC-11 declaraba
+`bash harness_check.sh`, y ese check **no puede pasar dentro de un worktree**:
+su gate de espejo expande `__HREL__` con el basename del directorio —que en un
+worktree es el de la feature, no `harness_process/`— y reporta divergencia falsa
+en los tres roles; ademas `progress/` no existe ahi, asi que ve `current.md`
+vacio. Cuatro problemas, ninguno real.
+
+Un criterio que solo puede pasar en otro directorio no es un criterio: es una
+trampa que invita a marcarlo MANUAL y seguir. Se reemplazo por un comando que
+verifica **lo que el AC promete** (que ningun rol afirme lo que el arnes ya no
+hace, y que los espejos coincidan bajo la expansion correcta), con su prueba del
+rojo: sembrada la afirmacion falsa, rc=1.
+
 ## La herramienta externa que no esta convierte el test en un placebo
 
 Un criterio puede nacer bien y volverse imposible de fallar **sin que nadie lo

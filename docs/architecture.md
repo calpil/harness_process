@@ -180,8 +180,9 @@ no hace falta rollback porque no hay nada escrito que revertir),
 `rollback`), `journey` (solo lectura, `--json`),
 `verify` (`--solo AC-n` / `--json`; el UNICO que ejecuta shell, y por eso exige
 `Estado: approved` y no lo llama ningun hook). Los gates
-duros viven en `advance`, `close` (solo `--status done`: spec aprobado, leccion
-declarada y `require_verify_green`), `check_spec` y
+duros viven en `advance`, `close` (solo `--status done`: spec aprobado,
+`require_verify_green`, `require_review` —el veredicto estampado del reviewer,
+feature #64— y leccion declarada), `check_spec` y
 `harness_check.sh`; `autocheck` y `nudge` son best-effort y NUNCA bloquean
 (tragan errores y re-firman en segundo plano).
 
@@ -270,7 +271,7 @@ Respeta un servidor `atlassian` ya declarado, conserva los demas servidores del
 archivo y no escribe credenciales: la URL del MCP es publica y el OAuth lo hace
 cada CLI contra Atlassian.
 
-## Paquete de revision (feature #51)
+## Paquete de revision y veredicto (features #51 y #64)
 
 `rust/src/revision.rs` + `harness revision --feature <id> [--max-lineas N]
 [--json]`: junta los AC del spec con su estado en `verify-<id>.md`, las filas de
@@ -278,6 +279,41 @@ evidencia de `impl-<id>.md`, los archivos tocados por la feature (incluido lo
 sin commitear y lo no indexado, marcado aparte), el diff acotado y las rutas
 protegidas tocadas. Es de SOLO LECTURA, declara lo que recorta y reporta su
 tamaño en lineas y tokens estimados.
+
+`--veredicto approved|changes_requested|blocked` (feature #64) es lo UNICO que
+escribe: estampa en `docs/review-<id>.md` la linea
+`Revisado: <veredicto> · <fecha> · estampado por ...` justo debajo del titulo
+—idempotente: reemplaza el sello anterior si lo hay— y deja
+`revision feature #<id> veredicto=<v>` en `progress/history.md`. `gate()` es lo
+que lee el cierre: con `rules.require_review` activa (`require_review(data)`,
+default `false`, como las otras reglas, para no romper instalaciones
+existentes), `close --status done` exige ese sello con veredicto `approved` y
+sale con exit code 2 si falta el archivo, si no lleva sello o si el veredicto es
+otro. La promesa "cerrar como done significa que alguien reviso" la sostienen
+dos decisiones, y ninguna es disciplina:
+
+- **El sello lo escribe el binario; la prosa no cuenta.** `veredicto_estampado`
+  lee UNICAMENTE la linea `Revisado:`, y un `Veredicto: approved` tipeado a mano
+  se ignora a proposito. De los 40 reviews que ya existen, 7 no son parseables y
+  `docs/review-3.md:3` dice "Veredicto: approved (implementacion) — cierre
+  BLOQUEADO": un `contains("approved")` aprobaria un review que declara el
+  cierre bloqueado. Parsear prosa de un agente es leer, no verificar.
+- **La cobertura sale del SPEC, no del review.** `acs_sin_fila` es pura y exige
+  una fila por cada AC-n que declara el spec, que lo NOMBRE —`menciona` matchea
+  token completo, para que la fila de `AC-10` no de por cubierto el `AC-1`— y
+  que cite `archivo:linea` (`fila_responde`). Si la lista saliera del review, un
+  review vacio estaria "completo"; y sin la cita, la fila es una afirmacion, que
+  es justo lo que un review escrito en cinco segundos sabe producir. La parte
+  que DECIDE corre antes que la que escribe: si falta un AC, el comando se niega
+  y no toca el archivo.
+
+Lo que NO hace, y por que: no compara el mtime del review contra
+`docs/impl-<id>.md`. `documentos.rs` ya habia rechazado una comparacion de
+frescura por el mismo motivo, y aca el deadlock es el ciclo normal (el reviewer
+pide cambios -> el implementer corrige -> el impl queda mas nuevo -> el gate
+bloquea para siempre) con una unica salida barata: `touch`. La regla entrenaria
+el `touch` y ademas no detecta nada: de los 40 pares existentes, cero tienen el
+review mas viejo que su `impl`.
 
 El modelo y el esfuerzo de los subagentes de Claude salen de la tabla de roles
 de cada instalador (`CLAUDE_MODEL_*` en `setup_harness.sh`, `$claudeModels` en
@@ -486,8 +522,16 @@ Consecuencias vinculantes de esa decision:
 
 - Exit code 2 sobrecargado (plan vs spec stale): el stdout debe distinguir; no se
   cambia la semantica 0/1/2.
-- Instalaciones existentes no reciben la regla `require_spec_approved` (seed
-  solo-si-falta): gate apagado por defecto, opt-in documentado en `UPDATING.md`.
+- Reglas nuevas en instalaciones existentes (resuelto en la feature #64): el
+  seed de `feature_list.json` es solo-si-falta, asi que una regla nueva jamas
+  llegaba a un proyecto ya instalado y habia que pegarla a mano leyendo
+  `UPDATING.md`. Ahora `migrate_rules()` (`setup_harness.sh`) y
+  `Migrate-HarnessRules` (el `.ps1`) AGREGAN las claves de `rules` que falten,
+  tomandolas del molde. El contrato es estrecho porque toca un archivo del
+  USUARIO: jamas pisan un valor existente (una regla apagada sigue apagada), no
+  tocan `features` ni ninguna otra clave, respaldan ANTES de escribir y no
+  escriben si no hay nada que agregar. Sin `python3` el `.sh` no migra: avisa
+  con el remedio en vez de saltearlo en silencio.
 - Paridad sh vs ps1: las superficies PowerShell son un resumen conceptual, no
   copia literal; la ejecucion Windows real se valida cuando hay entorno.
 - Inferencia de layout por huella (feature #10): un `harness_process/` colocado
