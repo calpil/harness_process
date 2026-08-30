@@ -162,6 +162,45 @@ dice que tiene que pasar ("si tu prueba del rojo empieza a fallar, la primera
 hipotesis es que el instrumento dejo de medir"). Se actualizo el `sed` a la
 invocacion nueva.
 
+## Tercera vuelta sobre el AC-11: el codigo original estaba bien
+
+El reviewer volvio a rechazarla, con UN bloqueante, y otra vez fue mi arreglo.
+El recorte de prefijo con el que arregle el falso positivo es **cuadratico** en
+bash. Medido en esta maquina, con la clave al final del payload:
+
+| tamaño | `grep` (original) | recorte de prefijo (mi arreglo) |
+| --- | --- | --- |
+| 200 KB | **0.032 s** | **20.5 s** |
+| 1 MB | 0.05 s | no termino en 2 minutos (~8 min estimados) |
+
+El timeout del hook es 120 s: un payload de 1 MB habria matado el Stop y el turno
+cerraba SIN check. Un hook que no termina es peor que uno que decide mal.
+
+**La secuencia completa de este AC, que es la leccion:**
+
+1. El codigo era `printf | grep -q`. Funcionaba.
+2. Una revision teorizo un EPIPE bajo `pipefail`. **No se reproduce** (medido
+   hasta 8 MB).
+3. Lo cambie igual "por robustez" a un `case`, que introdujo un falso positivo
+   con el `cwd` real del JSON: **la primera vuelta dejo de bloquear**.
+4. Lo arregle recortando el prefijo: **640 veces mas lento**, por encima del
+   timeout.
+5. Volvi al `grep`, con la unica mejora que si valia: here-string en vez de pipe.
+
+Tres vueltas de revision para volver, casi exactamente, a donde estaba. **No se
+endurece codigo que funciona contra un bug que no se pudo reproducir.** Y el AC
+que nace de una hipotesis no verificada arrastra el error hasta el final: cada
+"arreglo" fue una consecuencia del anterior.
+
+La otra mitad del hallazgo: `modo_payload_grande` **inlineaba una copia del
+patron**, asi que cuando el patron real cambio dos veces, el modo siguio verde
+probando codigo muerto — el comando declarado del AC-11 no podia fallar por nada
+que le pasara a `run_stop`. Ahora extrae el matcher REAL del instalador y lo
+ejercita, con dos pruebas del rojo: si cambia la forma, falla por "no se pudo
+extraer"; si cambia el regex dejando la forma, falla nombrando el payload exacto
+(`flag=1 esperaba=0 con: {"stop_hook_active":false,"cwd":".../truenorth"}`). Y
+mide el tiempo: 200 KB en menos de 5 s o falla.
+
 ## Lo que NO se hizo, y por que
 
 - **La linea de base de suciedad por sesion** (que el guard solo cuente lo que

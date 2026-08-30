@@ -123,26 +123,55 @@ modo_estado_degrada() {
 }
 
 modo_payload_grande() {
-    # AC-11: la deteccion de stop_hook_active no depende del tamaño del payload.
-    # OJO (medido 2026-08-30): la premisa original de este AC —que
-    # `printf | grep -q` bajo pipefail devuelve el EPIPE de printf— NO se pudo
-    # reproducir en bash de macOS ni con 8 MB. El `case` se usa igual porque es
-    # mas simple y no depende del buffer del pipe, pero esto es robustez, no la
-    # correccion de un bug observado.
-    big="$(head -c 1000000 /dev/zero | tr '\0' 'x')"
-    payload="{\"stop_hook_active\":true,\"pad\":\"$big\"}"
-    case "$payload" in
-        *'"stop_hook_active"'*[Tt]rue*) : ;;
-        *) fail "no detecto stop_hook_active en un payload de 1 MB" ;;
-    esac
-    chico='{"stop_hook_active":false}'
-    case "$chico" in
-        *'"stop_hook_active"'*[Tt]rue*) fail "detecto true donde el JSON dice false" ;;
-        *) : ;;
-    esac
-    ok "payload-grande: la deteccion no depende del tamaño"
-}
+    # AC-11. Este modo INLINEABA una copia del patron, asi que verificaba el
+    # instrumento adyacente: cuando el patron de `run_stop` cambio (dos veces),
+    # el modo siguio verde probando codigo muerto. Ahora extrae el matcher REAL
+    # del instalador y lo ejercita; si `run_stop` cambia, esto lo acompaña o se
+    # rompe ruidosamente, que es lo que queremos.
+    matcher="$TMP_ROOT/matcher.sh"
+    awk '/^run_stop\(\) \{/,/^\}/' "$REPO_ROOT/setup_harness.sh" \
+        | sed -n '/if grep -qE/,/^    fi$/p' > "$matcher"
+    grep -q 'stop_hook_active' "$matcher" \
+        || fail "payload-grande: no se pudo extraer el matcher de run_stop; ¿cambio su forma?"
 
+    probar() {
+        stop_input="$1"
+        HARNESS_STOP_HOOK_ACTIVE=""
+        # shellcheck disable=SC1090
+        . "$matcher"
+        [ "$HARNESS_STOP_HOOK_ACTIVE" = "$2" ] \
+            || fail "payload-grande: flag=$HARNESS_STOP_HOOK_ACTIVE esperaba=$2 con: $(printf '%.60s' "$1")"
+    }
+
+    # Los cuatro falsos positivos que costaron una vuelta de revision: el JSON
+    # real del Stop trae `cwd`, y un `case` que aceptaba cualquier `true`
+    # posterior a la clave se comia la primera vuelta del agente.
+    probar '{"stop_hook_active":false,"cwd":"/Users/alan/truenorth"}' 0
+    probar '{"stop_hook_active":false,"note":"construed"}' 0
+    probar '{"stop_hook_active":false,"verbose":true}' 0
+    probar '{"stop_hook_active":false,"msg":"True story"}' 0
+    probar '{"stop_hook_activeX":true}' 0
+    probar '{"other":true,"stop_hook_active":false}' 0
+    probar '{"session_id":"a"}' 0
+    probar '' 0
+    probar '{"stop_hook_active":true,"cwd":"/Users/alan/truenorth"}' 1
+    probar '{"stop_hook_active": true}' 1
+    probar '{"stop_hook_active" : true}' 1
+    probar '{"stop_hook_active":True}' 1
+
+    # Y que no dependa del tamaño NI se vuelva lento: el arreglo intermedio
+    # (recorte de prefijo, cuadratico en bash) tardaba 20 s con 200 KB y ~8 min
+    # con 1 MB, contra un timeout de hook de 120 s. Un hook que no termina es
+    # peor que uno que decide mal.
+    pad="$(head -c 204800 /dev/zero | tr '\0' 'x')"
+    inicio="$(date +%s)"
+    probar "{\"pad\":\"$pad\",\"stop_hook_active\":true}" 1
+    probar "{\"pad\":\"$pad\",\"stop_hook_active\":false}" 0
+    fin="$(date +%s)"
+    [ "$((fin - inicio))" -le 5 ] \
+        || fail "payload-grande: 200 KB tardo $((fin - inicio))s; el matcher volvio a ser no-lineal"
+    ok "payload-grande: adyacencia clave-valor, sin falsos positivos y lineal (200 KB en $((fin - inicio))s)"
+}
 modo_a_mano_no_degrada() {
     # La promesa del spec: correr `bash harness_check.sh` a mano NUNCA degrada.
     # Sin evento no hay racha que contar, y el que lo corre quiere el veredicto.

@@ -1381,37 +1381,28 @@ run_stop() {
     # (feature #52).
     stop_input=""
     [ -t 0 ] || stop_input="$(cat 2>/dev/null || true)"
-    # Sin pipe (feature #66): el `printf | grep -q` anterior corria bajo
-    # `set -o pipefail`, y aunque el EPIPE que se temia NO se pudo reproducir
-    # —medido hasta 8 MB, rc=0 siempre—, sacar el pipe simplifica y quita una
-    # dependencia del buffer.
+    # Historia de este bloque, porque costo tres vueltas de revision y la
+    # conclusion es que el codigo ORIGINAL estaba bien:
     #
-    # Pero el match tiene que exigir ADYACENCIA clave-valor, que es justo lo que
-    # el grep daba gratis: un `case *'"stop_hook_active"'*[Tt]rue*` acepta
-    # cualquier `true` POSTERIOR a la clave, y el JSON real del Stop trae `cwd`.
-    # Con `"stop_hook_active":false` y un cwd como `/Users/alan/truenorth` el flag
-    # salia 1 y el agente perdia su unica vuelta para arreglar lo suyo. Se recorta
-    # hasta la clave y se mira SOLO lo que sigue.
-    resto_stop="${stop_input#*\"stop_hook_active\"}"
-    if [ "$resto_stop" = "$stop_input" ]; then
-        HARNESS_STOP_HOOK_ACTIVE=0          # la clave no esta
+    # 1. Era `printf '%s' "$stop_input" | grep -q '...'`. Una revision teorizo que
+    #    el EPIPE de `printf` bajo `pipefail` podia dar un falso negativo. NO se
+    #    reproduce: medido hasta 8 MB, rc=0 siempre.
+    # 2. Se cambio igual "por robustez" a un `case *'"stop_hook_active"'*[Tt]rue*`,
+    #    que acepta cualquier `true` POSTERIOR a la clave. El JSON del Stop trae
+    #    `cwd`, asi que con `"stop_hook_active":false` y un cwd como
+    #    `/Users/alan/truenorth` el flag salia 1: la primera vuelta no bloqueaba.
+    # 3. Se arreglo recortando el prefijo (`${stop_input#*...}`), que en bash es
+    #    CUADRATICO: 200 KB tardaba 19.6 s y 1 MB ~8 min, contra un timeout de
+    #    120 s. Un hook que no termina es peor que uno que decide mal.
+    #
+    # Vuelve el `grep`, que exige adyacencia clave-valor (sin el falso positivo)
+    # y es lineal, con la unica mejora que si valia: here-string en vez de pipe,
+    # asi no hay pipeline del que preocuparse. La leccion, cara: no se "endurece"
+    # codigo que funciona contra un bug que no se pudo reproducir.
+    if grep -qE '"stop_hook_active"[[:space:]]*:[[:space:]]*[Tt]rue' <<<"$stop_input"; then
+        HARNESS_STOP_HOOK_ACTIVE=1
     else
-        case "$resto_stop" in
-            [[:space:]]*:*) resto_stop="${resto_stop#"${resto_stop%%:*}"}" ;;
-            :*) : ;;
-            *) resto_stop="" ;;             # la clave no venia seguida de `:`
-        esac
-        resto_stop="${resto_stop#:}"
-        while :; do
-            case "$resto_stop" in
-                [[:space:]]*) resto_stop="${resto_stop#?}" ;;
-                *) break ;;
-            esac
-        done
-        case "$resto_stop" in
-            [Tt]rue*) HARNESS_STOP_HOOK_ACTIVE=1 ;;
-            *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
-        esac
+        HARNESS_STOP_HOOK_ACTIVE=0
     fi
     export HARNESS_STOP_HOOK_ACTIVE
     if [ "$WITH_SUBAGENTS" -eq 1 ]; then
