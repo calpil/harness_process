@@ -987,6 +987,74 @@ mod tests {
         }
         n
     }
+
+    /// `parsear` como era antes de la #67: togglea solo con ```` ``` ````, no
+    /// conoce `~~~`. Se conserva para poder medir la diferencia sobre documentos
+    /// reales, que es la unica forma de saber si el arreglo CAMBIA algo o solo
+    /// cierra un agujero que nadie habia pisado todavia.
+    fn acs_con_el_parser_viejo(spec: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut dentro = false;
+        for linea in spec.lines() {
+            if linea.trim_start().starts_with("```") { // PARSER-VIEJO-A-PROPOSITO
+                dentro = !dentro;
+                continue;
+            }
+            if dentro {
+                continue;
+            }
+            if let Some(ac) = ac_de(linea.trim()) {
+                out.push(ac);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn corpus_real_sin_cambios() {
+        // AC-5: sobre los documentos REALES del repo, el parser unico da
+        // exactamente los mismos AC que el viejo. O sea: el arreglo de `~~~` no
+        // es un cambio de comportamiento sobre lo que ya existe, es un agujero
+        // que se cierra antes de que alguien lo pise.
+        //
+        // Se asserta la DIFERENCIA (cero) y no el total (733 hoy): el total sube
+        // con cada spec nuevo y un assert sobre el seria un detector-de-cambios,
+        // que es como murio la primera version del test de al lado.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs");
+        let Ok(entradas) = std::fs::read_dir(&dir) else {
+            return; // sin docs/ en el sandbox de build: nada que comprobar
+        };
+        let mut documentos = 0usize;
+        let mut acs = 0usize;
+        let mut difieren: Vec<String> = Vec::new();
+        for entrada in entradas.flatten() {
+            let path = entrada.path();
+            let nombre = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !(nombre.starts_with("spec-feature-") || nombre.starts_with("review-")) {
+                continue;
+            }
+            let Ok(texto) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            documentos += 1;
+            let nuevos: Vec<String> = parsear(&texto).into_iter().map(|v| v.ac).collect();
+            acs += nuevos.len();
+            let viejos = acs_con_el_parser_viejo(&texto);
+            if nuevos != viejos {
+                difieren.push(format!(
+                    "{nombre}: viejo={} nuevo={}",
+                    viejos.len(),
+                    nuevos.len()
+                ));
+            }
+        }
+        assert!(documentos >= 20, "esperaba el corpus real, lei {documentos} documentos");
+        assert!(acs > 300, "esperaba cientos de AC reales, encontre {acs}");
+        assert!(
+            difieren.is_empty(),
+            "el parser unico cambia lo que se lee de documentos reales: {difieren:?}"
+        );
+    }
 }
 
 /// Feature #44: el instrumento que dice "verde" sin haber medido nada.

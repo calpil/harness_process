@@ -53,6 +53,29 @@ pub fn run(
 /// Se niega —sin escribir nada— si el review no responde por cada AC-n que
 /// declara el SPEC con una cita `archivo:linea`. Esa es la parte del gate que
 /// un archivo tipeado en cinco segundos no puede satisfacer.
+/// Cuerpo del review sin los sellos anteriores, lo que hace idempotente a
+/// `estampar`.
+///
+/// Se saca el sello solo de las lineas que estan FUERA de un bloque: un review
+/// que documenta el formato del sello lo cita, y borrar esa cita seria mutar la
+/// prosa del reviewer.
+///
+/// Esta suelta —y no inline en `estampar`— para que el test exhaustivo del AC-4
+/// pueda comparar lo que ve ESTE consumidor contra la clasificacion del parser
+/// unico. Inline, el unico que podia mirarla era un E2E con un caso a mano, y un
+/// caso a mano es exactamente como se colo la divergencia.
+pub(crate) fn cuerpo_sin_sellos(review: &str) -> String {
+    crate::markdown::lineas_clasificadas(review)
+        .into_iter()
+        .filter(|(l, clase)| {
+            *clase != crate::markdown::Clase::Fuera
+                || !l.trim_start().starts_with(crate::revision::SELLO_REVIEW)
+        })
+        .map(|(l, _)| l)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn estampar(
     paths: &HarnessPaths,
     feature: &serde_json::Map<String, serde_json::Value>,
@@ -119,17 +142,7 @@ fn estampar(
     // discrepaba con el del gate (fences emparejados). Medido: segun la paridad
     // de fences ajenos citados, o borraba la cita del reviewer o dejaba DOS
     // sellos contradictorios en el archivo. Ahora los dos preguntan lo mismo.
-    let cuerpo_lineas: Vec<&str> = crate::markdown::lineas_clasificadas(&review)
-        .into_iter()
-        .filter(|(l, clase)| {
-            // Se conservan los fences y todo lo de adentro; de lo de afuera solo
-            // se descartan los sellos anteriores.
-            *clase != crate::markdown::Clase::Fuera
-                || !l.trim_start().starts_with(crate::revision::SELLO_REVIEW)
-        })
-        .map(|(l, _)| l)
-        .collect();
-    let cuerpo = cuerpo_lineas.join("\n");
+    let cuerpo = cuerpo_sin_sellos(&review);
     // El sello va tras la primera linea (el titulo), donde se lee sin scrollear
     // — pero NUNCA dentro de un bloque ```: ahi el gate no lo veria y el
     // comando estaria diciendo "registrado" sobre algo que su propio gate niega.
@@ -152,15 +165,21 @@ fn estampar(
         out.push_str(l);
         out.push('\n');
     }
-    std::fs::write(&ruta, &out)?;
-    // Se re-lee con el MISMO parser del gate: el comando no afirma "registrado"
-    // sin comprobar que lo registrado se pueda leer.
+    // Se comprueba con el MISMO parser del gate ANTES de escribir. El chequeo
+    // ya operaba sobre `out` en memoria, no sobre el archivo, asi que correrlo
+    // primero no pierde nada y saca la escritura de en medio: lo irreversible
+    // va ultimo (AC-11 de la #67). No se pudo reproducir un caso donde el orden
+    // viejo dejara el archivo pisado con el comando en error —el `bail` posterior
+    // no revertia nada, pero el contenido escrito era el bueno— asi que esto es
+    // cambio de forma, no arreglo de bug: la forma en que un comando no deberia
+    // poder fallar DESPUES de haber tocado el disco.
     if crate::revision::veredicto_estampado(&out).as_deref() != Some(veredicto) {
         anyhow::bail!(
-            "El sello quedo escrito pero el gate no lo puede leer en {rel}.\n    \
+            "El sello no se puede leer con el parser del gate, asi que no se escribio {rel}.\n    \
              Revisa que el review no lo deje dentro de un bloque de codigo."
         );
     }
+    std::fs::write(&ruta, &out)?;
 
     let _ = crate::progress::log(
         paths,

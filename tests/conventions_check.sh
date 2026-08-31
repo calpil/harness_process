@@ -140,11 +140,24 @@ modo_sin_rust() {
 # reviewer o dejaba dos sellos contradictorios. Este modo impide que aparezca un
 # quinto: cualquier `starts_with("```")` fuera de `markdown.rs` es una
 # implementacion nueva del mismo formato.
+#
+# La unica exencion es una implementacion VIEJA conservada a proposito para poder
+# medir contra ella, y tiene que declararse en la misma linea con el marcador
+# PARSER-VIEJO-A-PROPOSITO. Se declara por linea —y no por `#[cfg(test)]`— porque
+# eximir los tests enteros dejaria que un parser de verdad se esconda en uno, que
+# es justo lo que paso con el cross-check de `verificacion.rs`: compartia el punto
+# ciego del parser que decia verificar.
 modo_un_solo_parser() {
-    fuera="$(grep -rn 'starts_with("```")\|starts_with("~~~")' "$REPO_ROOT/rust/src" 2>/dev/null \
+    todas="$(grep -rn 'starts_with("```")\|starts_with("~~~")' "$REPO_ROOT/rust/src" 2>/dev/null \
         | grep -v '^.*rust/src/markdown\.rs:' \
         | grep -v 'rust/src/atlassian/markdown\.rs:' \
         || true)"
+    exentas="$(printf '%s\n' "$todas" | grep -c 'PARSER-VIEJO-A-PROPOSITO' || true)"
+    fuera="$(printf '%s\n' "$todas" | grep -v 'PARSER-VIEJO-A-PROPOSITO' | grep . || true)"
+    # Las exentas NUNCA son invisibles: si las hay, se nombran.
+    if [ "${exentas:-0}" -gt 0 ]; then
+        echo "    ($exentas implementacion(es) vieja(s) declarada(s) con PARSER-VIEJO-A-PROPOSITO)"
+    fi
     if [ -n "$fuera" ]; then
         echo "[!] un-solo-parser: hay parsers de bloques fuera de markdown.rs:" >&2
         printf '%s\n' "$fuera" | sed 's/^/    /' >&2
