@@ -151,20 +151,17 @@ pub struct Resultado {
 /// correr sobre los 310 AC reales del repo en un test.
 pub fn parsear(spec: &str) -> Vec<Verificacion> {
     let mut out: Vec<Verificacion> = Vec::new();
-    let mut en_bloque = false;
-    for linea in spec.lines() {
+    // Los bloques de codigo se saltean. Hallazgo de la primera corrida real de
+    // la #23: el propio spec EXPLICA el formato con un ejemplo dentro de un
+    // bloque, y `verify` ejecuto ese ejemplo. Un spec que documenta la sintaxis
+    // no puede quedar verificando su documentacion.
+    //
+    // Feature #67: esto usaba su propio parser, que togglea solo con ```` ``` ````
+    // y no conocia `~~~`, asi que el bug de la #23 seguia ABIERTO para tildes —
+    // medido: un `Comando:` dentro de un bloque `~~~` se ejecutaba. Ahora usa el
+    // parser unico, que conoce los dos fences y los empareja.
+    for linea in crate::markdown::lineas_fuera_de_bloque(spec) {
         let t = linea.trim();
-        // Los bloques ``` se saltean. Hallazgo de la primera corrida real: el
-        // propio spec de la #23 EXPLICA el formato con un ejemplo dentro de un
-        // bloque, y `verify` ejecuto ese ejemplo. Un spec que documenta la
-        // sintaxis no puede quedar verificando su documentacion.
-        if t.starts_with("```") {
-            en_bloque = !en_bloque;
-            continue;
-        }
-        if en_bloque {
-            continue;
-        }
         if let Some(ac) = ac_de(t) {
             out.push(Verificacion { ac, comando: None });
             continue;
@@ -966,23 +963,21 @@ mod tests {
         assert!(acs > 100, "esperaba cientos de AC reales, encontre {acs}");
     }
 
-    /// Cuenta las lineas `Comando:` que estan fuera de un bloque ``` — las que
-    /// el parser tiene que ver. Se calcula por un camino distinto al de
-    /// `parsear` a proposito: si las dos implementaciones coinciden sobre 20+
-    /// specs reales, el acuerdo significa algo.
+    /// Cuenta las lineas `Comando:` que estan fuera de un bloque — las que el
+    /// parser tiene que ver. El conteo de AC se hace por un camino distinto al
+    /// de `parsear` a proposito; la CLASIFICACION de bloques, en cambio, sale
+    /// del mismo lugar (feature #67).
+    ///
+    /// Antes este cross-check tenia su propia copia, que —como `parsear`— solo
+    /// conocia ```` ``` ````. Las dos compartian el punto ciego de `~~~`, asi
+    /// que su acuerdo sobre 20+ specs NO significaba lo que este comentario
+    /// decia: dos instrumentos mal calibrados de la misma forma coinciden
+    /// perfectamente y no miden nada.
     fn declaraciones_fuera_de_bloques(texto: &str) -> usize {
-        let mut en_bloque = false;
         let mut n = 0usize;
         let mut ac_abierto = false;
-        for linea in texto.lines() {
+        for linea in crate::markdown::lineas_fuera_de_bloque(texto) {
             let t = linea.trim();
-            if t.starts_with("```") {
-                en_bloque = !en_bloque;
-                continue;
-            }
-            if en_bloque {
-                continue;
-            }
             if t.starts_with("- AC-") {
                 ac_abierto = true;
             } else if t.starts_with("Comando:") && ac_abierto {

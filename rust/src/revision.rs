@@ -416,7 +416,14 @@ pub fn veredicto_estampado(texto: &str) -> Option<String> {
         let Some(resto) = linea.trim_start().strip_prefix(SELLO_REVIEW) else {
             continue;
         };
-        let v = resto.trim().split(['·', ' ']).find(|p| !p.is_empty())?;
+        // `continue`, no `?`: el `?` salia de la FUNCION ENTERA, asi que una
+        // primera linea `Revisado:` sin nada detras abortaba el barrido y el
+        // gate decia "no lleva el sello" con el sello tres lineas mas abajo. Un
+        // mensaje de gate que afirma algo que el archivo desmiente es lo que la
+        // #63 vino a cerrar.
+        let Some(v) = resto.trim().split(['·', ' ']).find(|p| !p.is_empty()) else {
+            continue;
+        };
         if VEREDICTOS.contains(&v) {
             return Some(v.to_string());
         }
@@ -424,45 +431,13 @@ pub fn veredicto_estampado(texto: &str) -> Option<String> {
     None
 }
 
-/// Las lineas que NO estan dentro de un bloque ```.
+/// Re-export del parser UNICO (feature #67).
 ///
-/// `verificacion::parsear` (verificacion.rs:157-164) aprendio esto en la #23: un
-/// documento que EXPLICA un formato lo cita dentro de un bloque, y el parser se
-/// lo comia como si fuera el formato real. Aca es peor: el propio
-/// `docs/review-64.md` cita la linea del sello para documentarla, y sin este
-/// filtro esa cita valdria como veredicto.
-pub fn lineas_fuera_de_bloque(texto: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    // Se recuerda CUAL fence abrio: un bloque ``` que contiene una linea ~~~
-    // (por ejemplo, un review ajeno citado entero) cerraba el bloque donde
-    // CommonMark no lo cierra, y un sello que estaba DENTRO pasaba a contar.
-    let mut abierto_con: Option<&str> = None;
-    for linea in texto.lines() {
-        let t = linea.trim_start();
-        let fence = if t.starts_with("```") {
-            Some("```")
-        } else if t.starts_with("~~~") {
-            Some("~~~")
-        } else {
-            None
-        };
-        match (abierto_con, fence) {
-            (None, Some(f)) => {
-                abierto_con = Some(f);
-                continue;
-            }
-            (Some(abierto), Some(f)) if abierto == f => {
-                abierto_con = None;
-                continue;
-            }
-            _ => {}
-        }
-        if abierto_con.is_none() {
-            out.push(linea);
-        }
-    }
-    out
-}
+/// Antes esta funcion era una implementacion propia, y `commands::revision`
+/// tenia otra, y `verificacion` una tercera. Discrepaban en el 37% de los
+/// documentos de siete lineas.
+pub use crate::markdown::lineas_fuera_de_bloque;
+
 
 /// La linea canonica del sello. La escribe SOLO el binario.
 pub fn linea_sello(veredicto: &str, stamp: &str) -> String {
@@ -530,58 +505,94 @@ fn citas_de(linea: &str) -> Vec<(String, usize)> {
     out
 }
 
-/// ¿La cita RESUELVE? El archivo existe bajo `root` y tiene esa linea.
+/// Que se pudo averiguar de una cita `archivo:linea`.
 ///
-/// Sin esto, `inventado.rs:99999` valia como evidencia y `3.14:15` matcheaba el
-/// patron de cita: el gate comprobaba la FORMA de la cita, no que apuntara a
-/// algo. Lo encontro el reviewer de la #64 y el usuario decidio cerrarlo aca.
-fn cita_resuelve(raices: &[&Path], ruta: &str, linea: usize) -> bool {
-    if ruta.contains("..") || Path::new(ruta).is_absolute() {
-        return false;
+/// Son TRES respuestas y no dos a proposito (feature #67). Antes el tope de
+/// lectura devolvia `false` —"la linea no existe"— sobre citas correctas cuya
+/// linea caia mas alla del tope: la linea existia y `sed` la mostraba. Es el
+/// patron 127-vs-124 de `docs/lecciones/criterios-de-cierre-que-se-pueden-fallar.md`:
+/// traducir "no pude comprobar" a "no". El tope se conserva —sacarlo cuesta
+/// 10,5 s por 2 GB dentro de un gate sin timeout, que es la familia de la #66—
+/// pero deja de mentir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cita {
+    Resuelve,
+    NoResuelve,
+    NoSePudoComprobar,
+}
+
+/// Tope de lectura por cita. No es memoria —el buffer fijo ya la acota— es
+/// TIEMPO: un review de 20 AC citando archivos enormes correria dentro de
+/// `close`, que no tiene timeout.
+const TOPE_LECTURA: u64 = 8 * 1024 * 1024;
+
+/// ¿La cita resuelve, no resuelve, o no se pudo comprobar?
+fn evaluar_cita(raices: &[&Path], ruta: &str, linea: usize) -> Cita {
+    if linea == 0 || ruta.contains("..") || Path::new(ruta).is_absolute() {
+        return Cita::NoResuelve;
     }
-    // Se prueban las dos raices porque una cita valida puede ser relativa a la
-    // raiz del repo (`rust/src/revision.rs:490`) o a la del arnes cuando esta
-    // instalado como subdirectorio.
-    raices.iter().any(|r| {
+    let mut sin_comprobar = false;
+    for r in raices {
         let candidato = r.join(ruta);
-        // `is_file()` antes de abrir: un FIFO (`mkfifo`) dejaba el proceso
-        // colgado para siempre esperando datos que nadie escribe, y un symlink a
-        // /dev/zero agotaba la memoria. Un archivo regular es lo unico que puede
-        // ser evidencia.
+        // `is_file()` antes de abrir: un FIFO dejaba el proceso colgado y un
+        // symlink a /dev/zero agotaba la memoria.
         if !std::fs::metadata(&candidato).is_ok_and(|m| m.is_file()) {
-            return false;
+            continue;
         }
-        // Se cuentan lineas SIN cargar el archivo entero: una cita a un blob de
-        // 300 MB no puede costar 300 MB de RSS por fila del review.
         let Ok(f) = std::fs::File::open(&candidato) else {
-            return false;
+            continue;
         };
-        // Se cuentan saltos de linea por BYTES, con tope: `lines()` materializa
-        // cada linea entera, asi que un blob de 200 MB en UNA sola linea costaba
-        // 211 MB de RSS aunque solo hiciera falta saber si existe la linea 1.
-        const TOPE: u64 = 8 * 1024 * 1024;
-        let mut leidos = 0u64;
-        let mut saltos = 0usize;
-        let mut buf = [0u8; 64 * 1024];
-        let mut r = std::io::BufReader::new(f);
-        loop {
-            let Ok(n) = std::io::Read::read(&mut r, &mut buf) else {
-                return false;
-            };
-            if n == 0 {
-                // Sin salto final, la ultima linea cuenta igual.
-                return saltos + 1 >= linea;
-            }
-            saltos += buf[..n].iter().filter(|b| **b == b'\n').count();
-            if saltos >= linea {
-                return true;
-            }
-            leidos += n as u64;
-            if leidos > TOPE {
-                return false;
-            }
+        match contar_hasta(f, linea) {
+            Cita::Resuelve => return Cita::Resuelve,
+            Cita::NoSePudoComprobar => sin_comprobar = true,
+            Cita::NoResuelve => {}
         }
-    })
+    }
+    if sin_comprobar {
+        Cita::NoSePudoComprobar
+    } else {
+        Cita::NoResuelve
+    }
+}
+
+/// Cuenta saltos por BYTES hasta encontrar la linea o agotar el tope.
+///
+/// `lines()` materializa cada linea entera, asi que un blob de 200 MB en UNA
+/// sola linea costaba 211 MB de RSS aunque solo hiciera falta saber si existe la
+/// linea 1.
+fn contar_hasta(f: std::fs::File, linea: usize) -> Cita {
+    let mut leidos = 0u64;
+    let mut saltos = 0usize;
+    let mut termina_en_salto = true;
+    let mut buf = [0u8; 64 * 1024];
+    let mut r = std::io::BufReader::new(f);
+    loop {
+        let Ok(n) = std::io::Read::read(&mut r, &mut buf) else {
+            return Cita::NoSePudoComprobar;
+        };
+        if n == 0 {
+            // Un archivo de N lineas terminado en salto tiene N saltos, no N+1:
+            // contar `saltos + 1` hacia que la cita a la linea N+1 resolviera en
+            // cualquier archivo normal (reproducido: `evidencia.txt:4` en un
+            // archivo de 3 lineas). La ultima linea solo suma si NO hay salto
+            // final.
+            let total = if termina_en_salto { saltos } else { saltos + 1 };
+            return if total >= linea {
+                Cita::Resuelve
+            } else {
+                Cita::NoResuelve
+            };
+        }
+        saltos += buf[..n].iter().filter(|b| **b == b'\n').count();
+        termina_en_salto = buf[n - 1] == b'\n';
+        if saltos >= linea {
+            return Cita::Resuelve;
+        }
+        leidos += n as u64;
+        if leidos > TOPE_LECTURA {
+            return Cita::NoSePudoComprobar;
+        }
+    }
 }
 
 /// ¿Una fila responde por este AC con una cita que resuelve?
@@ -593,7 +604,7 @@ fn fila_responde(raices: &[&Path], linea: &str, ac: &str) -> bool {
     menciona(linea, ac)
         && citas_de(linea)
             .iter()
-            .any(|(ruta, n)| cita_resuelve(raices, ruta, *n))
+            .any(|(ruta, n)| evaluar_cita(raices, ruta, *n) == Cita::Resuelve)
 }
 
 /// Los AC del SPEC que el review no responde con una cita. Vacio = cubierto.

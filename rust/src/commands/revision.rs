@@ -111,32 +111,35 @@ fn estampar(
     // La parte que ESCRIBE. Idempotente: reemplaza el sello anterior si lo hay.
     let stamp = crate::progress::now_stamp();
     let sello = linea_sello(veredicto, &stamp);
-    // Se saca el sello anterior, pero SOLO fuera de los bloques ```: un review
-    // que documenta el formato del sello lo cita, y borrar esa cita seria mutar
-    // la prosa del reviewer.
-    let mut en_bloque = false;
-    let mut cuerpo_lineas: Vec<&str> = Vec::new();
-    for l in review.lines() {
-        let t = l.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            en_bloque = !en_bloque;
-            cuerpo_lineas.push(l);
-            continue;
-        }
-        if !en_bloque && l.trim_start().starts_with(crate::revision::SELLO_REVIEW) {
-            continue;
-        }
-        cuerpo_lineas.push(l);
-    }
+    // Se saca el sello anterior, pero SOLO de las lineas que estan FUERA de un
+    // bloque: un review que documenta el formato del sello lo cita, y borrar esa
+    // cita seria mutar la prosa del reviewer.
+    //
+    // Feature #67: esto tenia su propio parser (toggle con cualquier fence) que
+    // discrepaba con el del gate (fences emparejados). Medido: segun la paridad
+    // de fences ajenos citados, o borraba la cita del reviewer o dejaba DOS
+    // sellos contradictorios en el archivo. Ahora los dos preguntan lo mismo.
+    let cuerpo_lineas: Vec<&str> = crate::markdown::lineas_clasificadas(&review)
+        .into_iter()
+        .filter(|(l, clase)| {
+            // Se conservan los fences y todo lo de adentro; de lo de afuera solo
+            // se descartan los sellos anteriores.
+            *clase != crate::markdown::Clase::Fuera
+                || !l.trim_start().starts_with(crate::revision::SELLO_REVIEW)
+        })
+        .map(|(l, _)| l)
+        .collect();
     let cuerpo = cuerpo_lineas.join("\n");
     // El sello va tras la primera linea (el titulo), donde se lee sin scrollear
     // — pero NUNCA dentro de un bloque ```: ahi el gate no lo veria y el
     // comando estaria diciendo "registrado" sobre algo que su propio gate niega.
     // Si el review arranca con un fence, se sella arriba de todo.
-    let arranca_en_bloque = cuerpo
-        .lines()
-        .next()
-        .is_some_and(|l| l.trim_start().starts_with("```") || l.trim_start().starts_with("~~~"));
+    // La primera linea ya viene clasificada por el parser unico: no hace falta
+    // un tercer chequeo de fences con su propia idea de que es un bloque
+    // (feature #67).
+    let arranca_en_bloque = crate::markdown::lineas_clasificadas(&cuerpo)
+        .first()
+        .is_some_and(|(_, c)| *c != crate::markdown::Clase::Fuera);
     let mut out = String::new();
     let mut lineas = cuerpo.lines();
     if !arranca_en_bloque && let Some(titulo) = lineas.next() {

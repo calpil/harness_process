@@ -132,19 +132,44 @@ modo_sin_rust() {
     ok "sin-rust: sin rust/tests/ el bloque se omite sin ruido"
 }
 
+# Feature #67: UN solo parser de bloques de codigo.
+#
+# Habia cuatro con tres semanticas, y el costo no era teorico: `verify` ejecutaba
+# comandos escritos dentro de un bloque `~~~` (el bug que la #23 cerro para
+# backticks, abierto para tildes), y `revision --veredicto` borraba prosa del
+# reviewer o dejaba dos sellos contradictorios. Este modo impide que aparezca un
+# quinto: cualquier `starts_with("```")` fuera de `markdown.rs` es una
+# implementacion nueva del mismo formato.
+modo_un_solo_parser() {
+    fuera="$(grep -rn 'starts_with("```")\|starts_with("~~~")' "$REPO_ROOT/rust/src" 2>/dev/null \
+        | grep -v '^.*rust/src/markdown\.rs:' \
+        | grep -v 'rust/src/atlassian/markdown\.rs:' \
+        || true)"
+    if [ -n "$fuera" ]; then
+        echo "[!] un-solo-parser: hay parsers de bloques fuera de markdown.rs:" >&2
+        printf '%s\n' "$fuera" | sed 's/^/    /' >&2
+        echo "    Usa crate::markdown::lineas_clasificadas. La divergencia entre copias" >&2
+        echo "    ya hizo que verify ejecutara documentacion (feature #67)." >&2
+        exit 1
+    fi
+    ok "un-solo-parser: los bloques de codigo se parsean en un solo lugar"
+}
+
 case "$MODO" in
     sin-violaciones) modo_sin_violaciones ;;
     detecta-en-src)  modo_detecta_en_src ;;
     detecta)         modo_detecta ;;
     no-bloquea)      modo_no_bloquea ;;
     sin-rust)        modo_sin_rust ;;
+    un-solo-parser)  modo_un_solo_parser ;;
     todos)
         modo_sin_violaciones
         modo_detecta_en_src
         modo_detecta
         modo_no_bloquea
         modo_sin_rust
-        ok "conventions check: los cuatro modos verdes"
+        modo_un_solo_parser
+        ok "conventions check: los cinco modos verdes"
         ;;
-    *) fail "modo desconocido: $MODO (sin-violaciones | detecta | no-bloquea | sin-rust | todos)" ;;
+    *) fail "modo desconocido: $MODO (sin-violaciones | detecta | no-bloquea | sin-rust | un-solo-parser | todos)" ;;
 esac

@@ -18,6 +18,7 @@ mod graph;
 mod graphify;
 mod journey;
 mod lecciones;
+mod markdown;
 mod memories;
 mod paths;
 mod perfil;
