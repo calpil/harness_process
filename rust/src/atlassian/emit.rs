@@ -232,6 +232,51 @@ pub fn on_approve_spec(paths: &HarnessPaths, feature: &Map<String, Value>, stamp
     );
 }
 
+/// Que le hace un cierre al ticket, segun el estado. **Funcion de produccion**:
+/// la usa `on_close` y es la que miran los tests.
+///
+/// Estaba escrita como un `match` inline, y el test que la cubria tenia su
+/// PROPIA copia de la tabla dentro de `mod tests`. O sea que borrar una rama de
+/// produccion dejaba el test verde: media una copia, no lo que corre. Es la
+/// misma trampa que el cross-check de `verificacion.rs` en la #67 —dos
+/// instrumentos que se copian coinciden siempre y no miden nada— y por eso ahora
+/// hay una sola tabla.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Efecto {
+    /// Mueve el ticket al estado "hecho".
+    ATerminado,
+    /// Lo devuelve a la cola. Es el brazo por defecto, y el peligroso: un estado
+    /// nuevo sin rama propia cae aca y REABRE el ticket.
+    ALaCola,
+    /// No transiciona: marca el flag Impediment.
+    Impedimento,
+    /// No se toca el ticket. Lo comparten los dos estados que significan "el
+    /// trabajo se hizo, pero no aca": mandarlos a terminado seria mentir y
+    /// mandarlos a la cola los reabriria.
+    NoTocar,
+}
+
+pub(crate) fn efecto_de(status: &str) -> Efecto {
+    match status {
+        "blocked" => Efecto::Impedimento,
+        "done" => Efecto::ATerminado,
+        // `superseded` (feature #37): el trabajo se hizo en OTRA feature. NO se
+        // emite transicion a proposito. Mandarla a `done` afirmaria que se
+        // entrego como tal —nunca tuvo spec ni evidencia propia— y dejarla caer
+        // en el brazo por defecto la movia de vuelta a To Do, que es exactamente
+        // el sintoma opuesto al que el estado vino a arreglar. Se deja el ticket
+        // como esta y se comenta quien absorbio, para que una persona lo cierre
+        // como corresponda en su tablero (Duplicate, Won't Do, lo que use).
+        "superseded" => Efecto::NoTocar,
+        // Feature #65: MISMA razon que `superseded`. El trabajo se hizo, pero no
+        // aca: mandarlo a `done` afirmaria que este proyecto lo entrego, y caer
+        // en el brazo por defecto lo moveria a To Do, o sea REABRIRIA el ticket
+        // — el defecto #1 de la #37, exactamente.
+        crate::commands::close::AGUAS_ARRIBA => Efecto::NoTocar,
+        _ => Efecto::ALaCola,
+    }
+}
+
 /// `close`: transicion al estado final y comentario con la nota de cierre
 /// (AC-8). `blocked` no transiciona: marca el flag Impediment (OBS-7), y
 /// `superseded` tampoco (feature #37): el trabajo se hizo en otra feature, asi
@@ -243,8 +288,8 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
     let fid = py_str(feature.get("id"));
     let statuses = &binding.jira.statuses;
 
-    match status {
-        "blocked" => {
+    match efecto_de(status) {
+        Efecto::Impedimento => {
             emit_best_effort(
                 paths,
                 &key_flag(&fid, true),
@@ -255,7 +300,7 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
                 },
             );
         }
-        "done" => {
+        Efecto::ATerminado => {
             emit_best_effort(
                 paths,
                 &key_status(&fid, &statuses.done),
@@ -266,21 +311,8 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
                 },
             );
         }
-        // `superseded` (feature #37): el trabajo se hizo en OTRA feature. NO se
-        // emite transicion a proposito. Mandarla a `done` afirmaria que se
-        // entrego como tal —nunca tuvo spec ni evidencia propia— y dejarla caer
-        // en el brazo `_` la movia de vuelta a To Do, que es exactamente el
-        // sintoma opuesto al que el estado vino a arreglar. Se deja el ticket
-        // como esta y se comenta quien absorbio, para que una persona lo cierre
-        // como corresponda en su tablero (Duplicate, Won't Do, lo que use).
-        "superseded" => {}
-        // Feature #65: MISMA razon que `superseded`. El trabajo se hizo, pero no
-        // aca: mandarlo a `done` afirmaria que este proyecto lo entrego, y caer
-        // en el brazo `_` lo moveria a To Do, o sea REABRIRIA el ticket — el
-        // defecto #1 de la #37, exactamente. Se deja como esta y se comenta
-        // donde se arreglo.
-        crate::commands::close::AGUAS_ARRIBA => {}
-        _ => {
+        Efecto::NoTocar => {}
+        Efecto::ALaCola => {
             emit_best_effort(
                 paths,
                 &key_status(&fid, &statuses.pending),
@@ -544,13 +576,13 @@ mod tests_superseded {
     /// El brazo del `match` de `on_close` que le toca a cada estado. Se extrae
     /// como funcion pura para poder probarlo sin binding ni outbox: lo que hay
     /// que fijar es la DECISION, no el efecto de red.
+    /// Adaptador fino sobre la tabla de PRODUCCION. Antes esto era una copia de
+    /// la tabla, asi que borrar una rama de produccion dejaba los tests verdes.
     fn transicion_de(status: &str) -> Option<&'static str> {
-        match status {
-            "blocked" => None,      // marca Impediment, no transiciona
-            "done" => Some("done"),
-            "superseded" => None,   // feature #37
-            "resuelto-aguas-arriba" => None,   // feature #65: misma razon
-            _ => Some("pending"),
+        match super::efecto_de(status) {
+            super::Efecto::ATerminado => Some("done"),
+            super::Efecto::ALaCola => Some("pending"),
+            super::Efecto::Impedimento | super::Efecto::NoTocar => None,
         }
     }
 

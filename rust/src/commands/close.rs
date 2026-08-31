@@ -28,6 +28,14 @@ pub const SUPERSEDED: &str = "superseded";
 /// que era otra feature — una afirmacion falsa con exit 0.
 pub const AGUAS_ARRIBA: &str = "resuelto-aguas-arriba";
 
+/// Los estados que acepta `close`, en un solo lugar.
+///
+/// `cli.rs` los tomaba de un literal propio y el resto de los consumidores de
+/// los suyos: agregar un estado y olvidarse de uno no rompia nada hasta que
+/// alguien miraba el tablero. Ahora la lista es esta, y el test del AC-9 la
+/// recorre entera contra cada consumidor.
+pub const ESTADOS_DE_CIERRE: [&str; 5] = ["done", "blocked", "pending", SUPERSEDED, AGUAS_ARRIBA];
+
 /// ¿Tiene la forma `<proyecto>/feature-<id>`?
 ///
 /// Se comprueba la FORMA y nada mas. La existencia vive en otro repo y el arnes
@@ -922,19 +930,54 @@ mod tests_aguas_arriba {
         // estado nuevo sin rama explicita nace con ese mismo defecto, y el
         // sintoma no se ve hasta que alguien mira el tablero.
         //
-        // Esta lista es la fuente: si se agrega un estado y no se agrega aca, el
-        // test falla y obliga a decidir que hace cada consumidor con el.
-        let estados = ["done", "blocked", "pending", SUPERSEDED, AGUAS_ARRIBA];
-        for st in estados {
+        // La primera version de este test asertaba que cada estado no era la
+        // cadena vacia y que `AGUAS_ARRIBA == "resuelto-aguas-arriba"` —una
+        // constante igual a su propio literal—. O sea: NO PODIA FALLAR por la
+        // razon que el AC declara. Se descubrio en la prueba del rojo: borrar la
+        // rama de produccion de Atlassian lo dejaba verde.
+        //
+        // Ahora la tabla es la fuente y se recorre contra cada consumidor. Un
+        // estado nuevo que no se agregue aca no compila; uno que se agregue sin
+        // decidir que hace cada consumidor, falla.
+        use crate::atlassian::emit::{Efecto, efecto_de};
+        let tabla: [(&str, Efecto, bool, bool); 5] = [
+            //  estado        Atlassian            ¿cuenta en el avance?  ¿bucket propio?
+            ("done", Efecto::ATerminado, true, true),
+            ("blocked", Efecto::Impedimento, true, true),
+            ("pending", Efecto::ALaCola, true, true),
+            (SUPERSEDED, Efecto::NoTocar, false, true),
+            (AGUAS_ARRIBA, Efecto::NoTocar, false, true),
+        ];
+        assert_eq!(
+            tabla.len(),
+            ESTADOS_DE_CIERRE.len(),
+            "se agrego un estado de cierre sin decidir que hace cada consumidor con el"
+        );
+        for (estado, efecto, cuenta, bucket) in tabla {
             assert!(
-                !st.is_empty(),
-                "un estado vacio caeria en el brazo por defecto de todos lados"
+                ESTADOS_DE_CIERRE.contains(&estado),
+                "{estado}: el CLI no lo acepta"
+            );
+            assert_eq!(efecto_de(estado), efecto, "{estado}: rama de Atlassian");
+            assert_eq!(
+                crate::prd::cuenta_en_el_avance(Some(estado)),
+                cuenta,
+                "{estado}: conteo de avance del PRD"
+            );
+            assert_eq!(
+                crate::commands::status::ESTADOS_CON_BUCKET.contains(&estado),
+                bucket,
+                "{estado}: bucket de la cabecera de status"
             );
         }
-        // Los dos estados que NO se entregaron aca no pueden transicionar el
-        // ticket: ni a done (seria mentir) ni a pending (lo reabriria).
-        assert_eq!(SUPERSEDED, "superseded");
-        assert_eq!(AGUAS_ARRIBA, "resuelto-aguas-arriba");
+        // Y la comprobacion de que la tabla mide algo: un estado inventado cae
+        // en el brazo por defecto de TODOS, que es justo el comportamiento
+        // peligroso del que hay que salvarse explicitamente.
+        let inventado = "estado-que-no-existe";
+        assert!(!ESTADOS_DE_CIERRE.contains(&inventado));
+        assert_eq!(efecto_de(inventado), Efecto::ALaCola, "reabriria el ticket");
+        assert!(crate::prd::cuenta_en_el_avance(Some(inventado)));
+        assert!(!crate::commands::status::ESTADOS_CON_BUCKET.contains(&inventado));
     }
 
     #[test]

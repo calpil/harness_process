@@ -38,7 +38,7 @@ pub enum Command {
     Close {
         #[arg(long)]
         feature: String,
-        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["done", "blocked", "pending", "superseded", "resuelto-aguas-arriba"]))]
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(crate::commands::close::ESTADOS_DE_CIERRE))]
         status: String,
         /// Feature que absorbio este trabajo (obligatorio con --status superseded)
         #[arg(long = "absorbida-por")]
