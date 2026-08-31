@@ -197,7 +197,9 @@ fn status_should_print_empty_backlog() {
         .arg("status")
         .assert()
         .success()
-        .stdout("Backlog: 0 feature(s) | active=0 pending=0 blocked=0 done=0\n");
+        // Feature #65: la cabecera enumera los SEIS estados. Antes listaba cuatro
+        // y `superseded` desaparecia, asi que los numeros no sumaban.
+        .stdout("Backlog: 0 feature(s) | active=0 pending=0 blocked=0 done=0 superseded=0 aguas-arriba=0\n");
 }
 
 #[test]
@@ -4977,7 +4979,11 @@ fn blocked_features_should_stay_blocked() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[blocked]"))
-        .stdout(predicate::str::contains("superseded").not());
+        // Acotado a la LINEA de la feature: desde la #65 la cabecera enumera
+        // todos los estados (`superseded=0`), asi que buscar la palabra en toda
+        // la salida dejo de distinguir "esta feature se muestra como
+        // superseded" —lo que el test quiere— de "la palabra aparece".
+        .stdout(predicate::str::contains("[superseded").not());
 }
 
 // ---------------------------------------------------------------------------
@@ -7127,5 +7133,182 @@ fn estampar_should_not_touch_prose_quoted_in_tilde_fences() {
     assert!(
         review.contains("Revisado: <veredicto> · <fecha>"),
         "borro la cita dentro del bloque ~~~"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Feature #65: cerrar lo que se resolvio AGUAS ARRIBA (en otro repo).
+//
+// El caso real: los bugs #91 y #92 del backlog de `realestate` se arreglaron en
+// `harness_process` como la #60. Antes de esta feature el unico camino que
+// "funcionaba" era `--absorbida-por 60`, que salia rc=0 apuntando a la #60 de
+// ESE backlog — una feature de negocio sin relacion. Una afirmacion falsa con
+// exit 0.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn resuelto_aguas_arriba() {
+    // AC-1: cierra, guarda la referencia y DICE que no la comprobo.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Bug del arnes"]).assert().success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "resuelto-aguas-arriba",
+            "--resuelto-en",
+            "harness_process/feature-60",
+        ])
+        .assert()
+        .success();
+    let backlog = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    assert!(backlog.contains("\"resuelto-aguas-arriba\""), "no guardo el estado");
+    assert!(
+        backlog.contains("harness_process/feature-60"),
+        "no guardo la referencia"
+    );
+    // Y el campo propio, NO `superseded_by`: ese conserva su invariante de
+    // resolver siempre contra este backlog.
+    assert!(
+        !backlog.contains("\"superseded_by\""),
+        "uso superseded_by para algo que no resuelve aca"
+    );
+}
+
+#[test]
+fn aguas_arriba_exige_referencia() {
+    // AC-2: sin --resuelto-en el estado no significa nada.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Bug"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "resuelto-aguas-arriba"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--resuelto-en"))
+        .stderr(predicate::str::contains("DONDE se arreglo"));
+}
+
+#[test]
+fn forma_de_la_referencia_externa_en_el_cierre() {
+    // AC-3: se comprueba la FORMA. `harness_process#60` es la sintaxis de
+    // GitHub, no la del arnes: el repo ya tiene una para lo cross-proyecto.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Bug"]).assert().success();
+    for mala in ["60", "harness_process#60", "harness_process/60", "/feature-60"] {
+        cmd(&bin)
+            .args([
+                "close",
+                "--feature",
+                "1",
+                "--status",
+                "resuelto-aguas-arriba",
+                "--resuelto-en",
+                mala,
+            ])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("<proyecto>/feature-<id>"));
+    }
+}
+
+#[test]
+fn referencia_externa_no_se_valida() {
+    // AC-4, y es lo central: una referencia bien formada a algo que no existe
+    // CIERRA IGUAL. El arnes no puede abrir el otro repo, y fingir que lo
+    // valido seria lo que la #64 prohibio.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Bug"]).assert().success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "resuelto-aguas-arriba",
+            "--resuelto-en",
+            "no-existe-en-ningun-lado/feature-999",
+        ])
+        .assert()
+        .success();
+    let backlog = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    assert!(backlog.contains("no-existe-en-ningun-lado/feature-999"));
+}
+
+#[test]
+fn status_muestra_aguas_arriba() {
+    // AC-5: nunca como `blocked`, y con la marca de que no se verifico. Esa
+    // marca es la unica parte del renglon que el arnes puede garantizar.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Bug"]).assert().success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "resuelto-aguas-arriba",
+            "--resuelto-en",
+            "harness_process/feature-60",
+        ])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("resuelto aguas arriba en harness_process/feature-60"))
+        .stdout(predicate::str::contains("sin verificar"));
+}
+
+#[test]
+fn cabecera_de_status_suma() {
+    // AC-6: hoy la cabecera enumeraba cuatro estados de los cinco y `superseded`
+    // desaparecia: con dos features absorbidas imprimia "4 feature(s) | ...
+    // done=2" y los numeros no daban.
+    let (_dir, bin) = sandbox_with_binary();
+    for n in ["Una", "Otra", "Tercera"] {
+        cmd(&bin).args(["add", "--name", n]).assert().success();
+    }
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "resuelto-aguas-arriba",
+            "--resuelto-en",
+            "harness_process/feature-60",
+        ])
+        .assert()
+        .success();
+    let salida = String::from_utf8(
+        cmd(&bin).args(["status"]).assert().success().get_output().stdout.clone(),
+    )
+    .unwrap();
+    let cabecera = salida.lines().next().unwrap_or_default().to_string();
+    // Se extraen los numeros de la cabecera y se exige que SUMEN el total.
+    // Solo los tokens `clave=valor`: el `3` de "Backlog: 3 feature(s)" es el
+    // TOTAL, y sumarlo con los buckets daba el doble. El codigo estaba bien; el
+    // test se contaba a si mismo.
+    let nums: Vec<usize> = cabecera
+        .split_whitespace()
+        .filter_map(|t| t.split_once('=').and_then(|(_, n)| n.parse().ok()))
+        .collect();
+    let total: usize = cabecera
+        .split_whitespace()
+        .nth(1)
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    assert_eq!(total, 3, "cabecera: {cabecera}");
+    assert_eq!(
+        nums.iter().sum::<usize>(),
+        total,
+        "la cabecera no suma: {cabecera}"
     );
 }

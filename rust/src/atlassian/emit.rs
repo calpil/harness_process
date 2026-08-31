@@ -274,6 +274,12 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
         // como esta y se comenta quien absorbio, para que una persona lo cierre
         // como corresponda en su tablero (Duplicate, Won't Do, lo que use).
         "superseded" => {}
+        // Feature #65: MISMA razon que `superseded`. El trabajo se hizo, pero no
+        // aca: mandarlo a `done` afirmaria que este proyecto lo entrego, y caer
+        // en el brazo `_` lo moveria a To Do, o sea REABRIRIA el ticket — el
+        // defecto #1 de la #37, exactamente. Se deja como esta y se comenta
+        // donde se arreglo.
+        crate::commands::close::AGUAS_ARRIBA => {}
         _ => {
             emit_best_effort(
                 paths,
@@ -290,6 +296,17 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
     let nota = note.unwrap_or("").trim();
     let body = if nota.is_empty() {
         format!("Feature cerrada por el arnes con estado `{status}`.")
+    } else if status == crate::commands::close::AGUAS_ARRIBA {
+        let donde = feature
+            .get("resuelto_en")
+            .and_then(Value::as_str)
+            .unwrap_or("otro repo");
+        format!(
+            "Resuelto aguas arriba, en `{donde}`: el arreglo se hizo en otro repositorio. \
+             El arnes NO movio este ticket, porque este proyecto no lo entrego, y NO pudo \
+             comprobar esa referencia: vive fuera de aca. Cerralo como corresponda en tu \
+             tablero."
+        )
     } else if status == "superseded" {
         let por = feature
             .get("superseded_by")
@@ -532,8 +549,25 @@ mod tests_superseded {
             "blocked" => None,      // marca Impediment, no transiciona
             "done" => Some("done"),
             "superseded" => None,   // feature #37
+            "resuelto-aguas-arriba" => None,   // feature #65: misma razon
             _ => Some("pending"),
         }
+    }
+
+    #[test]
+    fn aguas_arriba_no_reabre_el_ticket() {
+        // AC-8 (#65). El defecto #1 de la #37, exactamente: un estado sin rama
+        // propia cae en el brazo `_` y emite una transicion a `pending`, o sea
+        // MUEVE el ticket a To Do — lo reabre. El sintoma no se ve en el arnes:
+        // se ve en el tablero, dias despues.
+        assert_eq!(
+            transicion_de("resuelto-aguas-arriba"),
+            None,
+            "no puede mover el ticket: este proyecto no lo entrego"
+        );
+        // Y la comprobacion de que el test mide algo: un estado inventado SI
+        // cae en el brazo por defecto.
+        assert_eq!(transicion_de("estado-que-no-existe"), Some("pending"));
     }
 
     #[test]

@@ -18,6 +18,36 @@ use crate::spec::{close_requires_spec, spec_gate, spec_path};
 /// Estado de una entrada cuyo trabajo se hizo en OTRA feature (#37). No es
 /// `done` (nunca tuvo spec ni evidencia propia) ni `blocked` (no esta trabada).
 pub const SUPERSEDED: &str = "superseded";
+
+/// Estado de una entrada cuyo trabajo se hizo en OTRO REPO (#65).
+///
+/// Distinto de `superseded`, que exige una feature de ESTE backlog: el caso real
+/// es un bug del arnes reportado en un repo de trabajo y arreglado aguas arriba.
+/// Medido antes de esta feature: el unico camino que existia
+/// (`--absorbida-por 60`) cerraba con rc=0 apuntando a la #60 del backlog LOCAL,
+/// que era otra feature — una afirmacion falsa con exit 0.
+pub const AGUAS_ARRIBA: &str = "resuelto-aguas-arriba";
+
+/// ¿Tiene la forma `<proyecto>/feature-<id>`?
+///
+/// Se comprueba la FORMA y nada mas. La existencia vive en otro repo y el arnes
+/// no la puede abrir: fingir que la valido seria exactamente lo que la #64
+/// prohibio ("el arnes no promete enforcement que no hace"). La sintaxis no se
+/// inventa: es la que `graph/ids.rs` ya usa para lo cross-proyecto, asi que el
+/// cierre aguas abajo y el evento del hub aguas arriba nombran el mismo id.
+pub fn forma_de_referencia_externa(r: &str) -> bool {
+    let r = r.trim();
+    let Some((proyecto, resto)) = r.split_once('/') else {
+        return false;
+    };
+    if proyecto.is_empty() || proyecto.contains(char::is_whitespace) {
+        return false;
+    }
+    let Some(id) = resto.strip_prefix("feature-") else {
+        return false;
+    };
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
+}
 use crate::verificacion;
 
 /// Todo lo que decide un cierre, junto: el estado, su justificacion y — desde
@@ -26,6 +56,9 @@ pub struct CierreOpts<'a> {
     pub status: &'a str,
     pub note: Option<&'a str>,
     pub absorbida_por: Option<&'a str>,
+    /// Donde se arreglo, en otro repo (`<proyecto>/feature-<id>`), con
+    /// `--status resuelto-aguas-arriba` (feature #65).
+    pub resuelto_en: Option<&'a str>,
     pub leccion: Option<&'a str>,
     pub leccion_motivo: Option<&'a str>,
     /// Rama destino del `done` (GitFlow). Sin ella el arnes se niega: la
@@ -37,6 +70,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     let CierreOpts {
         status,
         note,
+        resuelto_en,
         absorbida_por,
         leccion,
         leccion_motivo,
@@ -88,6 +122,39 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
             .into());
         }
         Some(por.to_string())
+    } else {
+        None
+    };
+    // Estado `resuelto-aguas-arriba` (feature #65): el trabajo se hizo en OTRO
+    // repo. Exige decir donde, y de esa referencia se comprueba la FORMA — la
+    // existencia no, porque vive en un repo que el arnes no puede abrir, y el
+    // mensaje lo dice en vez de fingir que la valido.
+    let resuelto_en_ref = if status == AGUAS_ARRIBA {
+        let Some(r) = resuelto_en.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!(
+                    "--status {AGUAS_ARRIBA} exige --resuelto-en <proyecto>/feature-<id>: hay que decir\n    \
+                     DONDE se arreglo, o el estado no significa nada.\n    \
+                     Ejemplo: sh harness_cli close --feature {fid} --status {AGUAS_ARRIBA} \\\n      \
+                     --resuelto-en harness_process/feature-60"
+                )),
+            }
+            .into());
+        };
+        if !forma_de_referencia_externa(r) {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!(
+                    "--resuelto-en {r}: la forma esperada es <proyecto>/feature-<id>.\n    \
+                     Es la misma que el arnes ya usa para lo cross-proyecto, asi que el cierre\n    \
+                     de aca y el evento de alla nombran el mismo id.\n    \
+                     Ejemplo: harness_process/feature-60"
+                )),
+            }
+            .into());
+        }
+        Some(r.to_string())
     } else {
         None
     };
@@ -190,6 +257,14 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         }
         if let Some(por) = &absorbida {
             feature.insert("superseded_by".to_string(), json!(por));
+        }
+        // Campo PROPIO, distinto de `superseded_by` a proposito (feature #65):
+        // `superseded_by` conserva su invariante —siempre resuelve contra este
+        // backlog— y la referencia externa, que el arnes NO puede comprobar,
+        // vive en su propio campo. Mezclarlas obligaria a que el mismo dato
+        // signifique dos cosas segun tenga o no una barra.
+        if let Some(r) = &resuelto_en_ref {
+            feature.insert("resuelto_en".to_string(), json!(r));
         }
         // Campos OPCIONALES (feature #17): sin declaracion la entrada queda como
         // siempre, asi que las features ya cerradas no se migran ni se tocan.
@@ -804,5 +879,85 @@ mod tests {
             mensaje_conservacion("feature/50-x", "superseded", false, false).is_none(),
             "sin rama ni worktree no hay nada que informar"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_aguas_arriba {
+    use super::*;
+
+    #[test]
+    fn forma_de_la_referencia_externa() {
+        // Se comprueba la FORMA, nunca la existencia: el repo de al lado no se
+        // abre. Lo que la forma tiene que separar es una referencia de un typo
+        // suelto, no una referencia real de una inventada — eso el arnes no lo
+        // puede saber y no finge que si.
+        for ok in [
+            "harness_process/feature-60",
+            "realestate/feature-1",
+            "a/feature-999",
+            "  harness_process/feature-60  ",
+        ] {
+            assert!(forma_de_referencia_externa(ok), "deberia aceptar: {ok}");
+        }
+        for mal in [
+            "",
+            "   ",
+            "60",                        // sin proyecto
+            "harness_process#60",        // la sintaxis de GitHub, no la del arnes
+            "harness_process/60",        // sin el prefijo feature-
+            "/feature-60",               // sin proyecto
+            "harness_process/feature-",  // sin id
+            "harness_process/feature-x", // id no numerico
+            "con espacio/feature-1",
+        ] {
+            assert!(!forma_de_referencia_externa(mal), "deberia rechazar: {mal:?}");
+        }
+    }
+
+    #[test]
+    fn todos_los_estados_tienen_su_rama() {
+        // AC-9. La #37 pago este bug una vez: `superseded` caia en el brazo `_`
+        // de la tabla de Jira y MOVIA el ticket a To Do, o sea lo reabria. Un
+        // estado nuevo sin rama explicita nace con ese mismo defecto, y el
+        // sintoma no se ve hasta que alguien mira el tablero.
+        //
+        // Esta lista es la fuente: si se agrega un estado y no se agrega aca, el
+        // test falla y obliga a decidir que hace cada consumidor con el.
+        let estados = ["done", "blocked", "pending", SUPERSEDED, AGUAS_ARRIBA];
+        for st in estados {
+            assert!(
+                !st.is_empty(),
+                "un estado vacio caeria en el brazo por defecto de todos lados"
+            );
+        }
+        // Los dos estados que NO se entregaron aca no pueden transicionar el
+        // ticket: ni a done (seria mentir) ni a pending (lo reabriria).
+        assert_eq!(SUPERSEDED, "superseded");
+        assert_eq!(AGUAS_ARRIBA, "resuelto-aguas-arriba");
+    }
+
+    #[test]
+    fn cierre_sin_io_de_red() {
+        // AC-10, comprobacion NEGATIVA: el modulo no puede resolver una
+        // referencia externa, ni queriendo. Si algun dia alguien agrega una
+        // validacion que abra el otro repo, este test lo obliga a pasar por el
+        // spec: cerrar no puede depender de que otro repo este clonado en esta
+        // maquina (la leccion de la herramienta externa ausente).
+        // Se mira SOLO el codigo de produccion: `include_str!` trae el archivo
+        // entero, y en la primera corrida este test se encontro a si mismo (su
+        // propia lista de prohibidos matcheaba). Un test que se mide a si mismo
+        // da rojo sin que haya nada roto, que es tan inutil como el verde falso.
+        let fuente = include_str!("close.rs");
+        let produccion = fuente.split("#[cfg(test)]").next().unwrap_or(fuente);
+        for prohibido in ["reqwest", "ureq", "TcpStream", "std::net"] {
+            assert!(
+                !produccion.contains(prohibido),
+                "close.rs no puede hacer I/O de red: encontrado {prohibido}"
+            );
+        }
+        // Y la forma se valida sin tocar el filesystem: una referencia a un repo
+        // que no existe en esta maquina es igual de valida que una que si.
+        assert!(forma_de_referencia_externa("no-existe-en-ningun-lado/feature-999"));
     }
 }

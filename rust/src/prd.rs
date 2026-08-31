@@ -892,7 +892,12 @@ fn feature_counts(data: &Value, slug: &str) -> (usize, usize) {
         // evidencia propia— ni pendiente, es una entrada que se plego en otra.
         // Contarla solo en el denominador hacia que el PRD pareciera menos
         // completo de lo que esta.
-        if f.get("status").and_then(Value::as_str) == Some("superseded") {
+        // `resuelto-aguas-arriba` cuenta como `superseded` (feature #65): el
+        // trabajo NO se hizo en este producto, asi que no puede sumar al
+        // numerador de completitud; y dejarlo en el denominador —lo que hacia
+        // `blocked`— condena al PRD a no llegar nunca al 100%.
+        let st = f.get("status").and_then(Value::as_str);
+        if st == Some("superseded") || st == Some(crate::commands::close::AGUAS_ARRIBA) {
             continue;
         }
         total += 1;
@@ -1546,6 +1551,32 @@ mod tests_superseded {
         ]});
         // Sin la superseded: 1 done sobre 3 (done + pending + blocked).
         assert_eq!(feature_counts(&data, ""), (1, 3));
+    }
+
+    #[test]
+    fn prd_tree_ignora_aguas_arriba() {
+        // AC-7 (#65): misma decision que `superseded`, por la misma razon — el
+        // trabajo NO se hizo en este producto, asi que no puede sumar al
+        // numerador; y dejarlo en el denominador (lo que hacia `blocked`)
+        // condena al PRD a no llegar nunca al 100%.
+        let data = json!({"features": [
+            {"id": 1, "name": "hecha", "status": "done"},
+            {"id": 2, "name": "pendiente", "status": "pending"},
+            {"id": 3, "name": "arreglada-afuera", "status": "resuelto-aguas-arriba",
+             "resuelto_en": "harness_process/feature-60"},
+            {"id": 4, "name": "trabada", "status": "blocked"}
+        ]});
+        assert_eq!(feature_counts(&data, ""), (1, 3));
+
+        // Y la comprobacion que motivo la feature: con `blocked` esa misma
+        // entrada queda en el denominador PARA SIEMPRE.
+        let como_blocked = json!({"features": [
+            {"id": 1, "name": "hecha", "status": "done"},
+            {"id": 2, "name": "pendiente", "status": "pending"},
+            {"id": 3, "name": "arreglada-afuera", "status": "blocked"},
+            {"id": 4, "name": "trabada", "status": "blocked"}
+        ]});
+        assert_eq!(feature_counts(&como_blocked, ""), (1, 4));
     }
 
     #[test]
