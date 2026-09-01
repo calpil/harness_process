@@ -126,8 +126,16 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   que aparezca un quinto.
 - `verificacion.rs`: AC ejecutables (feature #23). `parsear()` es **pura** —lee
   el texto del spec y devuelve `Verificacion { ac, comando: Option<String> }`—, y
-  esa pureza es lo que permite probar la compatibilidad contra los 310 AC reales
-  del repo sin ejecutar un solo comando. `ejecutar()` corre UN comando desde la
+  esa pureza es lo que permite probar la compatibilidad contra los cientos de AC
+  reales del repo sin ejecutar un solo comando. El nombre de un AC es
+  `AC-<digitos><letras?>` y admite una anotacion entre parentesis que no entra en
+  el nombre (`- AC-11 (MANUAL):` es `AC-11`, `- AC-4b:` es `AC-4b`): antes se
+  exigian los dos puntos pegados a los digitos y eso tiraba siete AC reales,
+  entre ellos todos los marcados `(MANUAL)` (feature #68). Cualquier
+  ampliacion de esa gramatica hay que mirarla contra `revision::menciona`, que
+  compara nombres de AC token a token: cuando la #68 sumo letras, la guarda de la
+  #64 —escrita para nombres de solo digitos— quedo incompleta y una fila de
+  `AC-4b` volvio a dar por cubierto al `AC-4`. `ejecutar()` corre UN comando desde la
   raiz con `wait-timeout` (`rules.verify_timeout_segundos`, default 300) y
   clasifica en el enum `Estado` (`Verde` / `Rojo` / `Timeout` / `Manual` /
   `Vacio`); un AC sin comando es `Manual` y **nunca** bloquea. `Vacio` (feature
