@@ -1,4 +1,5 @@
 # Review — feature #69: una linea AC ilegible no desaparece en silencio
+Revisado: approved · 2026-09-01T23:29:56Z · estampado por `harness revision --veredicto`
 
 Revision adversarial sobre el propio trabajo. El mandato fue romperlo.
 
