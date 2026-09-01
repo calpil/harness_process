@@ -995,7 +995,11 @@ mod tests {
     }
 
     #[test]
-    fn las_citas_resuelven_contra_la_raiz_de_la_FEATURE_primero() {
+    fn las_citas_resuelven_contra_la_raiz_de_la_feature_primero() {
+        // El orden importa: la raiz de la FEATURE va primero, y esa es la
+        // palabra que el nombre del test venia gritando en mayusculas a costa
+        // de un warning del compilador. Va aca, que es donde se lee.
+        //
         // El bug que aparecio la primera vez que la feature se uso de verdad:
         // el review de la #64 citaba `rust/src/revision.rs:602`, que existe en
         // el worktree (927 lineas) y no en el checkout principal (507). El gate
