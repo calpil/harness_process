@@ -29,3 +29,6 @@ Microservicios:
 
 ### Avance 2026-09-01T22:12:10Z
 AC-12: el bloque indentado tambien ejecutaba documentacion; regla agregada al parser unico con costo medido cero en el corpus
+
+---
+Cerrado: 2026-09-01T22:17:22Z - status=done - un solo parser de bloques de codigo; dos bugs de ejecucion de shell desde documentacion cerrados
