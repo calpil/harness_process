@@ -68,8 +68,12 @@ pub(crate) fn cuerpo_sin_sellos(review: &str) -> String {
     crate::markdown::lineas_clasificadas(review)
         .into_iter()
         .filter(|(l, clase)| {
+            // El MISMO predicado que usa el gate para leer el sello, y no
+            // `starts_with(SELLO_REVIEW)`: con ese, una linea de prosa del
+            // reviewer que empezara con `Revisado:` se borraba del archivo sin
+            // aviso, aunque el gate jamas la habria contado como sello.
             *clase != crate::markdown::Clase::Fuera
-                || !l.trim_start().starts_with(crate::revision::SELLO_REVIEW)
+                || crate::revision::veredicto_de_sello(l).is_none()
         })
         .map(|(l, _)| l)
         .collect::<Vec<_>>()
@@ -191,4 +195,43 @@ fn estampar(
         println!("    Un cierre `done` exige `approved`: el gate del cierre lo va a rechazar.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_sello {
+    use crate::revision::linea_sello;
+
+    #[test]
+    fn prosa_que_arranca_con_revisado_sobrevive() {
+        // Hallazgo de la revision adversarial de la #67. El limpiador borraba
+        // CUALQUIER linea de afuera que empezara con `Revisado:`, aunque el gate
+        // jamas la hubiera contado como sello: una linea de prosa del reviewer
+        // desaparecia del archivo al estampar, sin aviso. Es la misma falla que
+        // el resto de la feature —dos partes que no coinciden en QUE ES un
+        // sello— un nivel mas abajo que los fences.
+        let review = "# Review\nRevisado: el parser unico esta bien resuelto, pero el tope miente.\nRevisado a mano por un humano, sin el binario.\n| AC-1 | a.md:1 | ok |\n";
+        let out = super::cuerpo_sin_sellos(review);
+        assert!(
+            out.contains("el parser unico esta bien resuelto"),
+            "se borro prosa del reviewer:\n{out}"
+        );
+        assert!(out.contains("Revisado a mano por un humano"), "y la otra tambien");
+    }
+
+    #[test]
+    fn el_sello_de_verdad_se_sigue_borrando() {
+        // La otra mitad: si el limpiador dejara de sacar el sello anterior,
+        // `estampar` dejaria DOS sellos contradictorios y romperia su promesa de
+        // idempotencia. Un predicado mas estricto no puede costar eso.
+        let viejo = linea_sello("changes_requested", "2026-01-01 00:00");
+        let review = format!("# Review\n{viejo}\n| AC-1 | a.md:1 | ok |\n");
+        let out = super::cuerpo_sin_sellos(&review);
+        assert!(!out.contains("changes_requested"), "quedo el sello anterior:\n{out}");
+
+        // Y un sello con veredicto valido escrito a mano tambien se saca: es
+        // indistinguible de uno real y el gate lo leeria como veredicto, asi que
+        // dejarlo seria dejar DOS.
+        let review = "# Review\nRevisado: approved · a mano · sin binario\n";
+        assert!(!super::cuerpo_sin_sellos(review).contains("approved"));
+    }
 }

@@ -412,23 +412,32 @@ pub fn review_path(paths: &HarnessPaths, fid: &str) -> std::path::PathBuf {
 ///
 /// Deliberadamente NO mira ninguna linea `Veredicto:` en prosa (AC-2).
 pub fn veredicto_estampado(texto: &str) -> Option<String> {
-    for linea in lineas_fuera_de_bloque(texto) {
-        let Some(resto) = linea.trim_start().strip_prefix(SELLO_REVIEW) else {
-            continue;
-        };
-        // `continue`, no `?`: el `?` salia de la FUNCION ENTERA, asi que una
-        // primera linea `Revisado:` sin nada detras abortaba el barrido y el
-        // gate decia "no lleva el sello" con el sello tres lineas mas abajo. Un
-        // mensaje de gate que afirma algo que el archivo desmiente es lo que la
-        // #63 vino a cerrar.
-        let Some(v) = resto.trim().split(['·', ' ']).find(|p| !p.is_empty()) else {
-            continue;
-        };
-        if VEREDICTOS.contains(&v) {
-            return Some(v.to_string());
-        }
-    }
-    None
+    lineas_fuera_de_bloque(texto)
+        .into_iter()
+        .find_map(|l| veredicto_de_sello(l).map(str::to_string))
+}
+
+/// ¿Esta linea es un sello del arnes? Devuelve su veredicto si lo es.
+///
+/// Es el UNICO lugar que responde esa pregunta, y lo usan los dos lados: el gate
+/// que lee el sello y el limpiador que borra el anterior. Antes cada uno tenia su
+/// propia idea: el gate exigia un veredicto valido, el limpiador borraba
+/// CUALQUIER linea que empezara con `Revisado:`. O sea que una linea de prosa del
+/// reviewer —"Revisado: el parser esta bien resuelto, pero el tope miente"—
+/// desaparecia del archivo al estampar, sin aviso.
+///
+/// Es la misma falla que el resto de la feature, un nivel mas abajo: dos partes
+/// de la misma maquinaria que no coinciden en QUE ES un sello, igual que no
+/// coincidian en que es un bloque de codigo.
+pub fn veredicto_de_sello(linea: &str) -> Option<&str> {
+    let resto = linea.trim_start().strip_prefix(SELLO_REVIEW)?;
+    // `find`, no `?` sobre el split: una linea `Revisado:` pelada no puede
+    // abortar el barrido del que llama — el `?` salia de la funcion ENTERA y el
+    // gate decia "no lleva el sello" con el sello tres lineas mas abajo. Un
+    // mensaje de gate que afirma algo que el archivo desmiente es lo que la #63
+    // vino a cerrar.
+    let v = resto.trim().split(['·', ' ']).find(|p| !p.is_empty())?;
+    VEREDICTOS.contains(&v).then_some(v)
 }
 
 /// Re-export del parser UNICO (feature #67).

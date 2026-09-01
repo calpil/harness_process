@@ -125,6 +125,29 @@ para exigir que el test haya corrido.
 | vuelve el off-by-one del EOF | `la_cita_no_acepta_la_linea_siguiente_al_eof` |
 | vuelve el `?` de `veredicto_estampado` | `el_sello_se_encuentra_aunque_haya_lineas_peladas` |
 
+## Lo que encontro la revision adversarial
+
+**El limpiador de `estampar` borraba prosa del reviewer.** Usaba
+`starts_with(SELLO_REVIEW)` —o sea, cualquier linea de afuera que empezara con
+`Revisado:`— mientras el gate exigia ademas un veredicto valido. Una linea de
+prosa como *"Revisado: el parser unico esta bien resuelto, pero el tope miente"*
+desaparecia del archivo al estampar, **sin aviso**.
+
+Es la misma falla que el resto de la feature, un nivel mas abajo que los fences:
+dos partes de la misma maquinaria que no coinciden en **que es un sello**. El
+arreglo es el mismo que el del parser — un solo predicado,
+`revision::veredicto_de_sello`, que usan los dos lados.
+
+Los dos tests que quedan cubren las dos mitades: que la prosa sobreviva, y que el
+sello de verdad se siga borrando. La segunda importa porque un predicado mas
+estricto no puede costar la idempotencia de `estampar`: si el limpiador dejara de
+sacar el sello anterior, quedarian DOS sellos contradictorios en el archivo.
+Verificado ROJO en las dos direcciones.
+
+Este defecto es **anterior** a la #67 —el limpiador viejo tenia el mismo
+criterio— pero entra de lleno en el AC-2 ("la prosa del reviewer queda intacta"),
+cuyo test solo cubria prosa dentro de bloques.
+
 ## Lo que NO se toco, y por que
 
 - **El largo del fence estilo CommonMark** (un bloque abierto con ```` ```` ````
