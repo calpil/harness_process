@@ -1,4 +1,5 @@
 # Review — feature #68: el arnes no pierde los AC que pide revisar a mano
+Revisado: approved · 2026-09-01T22:48:46Z · estampado por `harness revision --veredicto`
 
 Revision adversarial sobre el propio trabajo. El mandato fue romperlo.
 
