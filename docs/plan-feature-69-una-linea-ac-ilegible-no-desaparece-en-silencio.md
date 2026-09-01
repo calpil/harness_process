@@ -26,3 +26,6 @@ Microservicios:
      implementer DEBE preguntar al usuario que decision aplicar ANTES de
      implementar ese feat/fase/tarea, y registrar aqui la respuesta. -->
 - 
+
+---
+Cerrado: 2026-09-01T23:30:03Z - status=done - el aviso de AC ilegible; y el gate y estampar hacian la misma pregunta con su propia copia
