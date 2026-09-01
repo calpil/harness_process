@@ -256,3 +256,5 @@ con su fecha.>
 - #63 el_arnes_no_afirma_lo_que_no_puede_comprobar -> done 2026-08-27 · spec: docs/spec-feature-63-el-arnes-no-afirma-lo-que-no-puede-comprobar.md · impl: docs/impl-63.md
 - #64 el_arnes_no_promete_enforcement_que_no_hace -> done 2026-08-30 · spec: docs/spec-feature-64-el-arnes-no-promete-enforcement-que-no-hace.md · impl: docs/impl-64.md
 - #66 el_stop_hook_no_entra_en_bucle -> done 2026-08-30 · spec: docs/spec-feature-66-el-stop-hook-no-entra-en-bucle.md · impl: docs/impl-66.md
+- #67 los_dos_parsers_del_review_no_se_contradicen -> done 2026-09-01 · spec: docs/spec-feature-67-los-dos-parsers-del-review-no-se-contradicen.md · impl: docs/impl-67.md
+- #65 el_arnes_cierra_lo_resuelto_aguas_arriba -> done 2026-09-01 · spec: docs/spec-feature-65-el-arnes-cierra-lo-resuelto-aguas-arriba.md · impl: docs/impl-65.md
