@@ -26,3 +26,6 @@ Microservicios:
      implementer DEBE preguntar al usuario que decision aplicar ANTES de
      implementar ese feat/fase/tarea, y registrar aqui la respuesta. -->
 - 
+
+---
+Cerrado: 2026-09-01T22:21:25Z - status=done - estado resuelto-aguas-arriba; dos AC que no podian fallar, encontrados por la prueba del rojo
