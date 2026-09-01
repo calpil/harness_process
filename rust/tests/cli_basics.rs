@@ -7623,7 +7623,11 @@ fn las_features_cerradas_no_se_mueven() {
         vec!["journey"],
         vec!["doctor", "--json"],
     ] {
-        cmd(&bin).args(&args).assert();
+        // Se descarta el exit code a proposito: `next` sin pendientes sale 1 y
+        // eso no es un fallo. Lo que se afirma es lo de abajo — que ninguno
+        // MOVIO el backlog—, no que todos salgan 0. Un `.assert()` suelto no
+        // afirmaba nada y el compilador tenia razon en avisarlo.
+        let _ = cmd(&bin).args(&args).output();
     }
     let despues = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
     assert_eq!(antes, despues, "un comando de solo lectura movio el backlog");
