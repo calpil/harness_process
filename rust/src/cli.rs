@@ -38,11 +38,16 @@ pub enum Command {
     Close {
         #[arg(long)]
         feature: String,
-        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["done", "blocked", "pending", "superseded"]))]
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(crate::commands::close::ESTADOS_DE_CIERRE))]
         status: String,
         /// Feature que absorbio este trabajo (obligatorio con --status superseded)
         #[arg(long = "absorbida-por")]
         absorbida_por: Option<String>,
+        /// Donde se arreglo, en otro repo: `<proyecto>/feature-<id>` (obligatorio
+        /// con --status resuelto-aguas-arriba). El arnes comprueba la FORMA, no
+        /// la existencia: vive en un repo que no puede abrir (feature #65).
+        #[arg(long = "resuelto-en")]
+        resuelto_en: Option<String>,
         #[arg(long)]
         note: Option<String>,
         /// Rama a la que se integra el cierre `done` (GitFlow). Sin esto el
@@ -514,6 +519,7 @@ pub fn run() -> anyhow::Result<()> {
             note,
             to,
             absorbida_por,
+            resuelto_en,
             leccion,
             leccion_motivo,
         } => commands::close::run(
@@ -523,6 +529,7 @@ pub fn run() -> anyhow::Result<()> {
                 status: &status,
                 note: note.as_deref(),
                 absorbida_por: absorbida_por.as_deref(),
+                resuelto_en: resuelto_en.as_deref(),
                 leccion: leccion.as_deref(),
                 leccion_motivo: leccion_motivo.as_deref(),
                 to: to.as_deref(),

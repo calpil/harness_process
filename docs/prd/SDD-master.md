@@ -244,14 +244,33 @@ el detalle a su propio ADR y enlazalo aqui.>
 
 ## 5. Datos
 
-**Los estados de una feature** (`feature_list.json`). Son cinco y significan
+**Los estados de una feature** (`feature_list.json`). Son seis y significan
 cosas distintas: `pending` (sin empezar, `next` la ofrece), `in_progress`
 (pueden convivir varias, cada una en su worktree, desde la #47), `done` (hecha,
-con spec aprobado y su evidencia), `blocked` (trabada por algo externo) y
+con spec aprobado y su evidencia), `blocked` (trabada por algo externo),
 `superseded` (el trabajo se hizo en OTRA feature, que se nombra en
-`superseded_by` y se valida al cerrar). Solo `done` pasa por los cinco gates de
-cierre; `superseded` no cuenta ni en el numerador ni en el denominador de
-`prd tree`, porque no es trabajo hecho ni pendiente.
+`superseded_by` y se valida al cerrar) y `resuelto-aguas-arriba` (el trabajo se
+hizo en OTRO PROYECTO, que se nombra en `resuelto_en` con la forma
+`<proyecto>/feature-<id>`, feature #65). Solo `done` pasa por los cinco gates de
+cierre; `superseded` y `resuelto-aguas-arriba` no cuentan ni en el numerador ni
+en el denominador de `prd tree`, porque no son trabajo hecho ni pendiente.
+
+De la referencia externa se comprueba **la forma y nada mas**, y `status` lo dice
+literal ("sin verificar"): la feature de aguas arriba vive en un repo que el
+arnes no puede abrir, y validar su existencia seria prometer enforcement que no
+se hace (feature #64). Por la misma razon el cierre no transiciona el ticket de
+Atlassian: mandarlo a `done` afirmaria que este proyecto lo entrego, y dejarlo
+caer en el brazo por defecto lo REABRIRIA.
+
+**Un estado nuevo tiene que decidir en cada consumidor** (feature #65). El campo
+es un `&str` comparado por igualdad en varios lugares, asi que un estado que no
+declara su rama en alguno cae en el brazo por defecto de ese consumidor — que en
+Atlassian significa reabrir el ticket. Las decisiones dejan de vivir en `match`
+inline y son produccion consultable (`close::ESTADOS_DE_CIERRE`,
+`emit::efecto_de`, `prd::cuenta_en_el_avance`, `status::ESTADOS_CON_BUCKET`), y
+un test recorre la tabla completa —estados x consumidores— contra ellas. Un
+estado que no se agregue a la tabla no compila; uno que se agregue sin decidir
+que hace cada consumidor, falla.
 
 **El quinto gate: el veredicto del reviewer** (feature #64). `require_review`
 exige que `docs/review-<id>.md` lleve la linea que estampa

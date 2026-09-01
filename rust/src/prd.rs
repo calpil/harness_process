@@ -57,7 +57,6 @@ impl Prd {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "PRD".to_string())
     }
-
     /// Como se escribe esta referencia en la linea de comandos.
     pub fn reference(&self) -> String {
         if self.slug.is_empty() {
@@ -879,6 +878,21 @@ pub fn feature_prd_slug(feature: &Value) -> String {
     normalize_parent(feature.get("prd").and_then(Value::as_str))
 }
 
+/// ¿Esta feature entra en el conteo de avance del PRD?
+///
+/// Una feature `superseded` no cuenta NI arriba NI abajo (feature #37,
+/// decision del usuario OBS-1): no es trabajo hecho —nunca tuvo spec ni
+/// evidencia propia— ni pendiente, es una entrada que se plego en otra.
+/// Contarla solo en el denominador hacia que el PRD pareciera menos
+/// completo de lo que esta.
+/// `resuelto-aguas-arriba` cuenta como `superseded` (feature #65): el
+/// trabajo NO se hizo en este producto, asi que no puede sumar al
+/// numerador de completitud; y dejarlo en el denominador —lo que hacia
+/// `blocked`— condena al PRD a no llegar nunca al 100%.
+pub(crate) fn cuenta_en_el_avance(status: Option<&str>) -> bool {
+    status != Some("superseded") && status != Some(crate::commands::close::AGUAS_ARRIBA)
+}
+
 /// Cuenta features del backlog por PRD: (cerradas como done, total).
 fn feature_counts(data: &Value, slug: &str) -> (usize, usize) {
     let mut done = 0;
@@ -887,12 +901,8 @@ fn feature_counts(data: &Value, slug: &str) -> (usize, usize) {
         if feature_prd_slug(f) != slug {
             continue;
         }
-        // Una feature `superseded` no cuenta NI arriba NI abajo (feature #37,
-        // decision del usuario OBS-1): no es trabajo hecho —nunca tuvo spec ni
-        // evidencia propia— ni pendiente, es una entrada que se plego en otra.
-        // Contarla solo en el denominador hacia que el PRD pareciera menos
-        // completo de lo que esta.
-        if f.get("status").and_then(Value::as_str) == Some("superseded") {
+        let st = f.get("status").and_then(Value::as_str);
+        if !cuenta_en_el_avance(st) {
             continue;
         }
         total += 1;
@@ -1546,6 +1556,32 @@ mod tests_superseded {
         ]});
         // Sin la superseded: 1 done sobre 3 (done + pending + blocked).
         assert_eq!(feature_counts(&data, ""), (1, 3));
+    }
+
+    #[test]
+    fn prd_tree_ignora_aguas_arriba() {
+        // AC-7 (#65): misma decision que `superseded`, por la misma razon — el
+        // trabajo NO se hizo en este producto, asi que no puede sumar al
+        // numerador; y dejarlo en el denominador (lo que hacia `blocked`)
+        // condena al PRD a no llegar nunca al 100%.
+        let data = json!({"features": [
+            {"id": 1, "name": "hecha", "status": "done"},
+            {"id": 2, "name": "pendiente", "status": "pending"},
+            {"id": 3, "name": "arreglada-afuera", "status": "resuelto-aguas-arriba",
+             "resuelto_en": "harness_process/feature-60"},
+            {"id": 4, "name": "trabada", "status": "blocked"}
+        ]});
+        assert_eq!(feature_counts(&data, ""), (1, 3));
+
+        // Y la comprobacion que motivo la feature: con `blocked` esa misma
+        // entrada queda en el denominador PARA SIEMPRE.
+        let como_blocked = json!({"features": [
+            {"id": 1, "name": "hecha", "status": "done"},
+            {"id": 2, "name": "pendiente", "status": "pending"},
+            {"id": 3, "name": "arreglada-afuera", "status": "blocked"},
+            {"id": 4, "name": "trabada", "status": "blocked"}
+        ]});
+        assert_eq!(feature_counts(&como_blocked, ""), (1, 4));
     }
 
     #[test]

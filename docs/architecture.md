@@ -219,12 +219,27 @@ salvo cuando tiene algo que decir. Su estado local vive en `progress/`:
 
 ### Estados de una feature
 
-`pending` / `in_progress` / `done` / `blocked` / `superseded`. El campo es un
-`&str` y **no** un enum: catorce lugares lo comparan por igualdad contra un valor
-concreto, lo que hace barato agregar uno nuevo (la #37 agrego `superseded` con un
-cambio real de una linea) y a la vez significa que un valor invalido escrito a
-mano solo lo detecta clap. `superseded` exige `superseded_by`, que se valida
-contra el backlog al cerrar.
+`pending` / `in_progress` / `done` / `blocked` / `superseded` /
+`resuelto-aguas-arriba`. El campo es un `&str` y **no** un enum: varios lugares
+lo comparan por igualdad contra un valor concreto, lo que a la vez significa que
+un valor invalido escrito a mano solo lo detecta clap.
+
+Agregar un estado NO es barato, y esta seccion decia lo contrario. La #37 lo
+midio como "un cambio real de una linea"; la #65 encontro el costo verdadero: un
+estado que no declara su rama en algun consumidor cae en el brazo por defecto de
+ese consumidor, y en Atlassian el brazo por defecto REABRE el ticket. Peor, los
+tests que deberian detectarlo no lo detectaban — uno asertaba que una constante
+era igual a su propio literal y otro llamaba a una copia de la tabla definida
+dentro de `mod tests`.
+
+Por eso las decisiones por estado son ahora produccion consultable, una por
+consumidor: `close::ESTADOS_DE_CIERRE` (que acepta el CLI),
+`emit::efecto_de` (que le hace al ticket), `prd::cuenta_en_el_avance` (si suma al
+avance) y `status::ESTADOS_CON_BUCKET` (si tiene bucket propio en la cabecera, o
+cae en `otros=N`). El test `todos_los_estados_tienen_su_rama` recorre la tabla
+completa contra las cuatro. `superseded` exige `superseded_by` y
+`resuelto-aguas-arriba` exige `resuelto_en`; el primero se valida contra el
+backlog al cerrar, del segundo se comprueba solo la forma.
 
 ### Exit codes (estables para hooks)
 

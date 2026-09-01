@@ -8,6 +8,17 @@ use crate::plan::{get_plan_sig, is_plan_stale};
 use crate::pycompat::py_str;
 use crate::spec::{is_spec_stale, spec_state};
 
+/// Los estados que tienen bucket propio en la cabecera. Lo que no este aca cae
+/// en `otros=N` y se VE — antes desaparecia sin dejar rastro.
+pub(crate) const ESTADOS_CON_BUCKET: [&str; 6] = [
+    "in_progress",
+    "pending",
+    "blocked",
+    "done",
+    crate::commands::close::SUPERSEDED,
+    crate::commands::close::AGUAS_ARRIBA,
+];
+
 pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
     let data = load_features(paths)?;
     let features = features_slice(&data);
@@ -17,14 +28,31 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
             .filter(|f| feature_status(f) == Some(status))
             .count()
     };
-    println!(
-        "Backlog: {} feature(s) | active={} pending={} blocked={} done={}",
+    // La cabecera SUMA (feature #65). Antes enumeraba cuatro estados de los
+    // cinco y `superseded` desaparecia: con dos features absorbidas imprimia
+    // "4 feature(s) | active=0 pending=0 blocked=0 done=2" y los numeros no
+    // daban. Un resumen que no suma invita a buscar las que faltan en otro lado.
+    // `otros` existe para que agregar un estado nuevo no vuelva a romper esto en
+    // silencio: lo que no tenga su bucket cae ahi y se ve.
+    let conocidos = ESTADOS_CON_BUCKET;
+    let otros = features
+        .iter()
+        .filter(|f| !feature_status(f).is_some_and(|s| conocidos.contains(&s)))
+        .count();
+    let mut linea = format!(
+        "Backlog: {} feature(s) | active={} pending={} blocked={} done={} superseded={} aguas-arriba={}",
         features.len(),
         count("in_progress"),
         count("pending"),
         count("blocked"),
-        count("done")
+        count("done"),
+        count(crate::commands::close::SUPERSEDED),
+        count(crate::commands::close::AGUAS_ARRIBA)
     );
+    if otros > 0 {
+        linea.push_str(&format!(" otros={otros}"));
+    }
+    println!("{linea}");
     for f in features {
         let services = f
             .get("microservicios")
@@ -47,7 +75,16 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
             Some(por) if py_str(f.get("status")) == "superseded" => {
                 format!("superseded por #{por}")
             }
-            _ => py_str(f.get("status")),
+            _ => match f.get("resuelto_en").and_then(Value::as_str) {
+                // "sin verificar" NO es cortesia: es la unica parte del renglon
+                // que el arnes puede garantizar. La referencia vive en otro repo
+                // y no la puede abrir; decirla sin la marca seria afirmar lo que
+                // no comprobo, que es lo que la #63 cerro (feature #65).
+                Some(r) if py_str(f.get("status")) == crate::commands::close::AGUAS_ARRIBA => {
+                    format!("resuelto aguas arriba en {r}, sin verificar")
+                }
+                _ => py_str(f.get("status")),
+            },
         };
         println!(
             "  #{} [{estado}] {} ({services})",
