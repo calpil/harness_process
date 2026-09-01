@@ -48,6 +48,30 @@ esquemas. Un cambio aqui impacta a otros; se registra impacto antes de mergear.>
 
 ## 4. Decisiones tecnicas
 
+**Un solo parser por formato** (feature #67). Habia CUATRO parsers de bloques de
+codigo markdown con TRES semanticas sobre los mismos documentos, y el costo no
+era teorico: `verify` ejecutaba los `Comando:` escritos dentro de un bloque
+`~~~` —ejecucion de shell salida de una seccion que el autor marco como
+documentacion, el bug que la #23 cerro para backticks y seguia abierto para
+tildes— y `revision --veredicto` borraba prosa del reviewer o dejaba dos sellos
+contradictorios segun la paridad de fences ajenos citados. Tres decisiones:
+
+- **Una sola implementacion, en `markdown.rs`.** Fences EMPAREJADOS: se recuerda
+  cual abrio el bloque y solo lo cierra el mismo. Es la unica de las tres
+  semanticas que coincide con como se renderiza el markdown de verdad.
+- **Se devuelve la clasificacion completa, no una lista filtrada.** Cada
+  consumidor necesita algo distinto de la MISMA respuesta —el gate quiere lo de
+  afuera, el limpiador necesita todas las lineas para reescribir conservando los
+  fences, el parseo de AC quiere todo lo que no sea contenido—. Un `Vec<&str>`
+  compartido no alcanzaba, y eso fue exactamente lo que hizo que cada uno se
+  escribiera el suyo.
+- **La regla se hace cumplir sola.** `tests/conventions_check.sh` gana el modo
+  `un-solo-parser`, que se pone rojo ante un quinto. La unica exencion es una
+  implementacion vieja conservada para poder medir contra ella, declarada por
+  linea con `PARSER-VIEJO-A-PROPOSITO` y NOMBRADA en la salida del check: eximir
+  los tests enteros dejaria que un parser de verdad se esconda en uno, que es
+  justo lo que paso con el cross-check de `verificacion.rs`.
+
 **Un gate solo verifica lo que puede ejecutar** (feature #46). El comando que
 mejor prueba una feature suele ser el mas verboso, y era justo el que no se
 podia declarar: `verify` leia los pipes DESPUES de esperar al proceso, asi que

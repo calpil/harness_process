@@ -53,6 +53,33 @@ pub fn run(
 /// Se niega —sin escribir nada— si el review no responde por cada AC-n que
 /// declara el SPEC con una cita `archivo:linea`. Esa es la parte del gate que
 /// un archivo tipeado en cinco segundos no puede satisfacer.
+/// Cuerpo del review sin los sellos anteriores, lo que hace idempotente a
+/// `estampar`.
+///
+/// Se saca el sello solo de las lineas que estan FUERA de un bloque: un review
+/// que documenta el formato del sello lo cita, y borrar esa cita seria mutar la
+/// prosa del reviewer.
+///
+/// Esta suelta —y no inline en `estampar`— para que el test exhaustivo del AC-4
+/// pueda comparar lo que ve ESTE consumidor contra la clasificacion del parser
+/// unico. Inline, el unico que podia mirarla era un E2E con un caso a mano, y un
+/// caso a mano es exactamente como se colo la divergencia.
+pub(crate) fn cuerpo_sin_sellos(review: &str) -> String {
+    crate::markdown::lineas_clasificadas(review)
+        .into_iter()
+        .filter(|(l, clase)| {
+            // El MISMO predicado que usa el gate para leer el sello, y no
+            // `starts_with(SELLO_REVIEW)`: con ese, una linea de prosa del
+            // reviewer que empezara con `Revisado:` se borraba del archivo sin
+            // aviso, aunque el gate jamas la habria contado como sello.
+            *clase != crate::markdown::Clase::Fuera
+                || crate::revision::veredicto_de_sello(l).is_none()
+        })
+        .map(|(l, _)| l)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn estampar(
     paths: &HarnessPaths,
     feature: &serde_json::Map<String, serde_json::Value>,
@@ -111,32 +138,25 @@ fn estampar(
     // La parte que ESCRIBE. Idempotente: reemplaza el sello anterior si lo hay.
     let stamp = crate::progress::now_stamp();
     let sello = linea_sello(veredicto, &stamp);
-    // Se saca el sello anterior, pero SOLO fuera de los bloques ```: un review
-    // que documenta el formato del sello lo cita, y borrar esa cita seria mutar
-    // la prosa del reviewer.
-    let mut en_bloque = false;
-    let mut cuerpo_lineas: Vec<&str> = Vec::new();
-    for l in review.lines() {
-        let t = l.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            en_bloque = !en_bloque;
-            cuerpo_lineas.push(l);
-            continue;
-        }
-        if !en_bloque && l.trim_start().starts_with(crate::revision::SELLO_REVIEW) {
-            continue;
-        }
-        cuerpo_lineas.push(l);
-    }
-    let cuerpo = cuerpo_lineas.join("\n");
+    // Se saca el sello anterior, pero SOLO de las lineas que estan FUERA de un
+    // bloque: un review que documenta el formato del sello lo cita, y borrar esa
+    // cita seria mutar la prosa del reviewer.
+    //
+    // Feature #67: esto tenia su propio parser (toggle con cualquier fence) que
+    // discrepaba con el del gate (fences emparejados). Medido: segun la paridad
+    // de fences ajenos citados, o borraba la cita del reviewer o dejaba DOS
+    // sellos contradictorios en el archivo. Ahora los dos preguntan lo mismo.
+    let cuerpo = cuerpo_sin_sellos(&review);
     // El sello va tras la primera linea (el titulo), donde se lee sin scrollear
     // — pero NUNCA dentro de un bloque ```: ahi el gate no lo veria y el
     // comando estaria diciendo "registrado" sobre algo que su propio gate niega.
     // Si el review arranca con un fence, se sella arriba de todo.
-    let arranca_en_bloque = cuerpo
-        .lines()
-        .next()
-        .is_some_and(|l| l.trim_start().starts_with("```") || l.trim_start().starts_with("~~~"));
+    // La primera linea ya viene clasificada por el parser unico: no hace falta
+    // un tercer chequeo de fences con su propia idea de que es un bloque
+    // (feature #67).
+    let arranca_en_bloque = crate::markdown::lineas_clasificadas(&cuerpo)
+        .first()
+        .is_some_and(|(_, c)| *c != crate::markdown::Clase::Fuera);
     let mut out = String::new();
     let mut lineas = cuerpo.lines();
     if !arranca_en_bloque && let Some(titulo) = lineas.next() {
@@ -149,15 +169,21 @@ fn estampar(
         out.push_str(l);
         out.push('\n');
     }
-    std::fs::write(&ruta, &out)?;
-    // Se re-lee con el MISMO parser del gate: el comando no afirma "registrado"
-    // sin comprobar que lo registrado se pueda leer.
+    // Se comprueba con el MISMO parser del gate ANTES de escribir. El chequeo
+    // ya operaba sobre `out` en memoria, no sobre el archivo, asi que correrlo
+    // primero no pierde nada y saca la escritura de en medio: lo irreversible
+    // va ultimo (AC-11 de la #67). No se pudo reproducir un caso donde el orden
+    // viejo dejara el archivo pisado con el comando en error —el `bail` posterior
+    // no revertia nada, pero el contenido escrito era el bueno— asi que esto es
+    // cambio de forma, no arreglo de bug: la forma en que un comando no deberia
+    // poder fallar DESPUES de haber tocado el disco.
     if crate::revision::veredicto_estampado(&out).as_deref() != Some(veredicto) {
         anyhow::bail!(
-            "El sello quedo escrito pero el gate no lo puede leer en {rel}.\n    \
+            "El sello no se puede leer con el parser del gate, asi que no se escribio {rel}.\n    \
              Revisa que el review no lo deje dentro de un bloque de codigo."
         );
     }
+    std::fs::write(&ruta, &out)?;
 
     let _ = crate::progress::log(
         paths,
@@ -169,4 +195,43 @@ fn estampar(
         println!("    Un cierre `done` exige `approved`: el gate del cierre lo va a rechazar.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_sello {
+    use crate::revision::linea_sello;
+
+    #[test]
+    fn prosa_que_arranca_con_revisado_sobrevive() {
+        // Hallazgo de la revision adversarial de la #67. El limpiador borraba
+        // CUALQUIER linea de afuera que empezara con `Revisado:`, aunque el gate
+        // jamas la hubiera contado como sello: una linea de prosa del reviewer
+        // desaparecia del archivo al estampar, sin aviso. Es la misma falla que
+        // el resto de la feature —dos partes que no coinciden en QUE ES un
+        // sello— un nivel mas abajo que los fences.
+        let review = "# Review\nRevisado: el parser unico esta bien resuelto, pero el tope miente.\nRevisado a mano por un humano, sin el binario.\n| AC-1 | a.md:1 | ok |\n";
+        let out = super::cuerpo_sin_sellos(review);
+        assert!(
+            out.contains("el parser unico esta bien resuelto"),
+            "se borro prosa del reviewer:\n{out}"
+        );
+        assert!(out.contains("Revisado a mano por un humano"), "y la otra tambien");
+    }
+
+    #[test]
+    fn el_sello_de_verdad_se_sigue_borrando() {
+        // La otra mitad: si el limpiador dejara de sacar el sello anterior,
+        // `estampar` dejaria DOS sellos contradictorios y romperia su promesa de
+        // idempotencia. Un predicado mas estricto no puede costar eso.
+        let viejo = linea_sello("changes_requested", "2026-01-01 00:00");
+        let review = format!("# Review\n{viejo}\n| AC-1 | a.md:1 | ok |\n");
+        let out = super::cuerpo_sin_sellos(&review);
+        assert!(!out.contains("changes_requested"), "quedo el sello anterior:\n{out}");
+
+        // Y un sello con veredicto valido escrito a mano tambien se saca: es
+        // indistinguible de uno real y el gate lo leeria como veredicto, asi que
+        // dejarlo seria dejar DOS.
+        let review = "# Review\nRevisado: approved · a mano · sin binario\n";
+        assert!(!super::cuerpo_sin_sellos(review).contains("approved"));
+    }
 }
