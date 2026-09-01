@@ -148,6 +148,37 @@ Este defecto es **anterior** a la #67 —el limpiador viejo tenia el mismo
 criterio— pero entra de lleno en el AC-2 ("la prosa del reviewer queda intacta"),
 cuyo test solo cubria prosa dentro de bloques.
 
+## El otro bloque de codigo que tiene markdown (AC-12)
+
+Markdown tiene **dos** formas de bloque y los cuatro parsers viejos conocian solo
+la cercada. Confirmado con el binario antes de tocar nada: un `Comando:` escrito
+en un bloque **indentado con 4 espacios** se ejecutaba —`verify` reportaba el
+AC-99 documentado y el archivo aparecia escrito— y un sello citado con esa
+sangria se leia como veredicto.
+
+Es el mismo daño que el bug de `~~~` con la otra sintaxis. No aparecio antes
+porque **no era una divergencia entre parsers**: los cuatro compartian el hueco,
+asi que mirar en que se contradecian no lo mostraba. Lo encontro sondear el
+parser unico contra las formas de bloque que markdown admite, no compararlo con
+sus antecesores.
+
+La regla es estrecha a proposito: cuatro espacios (o un tab, que vale cuatro) y
+nada mas, sin las reglas de CommonMark sobre interrumpir parrafos. Una linea en
+blanco no cuenta aunque tenga espacios. **El costo se midio antes de aplicarla**:
+0 de 733 AC reales, 0 de 1346 filas `| AC-n |` de review y 0 lineas `Comando:`
+tienen sangria de 4. O sea que no cambia lo que hoy se lee de ningun documento
+del repo — igual que el AC-5, es un agujero que se cierra antes de que alguien lo
+pise.
+
+Vive en el parser unico, asi que arregla a los tres consumidores de una vez: el
+AC deja de parsearse, el sello deja de contarse, y el limpiador de `estampar`
+ahora **conserva** el sello indentado en vez de borrarlo, porque es prosa.
+
+El simbolo indentado entra al alfabeto de la enumeracion exhaustiva del AC-4. Se
+baja el largo maximo de 7 a 6 para no triplicar el tiempo del test: el caso que
+importa —un consumidor que no coincide con la clasificacion— aparece con dos
+lineas, no con siete.
+
 ## Lo que NO se toco, y por que
 
 - **El largo del fence estilo CommonMark** (un bloque abierto con ```` ```` ````

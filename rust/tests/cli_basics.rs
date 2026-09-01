@@ -7263,3 +7263,67 @@ fn estampar_deja_un_solo_sello() {
         }
     }
 }
+
+#[test]
+fn verify_no_ejecuta_documentacion_indentada() {
+    // AC-12: markdown tiene DOS formas de bloque de codigo y los cuatro parsers
+    // viejos conocian solo la cercada. Confirmado con el binario antes de
+    // cerrarlo: `verify` reportaba el AC-99 documentado y el archivo aparecia
+    // escrito. Es el mismo daño que el bug de `~~~` del AC-1 —ejecucion de shell
+    // salida de una seccion que el autor marco como documentacion— con la otra
+    // sintaxis. No era una divergencia ENTRE parsers, asi que no se veia desde
+    // el problema que motivo la feature.
+    let (dir, bin, _spec) = feature_con_spec(
+        "- AC-1: Given algo, When pasa, Then otra.\n  \
+         Comando: `true`\n\n\
+         Asi se declara un AC, para el que nunca lo vio:\n\n\
+         \x20   - AC-99: Given ejemplo, When ejemplo, Then ejemplo.\n\
+         \x20     Comando: `touch la-documentacion-indentada-se-ejecuto.txt`\n",
+    );
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("AC-99").not());
+    assert!(
+        !dir.path()
+            .join("la-documentacion-indentada-se-ejecuto.txt")
+            .exists(),
+        "verify ejecuto un comando escrito en un bloque indentado"
+    );
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    assert!(!reporte.contains("AC-99"), "el reporte cuenta un AC documentado");
+    assert!(reporte.contains("AC-1"), "se perdio el AC de verdad");
+}
+
+#[test]
+fn el_gate_no_lee_un_sello_indentado() {
+    // La mitad simetrica del AC-12: un review que CITA un sello con sangria
+    // —sin fence, la otra forma de bloque— no puede contar como veredicto. El
+    // sello lo escribe el binario en columna 0; uno indentado es documentacion.
+    let (dir, bin, _spec) = feature_lista_para_revisar();
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        &format!(
+            "{CITAS_QUE_RESUELVEN}\nAsi queda el sello:\n\n\
+             \x20   Revisado: approved · 2026-01-01 00:00 · estampado por `harness revision --veredicto`\n"
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no lleva el sello del arnes"));
+    // Y estampar de verdad CONSERVA esa cita: es prosa del reviewer.
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .success();
+    let review = std::fs::read_to_string(dir.path().join("docs/review-1.md")).unwrap();
+    assert!(
+        review.contains("    Revisado: approved · 2026-01-01 00:00"),
+        "borro el sello citado con sangria, que es prosa:\n{review}"
+    );
+}

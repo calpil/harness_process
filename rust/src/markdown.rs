@@ -46,6 +46,12 @@ pub enum Clase {
     Fence,
     /// Contenido del bloque: es documentacion, no instrucciones para el arnes.
     Dentro,
+    /// Linea con sangria de 4+ espacios: la OTRA forma de bloque de codigo que
+    /// tiene markdown, la que no lleva fence. Cuenta como `Dentro` para todos
+    /// los consumidores; es una variante propia solo para que el que reescribe
+    /// el documento pueda distinguirla y no la confunda con contenido de un
+    /// bloque cercado.
+    Indentada,
 }
 
 /// Clasifica cada linea del documento.
@@ -80,10 +86,49 @@ pub fn lineas_clasificadas(texto: &str) -> Vec<(&str, Clase)> {
             // Un fence DISTINTO del que abrio es contenido del bloque, no un
             // cierre: es el caso de un review ajeno citado entero.
             (Some(_), _) => out.push((linea, Clase::Dentro)),
+            // Bloque de codigo INDENTADO: markdown tiene dos formas de bloque y
+            // los cuatro parsers viejos conocian solo una. Medido antes de
+            // cerrarlo: `verify` EJECUTABA un `Comando:` escrito asi —el mismo
+            // daño que el bug de `~~~`, con la otra sintaxis— y el gate leia
+            // como veredicto un sello citado asi.
+            //
+            // No era una divergencia ENTRE parsers —los cuatro compartian el
+            // hueco— asi que no se veia desde el problema que motivo la feature.
+            // La regla es estrecha a proposito: 4+ espacios y nada mas, sin las
+            // reglas de CommonMark sobre interrumpir parrafos. Costo medido en
+            // el corpus real antes de aplicarla: 0 de 733 AC, 0 de 1346 filas de
+            // review y 0 lineas `Comando:` tienen esa sangria, asi que no cambia
+            // lo que hoy se lee de ningun documento.
+            (None, None) if sangria_de_bloque(linea) => {
+                out.push((linea, Clase::Indentada))
+            }
             (None, None) => out.push((linea, Clase::Fuera)),
         }
     }
     out
+}
+
+/// ¿Esta linea tiene la sangria de un bloque de codigo de markdown?
+///
+/// Un tab cuenta como cuatro espacios, que es la equivalencia que usa markdown.
+/// Una linea en blanco NO es codigo: separa parrafos y aparece indentada por
+/// accidente todo el tiempo.
+fn sangria_de_bloque(linea: &str) -> bool {
+    if linea.trim().is_empty() {
+        return false;
+    }
+    let mut ancho = 0usize;
+    for c in linea.chars() {
+        match c {
+            ' ' => ancho += 1,
+            '\t' => ancho += 4,
+            _ => break,
+        }
+        if ancho >= 4 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Las lineas que NO estan dentro de un bloque ni son fences.
@@ -160,6 +205,40 @@ mod tests {
     fn los_fences_indentados_cuentan() {
         let t = "  ```\n  adentro\n  ```\nafuera";
         assert_eq!(lineas_fuera_de_bloque(t), vec!["afuera"]);
+    }
+
+    #[test]
+    fn un_bloque_indentado_es_codigo() {
+        // La OTRA forma de bloque de markdown. Antes de esto, `verify` ejecutaba
+        // un `Comando:` escrito asi —confirmado con el binario, el archivo
+        // aparecia escrito— y el gate leia como veredicto un sello citado asi.
+        let t = "texto\n    - AC-99: ejemplo\n      Comando: `rm -rf /`\ntexto2";
+        assert_eq!(
+            clases(t),
+            vec![Clase::Fuera, Clase::Indentada, Clase::Indentada, Clase::Fuera]
+        );
+        assert_eq!(lineas_fuera_de_bloque(t), vec!["texto", "texto2"]);
+    }
+
+    #[test]
+    fn la_sangria_corta_donde_tiene_que_cortar() {
+        // Tres espacios es prosa indentada, cuatro es codigo. La sangria de los
+        // documentos del arnes es de dos, asi que el corte no toca nada de lo
+        // que ya existe: medido, 0 de 733 AC reales y 0 de 1346 filas de review
+        // tienen sangria de 4.
+        assert_eq!(clases("   casi"), vec![Clase::Fuera]);
+        assert_eq!(clases("    justo"), vec![Clase::Indentada]);
+        // Un tab vale cuatro, como en markdown.
+        assert_eq!(clases("\tcon tab"), vec![Clase::Indentada]);
+        assert_eq!(clases("  \tdos y tab"), vec![Clase::Indentada]);
+        // Una linea EN BLANCO no es codigo aunque tenga espacios: separa
+        // parrafos y aparece indentada por accidente todo el tiempo.
+        assert_eq!(clases("      "), vec![Clase::Fuera]);
+        // Y adentro de un bloque cercado manda el fence, no la sangria.
+        assert_eq!(
+            clases("```\n    adentro\n```"),
+            vec![Clase::Fence, Clase::Dentro, Clase::Fence]
+        );
     }
 
     #[test]
@@ -265,7 +344,10 @@ mod tests {
             .map(|(_, c)| match c {
                 Clase::Fuera => 'O',
                 Clase::Fence => 'F',
-                Clase::Dentro => 'D',
+                // Los dos tipos de contenido se colapsan a 'D': para los
+                // consumidores son lo mismo —documentacion, no instrucciones— y
+                // las semanticas viejas contra las que se compara no distinguian.
+                Clase::Dentro | Clase::Indentada => 'D',
             })
             .collect()
     }
@@ -278,9 +360,12 @@ mod tests {
         // unico. Si manana alguien vuelve a escribir un parser local en
         // `verificacion` o en `commands::revision`, esto se pone rojo aunque el
         // grep del AC-10 no lo agarre.
-        let alfabeto = ["```", "~~~", SELLO, AC, "texto"];
+        // El simbolo indentado entra al alfabeto: si no, el consumidor nuevo
+        // quedaria sin cubrir por la enumeracion, que es justo el agujero por el
+        // que se colaron los parsers divergentes.
+        let alfabeto = ["```", "~~~", SELLO, AC, "texto", "    - AC-2: indentado"];
         let mut docs = 0usize;
-        for n in 1..=7 {
+        for n in 1..=6 {
             for doc in documentos(&alfabeto, n) {
                 docs += 1;
                 let texto = doc.join("\n");
@@ -326,7 +411,11 @@ mod tests {
                 );
             }
         }
-        assert_eq!(docs, 97_655, "cambio el tamaño del espacio enumerado");
+        // n<=6 con seis simbolos son 55.986 documentos, contra 97.655 que eran
+        // n<=7 con cinco. Se baja un largo para no triplicar el tiempo del test
+        // al sumar el simbolo: el caso que importa —un consumidor que no
+        // coincide con la clasificacion— aparece con dos lineas, no con siete.
+        assert_eq!(docs, 55_986, "cambio el tamaño del espacio enumerado");
     }
 
     #[test]

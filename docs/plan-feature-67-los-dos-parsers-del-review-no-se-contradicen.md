@@ -26,3 +26,6 @@ Microservicios:
      implementer DEBE preguntar al usuario que decision aplicar ANTES de
      implementar ese feat/fase/tarea, y registrar aqui la respuesta. -->
 - 
+
+### Avance 2026-09-01T22:12:10Z
+AC-12: el bloque indentado tambien ejecutaba documentacion; regla agregada al parser unico con costo medido cero en el corpus

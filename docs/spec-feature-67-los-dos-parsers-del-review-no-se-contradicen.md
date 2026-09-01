@@ -132,6 +132,17 @@ cita_resuelve: >8MB -> "la linea         cita_resuelve: >8MB -> "no se pudo
   vuelva a parsear fences por su cuenta, Then algo se pone rojo.
   Comando: `bash tests/conventions_check.sh`
 
+- AC-12: Given un spec con un `Comando:` en un bloque de codigo INDENTADO (4
+  espacios, la otra forma de bloque que tiene markdown), When se corre `verify`,
+  Then ese comando NO se ejecuta; y un sello citado con esa sangria no cuenta
+  como veredicto. Los cuatro parsers viejos compartian el hueco, asi que no era
+  una divergencia entre ellos y no se veia desde el problema que motivo la
+  feature. Confirmado con el binario antes de cerrarlo: `verify` reportaba el
+  AC-99 documentado y el archivo aparecia escrito. Costo medido de la regla en el
+  corpus real: 0 de 733 AC, 0 de 1346 filas de review y 0 lineas `Comando:`
+  tienen sangria de 4, o sea que no cambia lo que hoy se lee de ningun documento.
+  Comando: `cd rust && out=$(cargo test indentad 2>&1) && printf %s "$out" | grep -qE "[1-9][0-9]* passed" && ! printf %s "$out" | grep -q "FAILED"`
+
 - AC-11 (MANUAL): Given `estampar`, When se lo audita, Then lo irreversible va
   ultimo: hoy escribe el archivo (`commands/revision.rs:152`) y **despues**
   comprueba si el gate puede leerlo (`:155`). No se pudo reproducir un caso donde
