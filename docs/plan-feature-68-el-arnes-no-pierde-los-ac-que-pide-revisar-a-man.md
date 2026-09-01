@@ -26,3 +26,6 @@ Microservicios:
      implementer DEBE preguntar al usuario que decision aplicar ANTES de
      implementar ese feat/fase/tarea, y registrar aqui la respuesta. -->
 - 
+
+---
+Cerrado: 2026-09-01T22:48:56Z - status=done - el parser tiraba los AC marcados MANUAL; y el sufijo de letra reabrio el bug AC-1/AC-11 del gate
