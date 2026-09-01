@@ -337,7 +337,12 @@ concretos viven en `docs/verification.md`.>
   tuviera que comprobarlo. La gramatica del nombre es ahora
   `AC-<digitos><letras?>` mas una anotacion opcional entre parentesis que NO
   entra en el nombre, y se afloja **lo justo**: un parser que inventa un AC es
-  peor que uno que lo pierde, porque hace fallar cierres que estaban bien.
+  peor que uno que lo pierde, porque hace fallar cierres que estaban bien. Y cuando
+  una linea DICE ser un AC y no se puede leer, el arnes la **nombra** en vez de
+  descartarla: `verify` la imprime con su texto antes de correr nada y el gate del
+  review se niega (feature #69). Un criterio que desaparece por un typo es la
+  misma clase de perdida que uno que desaparece por una anotacion, y el silencio
+  es lo que la vuelve cara: el autor se entera —si se entera— en el review.
 - **Un `Comando:` nunca se cuelga del AC equivocado.** `parsear` lo asocia al
   ultimo AC abierto, asi que un encabezado ilegible le regalaba su comando al AC
   de arriba: reproducido, `AC-1` se quedaba con el `touch` que era del `AC-2`, y
