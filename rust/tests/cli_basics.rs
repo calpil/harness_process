@@ -7632,3 +7632,68 @@ fn las_features_cerradas_no_se_mueven() {
     let despues = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
     assert_eq!(antes, despues, "un comando de solo lectura movio el backlog");
 }
+
+// =========================================================================
+// Feature #69: una linea AC ilegible no desaparece en silencio.
+// =========================================================================
+
+#[test]
+fn verify_nombra_la_linea_ilegible() {
+    // AC-1. Un typo en el encabezado hacia desaparecer el criterio sin una
+    // palabra: `verify` decia "6 en total" sobre un spec de siete y el autor se
+    // enteraba —si se enteraba— en el review. Se avisa ANTES de correr nada, que
+    // es donde el error todavia es barato.
+    let (_dir, bin, _spec) = feature_con_spec(
+        "- AC-1: Given algo, When pasa, Then otra.\n  \
+         Comando: `true`\n\
+         - AC-7 Given algo, When pasa, Then falta el dos puntos\n",
+    );
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Linea que dice ser un AC y no se pudo leer",
+        ))
+        // La linea se nombra ENTERA: sin su texto, el aviso obliga a buscarla.
+        .stdout(predicate::str::contains(
+            "- AC-7 Given algo, When pasa, Then falta el dos puntos",
+        ))
+        // Y el resto se verifica igual: cortar aca le quitaria al autor el
+        // resultado de los AC que si estan bien.
+        .stdout(predicate::str::contains("AC-1"));
+}
+
+#[test]
+fn el_gate_se_niega_con_un_ac_ilegible() {
+    // AC-2. Un review no puede cubrir un criterio que el arnes no leyo. Se niega
+    // por el mismo camino que cuando el spec no declara ningun AC: las dos son
+    // "la lista contra la que se mide la cobertura no es de fiar".
+    let (dir, bin, spec) = feature_lista_para_revisar();
+    let texto = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        texto.replace(
+            "- AC-2: Given mas, When pasa, Then otra.",
+            "- AC-2 Given mas, sin los dos puntos",
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+    std::fs::write(dir.path().join("docs/review-1.md"), CITAS_QUE_RESUELVEN).unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no se pueden leer"))
+        .stderr(predicate::str::contains("- AC-2 Given mas, sin los dos puntos"));
+    // Y el cierre, en consecuencia, tampoco pasa: sigue sin sello.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .code(2);
+}

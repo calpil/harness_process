@@ -115,11 +115,12 @@ fn estampar(
             spec_path.display()
         );
     };
-    if crate::verificacion::parsear(&spec).is_empty() {
-        anyhow::bail!(
-            "El spec de la feature #{fid} no declara ningun AC-n.\n    \
-             Sin AC no hay contra que medir el review: completa el spec primero."
-        );
+    // La MISMA pregunta que hace el gate del cierre, con la misma respuesta.
+    // Antes cada uno tenia la suya y discrepaban: el gate rechazaba un spec con
+    // un AC ilegible y `estampar` lo estampaba igual, asi que el sello decia
+    // "approved" sobre una cobertura que el cierre no iba a aceptar.
+    if let Some(motivo) = crate::revision::motivo_spec_inservible(&fid.to_string(), &spec) {
+        anyhow::bail!("{motivo}");
     }
 
     // La parte que DECIDE. Si falla, no se escribe nada.

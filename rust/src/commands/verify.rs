@@ -65,6 +65,16 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
             verificaciones.len(),
             rel_spec.display()
         );
+        // Feature #69: una linea que dice ser un AC y no se puede leer se
+        // descartaba SIN UNA PALABRA. El criterio desaparecia por un caracter y
+        // el autor se enteraba —si se enteraba— en el review. Se avisa antes de
+        // correr nada, que es donde el error todavia es barato, y se sigue
+        // verificando el resto: cortar aca le quitaria al autor el resultado de
+        // los AC que si estan bien.
+        for linea in crate::verificacion::lineas_ac_ilegibles(&texto) {
+            println!("[!] Linea que dice ser un AC y no se pudo leer: {linea}");
+            println!("    Forma esperada: `- AC-<n>[letra] [(anotacion)]: ...`. Ese AC NO se verifica.");
+        }
         println!("Raiz de ejecucion: {}", raiz.display());
         println!("Timeout por comando: {}s\n", timeout.as_secs());
     }
