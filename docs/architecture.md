@@ -114,6 +114,16 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   ancla a la feature mas reciente que cita. El hueco `CierreSinLeccion` solo
   aplica a features cerradas DESPUES de que el proyecto empezo a declarar
   lecciones, comparando timestamps completos y no fechas.
+- `markdown.rs`: el UNICO parser de bloques de codigo del arnes (feature #67).
+  `lineas_clasificadas()` marca cada linea como `Fuera` / `Fence` / `Dentro` con
+  semantica de fences EMPAREJADOS (un `~~~` dentro de un bloque ``` es
+  contenido, no un cierre), y `lineas_fuera_de_bloque()` es el filtro que quieren
+  el gate del review y el parseo de AC. Sus consumidores son `verificacion.rs`
+  (los AC del spec), `revision.rs` (el gate y el sello) y `commands/revision.rs`
+  (el limpiador de `estampar`); `atlassian/markdown.rs` queda aparte porque
+  CONSUME el bloque para convertirlo a ADF. Antes cada uno tenia el suyo, con
+  tres semanticas distintas. `tests/conventions_check.sh un-solo-parser` impide
+  que aparezca un quinto.
 - `verificacion.rs`: AC ejecutables (feature #23). `parsear()` es **pura** —lee
   el texto del spec y devuelve `Verificacion { ac, comando: Option<String> }`—, y
   esa pureza es lo que permite probar la compatibilidad contra los 310 AC reales

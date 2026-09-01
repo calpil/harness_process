@@ -151,20 +151,17 @@ pub struct Resultado {
 /// correr sobre los 310 AC reales del repo en un test.
 pub fn parsear(spec: &str) -> Vec<Verificacion> {
     let mut out: Vec<Verificacion> = Vec::new();
-    let mut en_bloque = false;
-    for linea in spec.lines() {
+    // Los bloques de codigo se saltean. Hallazgo de la primera corrida real de
+    // la #23: el propio spec EXPLICA el formato con un ejemplo dentro de un
+    // bloque, y `verify` ejecuto ese ejemplo. Un spec que documenta la sintaxis
+    // no puede quedar verificando su documentacion.
+    //
+    // Feature #67: esto usaba su propio parser, que togglea solo con ```` ``` ````
+    // y no conocia `~~~`, asi que el bug de la #23 seguia ABIERTO para tildes —
+    // medido: un `Comando:` dentro de un bloque `~~~` se ejecutaba. Ahora usa el
+    // parser unico, que conoce los dos fences y los empareja.
+    for linea in crate::markdown::lineas_fuera_de_bloque(spec) {
         let t = linea.trim();
-        // Los bloques ``` se saltean. Hallazgo de la primera corrida real: el
-        // propio spec de la #23 EXPLICA el formato con un ejemplo dentro de un
-        // bloque, y `verify` ejecuto ese ejemplo. Un spec que documenta la
-        // sintaxis no puede quedar verificando su documentacion.
-        if t.starts_with("```") {
-            en_bloque = !en_bloque;
-            continue;
-        }
-        if en_bloque {
-            continue;
-        }
         if let Some(ac) = ac_de(t) {
             out.push(Verificacion { ac, comando: None });
             continue;
@@ -966,23 +963,21 @@ mod tests {
         assert!(acs > 100, "esperaba cientos de AC reales, encontre {acs}");
     }
 
-    /// Cuenta las lineas `Comando:` que estan fuera de un bloque ``` — las que
-    /// el parser tiene que ver. Se calcula por un camino distinto al de
-    /// `parsear` a proposito: si las dos implementaciones coinciden sobre 20+
-    /// specs reales, el acuerdo significa algo.
+    /// Cuenta las lineas `Comando:` que estan fuera de un bloque — las que el
+    /// parser tiene que ver. El conteo de AC se hace por un camino distinto al
+    /// de `parsear` a proposito; la CLASIFICACION de bloques, en cambio, sale
+    /// del mismo lugar (feature #67).
+    ///
+    /// Antes este cross-check tenia su propia copia, que —como `parsear`— solo
+    /// conocia ```` ``` ````. Las dos compartian el punto ciego de `~~~`, asi
+    /// que su acuerdo sobre 20+ specs NO significaba lo que este comentario
+    /// decia: dos instrumentos mal calibrados de la misma forma coinciden
+    /// perfectamente y no miden nada.
     fn declaraciones_fuera_de_bloques(texto: &str) -> usize {
-        let mut en_bloque = false;
         let mut n = 0usize;
         let mut ac_abierto = false;
-        for linea in texto.lines() {
+        for linea in crate::markdown::lineas_fuera_de_bloque(texto) {
             let t = linea.trim();
-            if t.starts_with("```") {
-                en_bloque = !en_bloque;
-                continue;
-            }
-            if en_bloque {
-                continue;
-            }
             if t.starts_with("- AC-") {
                 ac_abierto = true;
             } else if t.starts_with("Comando:") && ac_abierto {
@@ -991,6 +986,74 @@ mod tests {
             }
         }
         n
+    }
+
+    /// `parsear` como era antes de la #67: togglea solo con ```` ``` ````, no
+    /// conoce `~~~`. Se conserva para poder medir la diferencia sobre documentos
+    /// reales, que es la unica forma de saber si el arreglo CAMBIA algo o solo
+    /// cierra un agujero que nadie habia pisado todavia.
+    fn acs_con_el_parser_viejo(spec: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut dentro = false;
+        for linea in spec.lines() {
+            if linea.trim_start().starts_with("```") { // PARSER-VIEJO-A-PROPOSITO
+                dentro = !dentro;
+                continue;
+            }
+            if dentro {
+                continue;
+            }
+            if let Some(ac) = ac_de(linea.trim()) {
+                out.push(ac);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn corpus_real_sin_cambios() {
+        // AC-5: sobre los documentos REALES del repo, el parser unico da
+        // exactamente los mismos AC que el viejo. O sea: el arreglo de `~~~` no
+        // es un cambio de comportamiento sobre lo que ya existe, es un agujero
+        // que se cierra antes de que alguien lo pise.
+        //
+        // Se asserta la DIFERENCIA (cero) y no el total (733 hoy): el total sube
+        // con cada spec nuevo y un assert sobre el seria un detector-de-cambios,
+        // que es como murio la primera version del test de al lado.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs");
+        let Ok(entradas) = std::fs::read_dir(&dir) else {
+            return; // sin docs/ en el sandbox de build: nada que comprobar
+        };
+        let mut documentos = 0usize;
+        let mut acs = 0usize;
+        let mut difieren: Vec<String> = Vec::new();
+        for entrada in entradas.flatten() {
+            let path = entrada.path();
+            let nombre = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !(nombre.starts_with("spec-feature-") || nombre.starts_with("review-")) {
+                continue;
+            }
+            let Ok(texto) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            documentos += 1;
+            let nuevos: Vec<String> = parsear(&texto).into_iter().map(|v| v.ac).collect();
+            acs += nuevos.len();
+            let viejos = acs_con_el_parser_viejo(&texto);
+            if nuevos != viejos {
+                difieren.push(format!(
+                    "{nombre}: viejo={} nuevo={}",
+                    viejos.len(),
+                    nuevos.len()
+                ));
+            }
+        }
+        assert!(documentos >= 20, "esperaba el corpus real, lei {documentos} documentos");
+        assert!(acs > 300, "esperaba cientos de AC reales, encontre {acs}");
+        assert!(
+            difieren.is_empty(),
+            "el parser unico cambia lo que se lee de documentos reales: {difieren:?}"
+        );
     }
 }
 

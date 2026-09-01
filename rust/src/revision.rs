@@ -412,57 +412,41 @@ pub fn review_path(paths: &HarnessPaths, fid: &str) -> std::path::PathBuf {
 ///
 /// Deliberadamente NO mira ninguna linea `Veredicto:` en prosa (AC-2).
 pub fn veredicto_estampado(texto: &str) -> Option<String> {
-    for linea in lineas_fuera_de_bloque(texto) {
-        let Some(resto) = linea.trim_start().strip_prefix(SELLO_REVIEW) else {
-            continue;
-        };
-        let v = resto.trim().split(['·', ' ']).find(|p| !p.is_empty())?;
-        if VEREDICTOS.contains(&v) {
-            return Some(v.to_string());
-        }
-    }
-    None
+    lineas_fuera_de_bloque(texto)
+        .into_iter()
+        .find_map(|l| veredicto_de_sello(l).map(str::to_string))
 }
 
-/// Las lineas que NO estan dentro de un bloque ```.
+/// ¿Esta linea es un sello del arnes? Devuelve su veredicto si lo es.
 ///
-/// `verificacion::parsear` (verificacion.rs:157-164) aprendio esto en la #23: un
-/// documento que EXPLICA un formato lo cita dentro de un bloque, y el parser se
-/// lo comia como si fuera el formato real. Aca es peor: el propio
-/// `docs/review-64.md` cita la linea del sello para documentarla, y sin este
-/// filtro esa cita valdria como veredicto.
-pub fn lineas_fuera_de_bloque(texto: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    // Se recuerda CUAL fence abrio: un bloque ``` que contiene una linea ~~~
-    // (por ejemplo, un review ajeno citado entero) cerraba el bloque donde
-    // CommonMark no lo cierra, y un sello que estaba DENTRO pasaba a contar.
-    let mut abierto_con: Option<&str> = None;
-    for linea in texto.lines() {
-        let t = linea.trim_start();
-        let fence = if t.starts_with("```") {
-            Some("```")
-        } else if t.starts_with("~~~") {
-            Some("~~~")
-        } else {
-            None
-        };
-        match (abierto_con, fence) {
-            (None, Some(f)) => {
-                abierto_con = Some(f);
-                continue;
-            }
-            (Some(abierto), Some(f)) if abierto == f => {
-                abierto_con = None;
-                continue;
-            }
-            _ => {}
-        }
-        if abierto_con.is_none() {
-            out.push(linea);
-        }
-    }
-    out
+/// Es el UNICO lugar que responde esa pregunta, y lo usan los dos lados: el gate
+/// que lee el sello y el limpiador que borra el anterior. Antes cada uno tenia su
+/// propia idea: el gate exigia un veredicto valido, el limpiador borraba
+/// CUALQUIER linea que empezara con `Revisado:`. O sea que una linea de prosa del
+/// reviewer —"Revisado: el parser esta bien resuelto, pero el tope miente"—
+/// desaparecia del archivo al estampar, sin aviso.
+///
+/// Es la misma falla que el resto de la feature, un nivel mas abajo: dos partes
+/// de la misma maquinaria que no coinciden en QUE ES un sello, igual que no
+/// coincidian en que es un bloque de codigo.
+pub fn veredicto_de_sello(linea: &str) -> Option<&str> {
+    let resto = linea.trim_start().strip_prefix(SELLO_REVIEW)?;
+    // `find`, no `?` sobre el split: una linea `Revisado:` pelada no puede
+    // abortar el barrido del que llama — el `?` salia de la funcion ENTERA y el
+    // gate decia "no lleva el sello" con el sello tres lineas mas abajo. Un
+    // mensaje de gate que afirma algo que el archivo desmiente es lo que la #63
+    // vino a cerrar.
+    let v = resto.trim().split(['·', ' ']).find(|p| !p.is_empty())?;
+    VEREDICTOS.contains(&v).then_some(v)
 }
+
+/// Re-export del parser UNICO (feature #67).
+///
+/// Antes esta funcion era una implementacion propia, y `commands::revision`
+/// tenia otra, y `verificacion` una tercera. Discrepaban en el 37% de los
+/// documentos de siete lineas.
+pub use crate::markdown::lineas_fuera_de_bloque;
+
 
 /// La linea canonica del sello. La escribe SOLO el binario.
 pub fn linea_sello(veredicto: &str, stamp: &str) -> String {
@@ -530,58 +514,102 @@ fn citas_de(linea: &str) -> Vec<(String, usize)> {
     out
 }
 
-/// ¿La cita RESUELVE? El archivo existe bajo `root` y tiene esa linea.
+/// Que se pudo averiguar de una cita `archivo:linea`.
 ///
-/// Sin esto, `inventado.rs:99999` valia como evidencia y `3.14:15` matcheaba el
-/// patron de cita: el gate comprobaba la FORMA de la cita, no que apuntara a
-/// algo. Lo encontro el reviewer de la #64 y el usuario decidio cerrarlo aca.
-fn cita_resuelve(raices: &[&Path], ruta: &str, linea: usize) -> bool {
-    if ruta.contains("..") || Path::new(ruta).is_absolute() {
-        return false;
+/// Son TRES respuestas y no dos a proposito (feature #67). Antes el tope de
+/// lectura devolvia `false` —"la linea no existe"— sobre citas correctas cuya
+/// linea caia mas alla del tope: la linea existia y `sed` la mostraba. Es el
+/// patron 127-vs-124 de `docs/lecciones/criterios-de-cierre-que-se-pueden-fallar.md`:
+/// traducir "no pude comprobar" a "no". El tope se conserva —sacarlo cuesta
+/// 10,5 s por 2 GB dentro de un gate sin timeout, que es la familia de la #66—
+/// pero deja de mentir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cita {
+    Resuelve,
+    NoResuelve,
+    NoSePudoComprobar,
+}
+
+/// Tope de lectura por cita. No es memoria —el buffer fijo ya la acota— es
+/// TIEMPO: un review de 20 AC citando archivos enormes correria dentro de
+/// `close`, que no tiene timeout.
+const TOPE_LECTURA: u64 = 8 * 1024 * 1024;
+
+/// ¿La cita resuelve, no resuelve, o no se pudo comprobar?
+fn evaluar_cita(raices: &[&Path], ruta: &str, linea: usize) -> Cita {
+    if linea == 0 || ruta.contains("..") || Path::new(ruta).is_absolute() {
+        return Cita::NoResuelve;
     }
-    // Se prueban las dos raices porque una cita valida puede ser relativa a la
-    // raiz del repo (`rust/src/revision.rs:490`) o a la del arnes cuando esta
-    // instalado como subdirectorio.
-    raices.iter().any(|r| {
+    let mut sin_comprobar = false;
+    for r in raices {
         let candidato = r.join(ruta);
-        // `is_file()` antes de abrir: un FIFO (`mkfifo`) dejaba el proceso
-        // colgado para siempre esperando datos que nadie escribe, y un symlink a
-        // /dev/zero agotaba la memoria. Un archivo regular es lo unico que puede
-        // ser evidencia.
+        // `is_file()` antes de abrir: un FIFO dejaba el proceso colgado y un
+        // symlink a /dev/zero agotaba la memoria.
         if !std::fs::metadata(&candidato).is_ok_and(|m| m.is_file()) {
-            return false;
+            continue;
         }
-        // Se cuentan lineas SIN cargar el archivo entero: una cita a un blob de
-        // 300 MB no puede costar 300 MB de RSS por fila del review.
         let Ok(f) = std::fs::File::open(&candidato) else {
-            return false;
+            continue;
         };
-        // Se cuentan saltos de linea por BYTES, con tope: `lines()` materializa
-        // cada linea entera, asi que un blob de 200 MB en UNA sola linea costaba
-        // 211 MB de RSS aunque solo hiciera falta saber si existe la linea 1.
-        const TOPE: u64 = 8 * 1024 * 1024;
-        let mut leidos = 0u64;
-        let mut saltos = 0usize;
-        let mut buf = [0u8; 64 * 1024];
-        let mut r = std::io::BufReader::new(f);
-        loop {
-            let Ok(n) = std::io::Read::read(&mut r, &mut buf) else {
-                return false;
-            };
-            if n == 0 {
-                // Sin salto final, la ultima linea cuenta igual.
-                return saltos + 1 >= linea;
-            }
-            saltos += buf[..n].iter().filter(|b| **b == b'\n').count();
-            if saltos >= linea {
-                return true;
-            }
-            leidos += n as u64;
-            if leidos > TOPE {
-                return false;
-            }
+        match contar_hasta(f, linea) {
+            Cita::Resuelve => return Cita::Resuelve,
+            Cita::NoSePudoComprobar => sin_comprobar = true,
+            Cita::NoResuelve => {}
         }
-    })
+    }
+    if sin_comprobar {
+        Cita::NoSePudoComprobar
+    } else {
+        Cita::NoResuelve
+    }
+}
+
+/// Cuenta saltos por BYTES hasta encontrar la linea o agotar el tope.
+///
+/// `lines()` materializa cada linea entera, asi que un blob de 200 MB en UNA
+/// sola linea costaba 211 MB de RSS aunque solo hiciera falta saber si existe la
+/// linea 1.
+fn contar_hasta(f: std::fs::File, linea: usize) -> Cita {
+    // Lineas vistas hasta aca. Un archivo de N lineas terminado en salto tiene N
+    // saltos, no N+1: contar `saltos + 1` siempre hacia que la cita a la linea
+    // N+1 resolviera en cualquier archivo normal (reproducido: `evidencia.txt:4`
+    // en un archivo de 3 lineas). La ultima linea solo suma si NO hay salto
+    // final.
+    let vistas = |saltos: usize, termina_en_salto: bool| {
+        if termina_en_salto { saltos } else { saltos + 1 }
+    };
+    let mut leidos = 0u64;
+    let mut saltos = 0usize;
+    let mut termina_en_salto = true;
+    let mut buf = [0u8; 64 * 1024];
+    let mut r = std::io::BufReader::new(f);
+    loop {
+        let Ok(n) = std::io::Read::read(&mut r, &mut buf) else {
+            return Cita::NoSePudoComprobar;
+        };
+        if n == 0 {
+            return if vistas(saltos, termina_en_salto) >= linea {
+                Cita::Resuelve
+            } else {
+                Cita::NoResuelve
+            };
+        }
+        saltos += buf[..n].iter().filter(|b| **b == b'\n').count();
+        termina_en_salto = buf[n - 1] == b'\n';
+        // El MISMO conteo que en el EOF, y no `saltos >= linea`: la linea en
+        // curso ya existe —se leyo un byte suyo— asi que exigirle su salto final
+        // hacia que un archivo de una sola linea larga no pudiera confirmar ni
+        // su linea 1 antes de agotar el tope. Encontrado por el test del AC-6:
+        // es el mismo error que el AC-6 arregla —reportar "no pude" sobre algo
+        // que si se puede— un paso antes.
+        if vistas(saltos, termina_en_salto) >= linea {
+            return Cita::Resuelve;
+        }
+        leidos += n as u64;
+        if leidos > TOPE_LECTURA {
+            return Cita::NoSePudoComprobar;
+        }
+    }
 }
 
 /// ¿Una fila responde por este AC con una cita que resuelve?
@@ -593,7 +621,7 @@ fn fila_responde(raices: &[&Path], linea: &str, ac: &str) -> bool {
     menciona(linea, ac)
         && citas_de(linea)
             .iter()
-            .any(|(ruta, n)| cita_resuelve(raices, ruta, *n))
+            .any(|(ruta, n)| evaluar_cita(raices, ruta, *n) == Cita::Resuelve)
 }
 
 /// Los AC del SPEC que el review no responde con una cita. Vacio = cubierto.
@@ -971,4 +999,132 @@ mod tests {
         assert!(!fila_responde(&[root], "| AC-1 | ../../etc/passwd:1 |", "AC-1"));
     }
 
+
+    // ---------------------------------------------------------------------
+    // Feature #67: las tres respuestas de una cita, el off-by-one del EOF y el
+    // sello que se encontraba a medias.
+    // ---------------------------------------------------------------------
+
+    /// Un archivo de `lineas` lineas, mas relleno hasta pasarse del tope.
+    fn archivo_gordo(dir: &std::path::Path, nombre: &str) -> usize {
+        // Una sola linea larguisima: el tope se agota ANTES de ver un solo
+        // salto, que es el caso donde la respuesta vieja ("la linea no existe")
+        // era mas falsa. Son 12 MB contra un tope de 8 MB.
+        let mut texto = "x".repeat(12 * 1024 * 1024);
+        texto.push('\n');
+        texto.push_str("la linea 2 existe de verdad\n");
+        std::fs::write(dir.join(nombre), &texto).unwrap();
+        2
+    }
+
+    #[test]
+    fn cita_grande_no_se_pudo_comprobar() {
+        // AC-6: la tercera respuesta. Antes esto devolvia "no resuelve" —o sea,
+        // "la linea no existe"— sobre una cita CORRECTA cuya linea cae mas alla
+        // del tope. La linea existe y `sed` la muestra. Es el patron 127-vs-124
+        // de `docs/lecciones/criterios-de-cierre-que-se-pueden-fallar.md`:
+        // traducir "no pude comprobar" a "no".
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path();
+        let existe = archivo_gordo(raiz, "gordo.txt");
+        assert_eq!(
+            evaluar_cita(&[raiz], "gordo.txt", existe),
+            Cita::NoSePudoComprobar,
+            "una cita que no se alcanzo a leer no puede reportarse como inexistente"
+        );
+        // Y la linea 1 SI se puede comprobar sin agotar el tope: el tope no es
+        // una excusa para no mirar.
+        assert_eq!(evaluar_cita(&[raiz], "gordo.txt", 1), Cita::Resuelve);
+        // Un archivo chico sigue dando las dos respuestas de siempre.
+        std::fs::write(raiz.join("chico.txt"), "uno\ndos\n").unwrap();
+        assert_eq!(evaluar_cita(&[raiz], "chico.txt", 2), Cita::Resuelve);
+        assert_eq!(evaluar_cita(&[raiz], "chico.txt", 9), Cita::NoResuelve);
+    }
+
+    #[test]
+    fn cita_grande_no_cuelga_el_cierre() {
+        // AC-7: el cierre DECIDE. No cuelga (el tope se conserva: sacarlo cuesta
+        // 10,5 s por 2 GB dentro de un gate sin timeout) y no muere.
+        //
+        // Y decide en la direccion honesta: una cita que no se pudo comprobar NO
+        // cuenta como cobertura. La alternativa —darla por buena— dejaria pasar
+        // un review citando un archivo enorme cualquiera.
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path();
+        let existe = archivo_gordo(raiz, "gordo.txt");
+        let spec = "- AC-1: Given algo, When pasa, Then otra.\n";
+        let review = format!("| AC-1 | gordo.txt:{existe} | cubierto |\n");
+
+        let t0 = std::time::Instant::now();
+        let faltan = acs_sin_fila(&[raiz], spec, &review);
+        let ms = t0.elapsed().as_millis();
+
+        assert_eq!(
+            faltan,
+            vec!["AC-1".to_string()],
+            "una cita sin comprobar no puede contar como cobertura"
+        );
+        assert!(ms < 10_000, "el gate tardo {ms} ms: el tope no esta cortando");
+    }
+
+    #[test]
+    fn la_cita_no_acepta_la_linea_siguiente_al_eof() {
+        // AC-8: un archivo de N lineas terminado en salto tiene N saltos, no
+        // N+1. Contar `saltos + 1` hacia que la cita a la linea N+1 resolviera
+        // en CUALQUIER archivo normal —reproducido con `evidencia.txt:4` en un
+        // archivo de 3 lineas—, o sea que el gate aceptaba como evidencia una
+        // linea que no existe.
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path();
+
+        std::fs::write(raiz.join("con_salto.txt"), "uno\ndos\ntres\n").unwrap();
+        assert_eq!(evaluar_cita(&[raiz], "con_salto.txt", 3), Cita::Resuelve);
+        assert_eq!(
+            evaluar_cita(&[raiz], "con_salto.txt", 4),
+            Cita::NoResuelve,
+            "la linea 4 de un archivo de 3 lineas no existe"
+        );
+
+        // Sin salto final, la ultima linea SI cuenta: son 3 lineas igual.
+        std::fs::write(raiz.join("sin_salto.txt"), "uno\ndos\ntres").unwrap();
+        assert_eq!(evaluar_cita(&[raiz], "sin_salto.txt", 3), Cita::Resuelve);
+        assert_eq!(evaluar_cita(&[raiz], "sin_salto.txt", 4), Cita::NoResuelve);
+
+        // Un archivo vacio no tiene linea 1.
+        std::fs::write(raiz.join("vacio.txt"), "").unwrap();
+        assert_eq!(evaluar_cita(&[raiz], "vacio.txt", 1), Cita::NoResuelve);
+        // Y uno de una sola linea sin salto, si.
+        std::fs::write(raiz.join("una.txt"), "sola").unwrap();
+        assert_eq!(evaluar_cita(&[raiz], "una.txt", 1), Cita::Resuelve);
+        assert_eq!(evaluar_cita(&[raiz], "una.txt", 2), Cita::NoResuelve);
+    }
+
+    #[test]
+    fn el_sello_se_encuentra_aunque_haya_lineas_peladas() {
+        // AC-9: el `?` salia de la FUNCION ENTERA en la primera linea `Revisado:`
+        // sin valor detras, asi que el gate decia "no lleva el sello del arnes"
+        // con el sello tres lineas mas abajo. Un mensaje de gate que el archivo
+        // desmiente es justo lo que la #63 vino a cerrar.
+        let sello = linea_sello("approved", "2026-08-30 12:00");
+        let texto = format!("# Review\nRevisado:\nprosa\n{sello}\n");
+        assert_eq!(
+            veredicto_estampado(&texto).as_deref(),
+            Some("approved"),
+            "el sello esta en el archivo y el gate no lo vio"
+        );
+
+        // Variantes de linea pelada que tampoco pueden abortar el barrido.
+        for pelada in ["Revisado:", "Revisado:   ", "Revisado: · ·", "Revisado: fulano"] {
+            let texto = format!("# Review\n{pelada}\n{sello}\n");
+            assert_eq!(
+                veredicto_estampado(&texto).as_deref(),
+                Some("approved"),
+                "aborto el barrido en {pelada:?}"
+            );
+        }
+
+        // Y sigue sin inventar: sin sello real, no hay veredicto.
+        assert_eq!(veredicto_estampado("# Review\nRevisado:\nprosa\n"), None);
+        assert_eq!(veredicto_estampado("# Review\nVeredicto: approved\n"), None);
+    }
 }
