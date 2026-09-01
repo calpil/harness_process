@@ -259,3 +259,4 @@ con su fecha.>
 - #67 los_dos_parsers_del_review_no_se_contradicen -> done 2026-09-01 · spec: docs/spec-feature-67-los-dos-parsers-del-review-no-se-contradicen.md · impl: docs/impl-67.md
 - #65 el_arnes_cierra_lo_resuelto_aguas_arriba -> done 2026-09-01 · spec: docs/spec-feature-65-el-arnes-cierra-lo-resuelto-aguas-arriba.md · impl: docs/impl-65.md
 - #68 el arnes no pierde los AC que pide revisar a mano -> done 2026-09-01 · spec: docs/spec-feature-68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man.md · impl: docs/impl-68.md
+- #69 una linea AC ilegible no desaparece en silencio -> done 2026-09-01 · spec: docs/spec-feature-69-una-linea-ac-ilegible-no-desaparece-en-silencio.md · impl: docs/impl-69.md
