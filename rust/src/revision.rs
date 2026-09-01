@@ -461,7 +461,12 @@ fn menciona(linea: &str, ac: &str) -> bool {
     let mut desde = 0;
     while let Some(i) = linea[desde..].find(ac) {
         let fin = desde + i + ac.len();
-        if !linea[fin..].starts_with(|c: char| c.is_ascii_digit()) {
+        // Ni digito ni letra. El digito lo cerro la #64 (`AC-1` no lo cubre
+        // una fila de `AC-11`); la LETRA la abrio la #68, que metio sufijos en
+        // los nombres, y sin esto una fila de `AC-4b` daba por cubierto al
+        // `AC-4`. Es el mismo bug con otro alfabeto: un review que responde por
+        // un criterio y da por cubierto otro.
+        if !linea[fin..].starts_with(|c: char| c.is_ascii_alphanumeric()) {
             return true;
         }
         desde = fin;
@@ -1126,5 +1131,29 @@ mod tests {
         // Y sigue sin inventar: sin sello real, no hay veredicto.
         assert_eq!(veredicto_estampado("# Review\nRevisado:\nprosa\n"), None);
         assert_eq!(veredicto_estampado("# Review\nVeredicto: approved\n"), None);
+    }
+}
+
+#[cfg(test)]
+mod tests_68 {
+    use super::*;
+
+    #[test]
+    fn el_sufijo_de_letra_no_cubre_al_ac_pelado() {
+        // La #68 metio letras en los nombres de AC (`AC-4b` es otro criterio que
+        // `AC-4`), y `menciona` solo se defendia del DIGITO siguiente. O sea que
+        // una fila que responde por `AC-4b` contaba como cobertura de `AC-4`:
+        // el mismo bug que la #64 cerro para `AC-1` vs `AC-11`, reabierto por el
+        // alfabeto nuevo. Un review que responde por un criterio y da por
+        // cubierto otro es exactamente lo que el gate vino a impedir.
+        assert!(!menciona("| AC-4b | evidencia.txt:1 | ok |", "AC-4"));
+        assert!(menciona("| AC-4b | evidencia.txt:1 | ok |", "AC-4b"));
+        assert!(menciona("| AC-4 | evidencia.txt:1 | ok |", "AC-4"));
+        // Y lo que ya defendia sigue en pie.
+        assert!(!menciona("| AC-11 | evidencia.txt:1 | ok |", "AC-1"));
+        assert!(menciona("| AC-11 | evidencia.txt:1 | ok |", "AC-11"));
+        // Una fila que nombra los dos cubre los dos.
+        assert!(menciona("| AC-4 y AC-4b | e.txt:1 |", "AC-4"));
+        assert!(menciona("| AC-4 y AC-4b | e.txt:1 |", "AC-4b"));
     }
 }

@@ -327,6 +327,23 @@ concretos viven en `docs/verification.md`.>
   `harness_cli verify --feature <id>` los corre y escribe `docs/verify-<id>.md`.
   Con `require_verify_green`, `close --status done` LEE ese reporte —nunca
   ejecuta— y no deja cerrar con alguno bloqueando.
+- **Un AC que el parser no ve no existe para nadie**, y eso incluia justo a los
+  que pedian una persona (feature #68). `ac_de` exigia los dos puntos PEGADOS a
+  los digitos, asi que `- AC-11 (MANUAL):` —la anotacion que marca "esto lo tiene
+  que auditar alguien"— hacia desaparecer el AC de `verify` Y del gate del
+  review, que saca su lista del mismo parser. Medido: siete AC invisibles en 55
+  specs, en dos familias (`(MANUAL)` y el sufijo de letra `AC-4b`). La marca de
+  "esto no lo puede comprobar la maquina" era exactamente lo que hacia que nadie
+  tuviera que comprobarlo. La gramatica del nombre es ahora
+  `AC-<digitos><letras?>` mas una anotacion opcional entre parentesis que NO
+  entra en el nombre, y se afloja **lo justo**: un parser que inventa un AC es
+  peor que uno que lo pierde, porque hace fallar cierres que estaban bien.
+- **Un `Comando:` nunca se cuelga del AC equivocado.** `parsear` lo asocia al
+  ultimo AC abierto, asi que un encabezado ilegible le regalaba su comando al AC
+  de arriba: reproducido, `AC-1` se quedaba con el `touch` que era del `AC-2`, y
+  `verify` habria impreso "AC-1 verde" tras correr la prueba de otro criterio.
+  Una linea que arranca como AC y no se puede leer cierra el anterior: vale mas
+  perder un comando que adjudicarselo al criterio equivocado.
 - **Un AC que no midio nada no cuenta como verificado**: `cargo test <nombre>`
   con un filtro que no matchea sale 0, y eso ya produjo un falso verde real. Por
   eso `verify` mira la salida ademas del exit code y marca `vacio` al AC que

@@ -160,15 +160,28 @@ pub fn parsear(spec: &str) -> Vec<Verificacion> {
     // y no conocia `~~~`, asi que el bug de la #23 seguia ABIERTO para tildes —
     // medido: un `Comando:` dentro de un bloque `~~~` se ejecutaba. Ahora usa el
     // parser unico, que conoce los dos fences y los empareja.
+    // Una linea que ARRANCA como AC pero que no se puede leer cierra el AC
+    // anterior. Sin esto, su `Comando:` se le colgaba al de arriba: reproducido
+    // con el parser real, `- AC-1: uno` (sin comando) seguido de un AC ilegible
+    // con `Comando: touch MAL.txt` dejaba a **AC-1** con ese comando, y `verify`
+    // habria impreso "AC-1 verde" tras correr la prueba de otro criterio. Un
+    // verde atribuido al AC equivocado es la familia de la #44.
+    let mut ac_ilegible = false;
     for linea in crate::markdown::lineas_fuera_de_bloque(spec) {
         let t = linea.trim();
         if let Some(ac) = ac_de(t) {
+            ac_ilegible = false;
             out.push(Verificacion { ac, comando: None });
+            continue;
+        }
+        if t.starts_with("- AC-") {
+            ac_ilegible = true;
             continue;
         }
         // `Comando:` pertenece al ultimo AC abierto (decision del usuario
         // 2026-08-17, OBS-1: la prueba va pegada al criterio).
         if let Some(cmd) = comando_de(t)
+            && !ac_ilegible
             && let Some(ultimo) = out.last_mut()
             && ultimo.comando.is_none()
         {
@@ -178,14 +191,50 @@ pub fn parsear(spec: &str) -> Vec<Verificacion> {
     out
 }
 
-/// `- AC-12: ...` -> `AC-12`.
+/// `- AC-12: ...` -> `AC-12`. Tambien `- AC-4b:` -> `AC-4b` y
+/// `- AC-11 (MANUAL):` -> `AC-11`.
+///
+/// Antes pedia los dos puntos PEGADOS a los digitos, y cualquier otra cosa en el
+/// medio tiraba el AC entero. Medido sobre los 55 specs del repo: siete AC
+/// desaparecidos en dos familias —cuatro `(MANUAL)` en las #64/#65/#66/#67, y
+/// `AC-4b` / `AC-12b` / `AC-12c` en las #16/#51—. La anotacion `(MANUAL)`, que
+/// existe justo para marcar "esto lo tiene que mirar una persona", era lo que
+/// hacia que el arnes no se lo pidiera a nadie.
+///
+/// El sufijo de letra SI entra en el nombre (`AC-4b` es otro criterio que
+/// `AC-4`); la anotacion entre parentesis NO (`- AC-11 (MANUAL):` es `AC-11`).
+///
+/// Se afloja lo justo: lo que no es un AC tiene que seguir sin serlo, porque un
+/// parser que se come prosa es peor que uno que pierde un AC (feature #68, AC-5).
 fn ac_de(linea: &str) -> Option<String> {
     let resto = linea.strip_prefix("- AC-")?;
     let numero: String = resto.chars().take_while(char::is_ascii_digit).collect();
-    if numero.is_empty() || !resto[numero.len()..].starts_with(':') {
+    if numero.is_empty() {
         return None;
     }
-    Some(format!("AC-{numero}"))
+    let resto = &resto[numero.len()..];
+    // `AC-4b`, `AC-12c`: parte del NOMBRE, es un criterio distinto.
+    let letras: String = resto.chars().take_while(char::is_ascii_alphabetic).collect();
+    let resto = &resto[letras.len()..];
+    // ` (MANUAL)` y cualquier otra anotacion: NO entra en el nombre. Se acepta
+    // la que los specs ya usan, no se inventa una sintaxis nueva.
+    let resto = match resto.strip_prefix(" (") {
+        Some(r) => match r.find(')') {
+            Some(i) => &r[i + 1..],
+            // Un parentesis sin cerrar no es una anotacion: es prosa. Este
+            // `return` es EXPLICITO, no cargante: se comprobo por mutacion que
+            // dejar caer el caso da el mismo resultado (lo que queda tampoco
+            // empieza con `:`), asi que no hay test que distinga las dos
+            // versiones. Se deja escrito para que la intencion se lea, y se
+            // declara aca que no es una defensa independiente.
+            None => return None,
+        },
+        None => resto,
+    };
+    if !resto.starts_with(':') {
+        return None;
+    }
+    Some(format!("AC-{numero}{letras}"))
 }
 
 /// `Comando: `algo`` -> `algo` (con o sin backticks).
@@ -910,6 +959,152 @@ mod tests {
     fn rojos_del_reporte_should_be_empty_for_a_green_report() {
         let texto = render_reporte("23", "ts", &[resultado("AC-1", Estado::Verde, Some("true"))]);
         assert!(rojos_del_reporte(&texto).is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Feature #68: el arnes no pierde los AC que pide revisar a mano.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn el_sufijo_de_letra_es_un_ac_propio() {
+        // AC-3. `AC-4b` es OTRO criterio que `AC-4`, no una nota al pie: son
+        // tres AC reales de los specs #16 y #51 que el arnes venia tirando.
+        let v = parsear("- AC-4: cuatro\n- AC-4b: cuatro bis\n- AC-12c: doce ce\n");
+        let nombres: Vec<&str> = v.iter().map(|x| x.ac.as_str()).collect();
+        assert_eq!(nombres, vec!["AC-4", "AC-4b", "AC-12c"]);
+    }
+
+    #[test]
+    fn la_anotacion_no_entra_en_el_nombre() {
+        // `- AC-11 (MANUAL):` es `AC-11`, no `AC-11 (MANUAL)`: el review lo cita
+        // por su numero, y el gate compara el nombre token a token.
+        let v = parsear("- AC-11 (MANUAL): audita esto\n");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].ac, "AC-11");
+        assert!(v[0].comando.is_none(), "un AC manual no declara comando");
+    }
+
+    #[test]
+    fn el_comando_no_migra_al_ac_anterior() {
+        // AC-4. El daño peor, y era LATENTE: `parsear` cuelga cada `Comando:`
+        // del ultimo AC abierto, asi que el comando de un AC ilegible se le
+        // adjudicaba al de arriba. `verify` habria impreso "AC-1 verde" tras
+        // correr la prueba de otro criterio.
+        //
+        // Ahora la forma `(MANUAL)` se entiende, asi que el comando queda donde
+        // corresponde.
+        let v = parsear("- AC-1: uno\n- AC-2 (MANUAL): dos\n  Comando: `mio`\n");
+        assert_eq!(v.len(), 2);
+        assert!(v[0].comando.is_none(), "AC-1 se quedo con el comando de AC-2");
+        assert_eq!(v[1].comando.as_deref(), Some("mio"));
+
+        // Y con una linea que ARRANCA como AC pero es ilegible de verdad, el
+        // comando no se le cuelga a nadie: vale mas perderlo que adjudicarselo
+        // al criterio equivocado.
+        let v = parsear("- AC-1: uno\n- AC-: rota\n  Comando: `ajeno`\n");
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].comando.is_none(),
+            "el comando de una linea ilegible se le colgo a AC-1"
+        );
+    }
+
+    #[test]
+    fn lo_que_no_es_un_ac_sigue_sin_serlo() {
+        // AC-5. Aflojar el parser no puede empezar a comerse prosa: un parser
+        // que inventa un AC es peor que uno que pierde uno, porque el que
+        // inventa hace fallar cierres que estaban bien.
+        for linea in [
+            "- AC-12 y AC-13: dos de una",
+            "- AC-: sin numero",
+            "- AC-1 sin dos puntos",
+            "- ACR-1: otra cosa",
+            "- AC-1 (sin cerrar: parentesis abierto",
+            "- AC 1: con espacio",
+            "-  AC-1: doble espacio",
+            "- AC-1b2: letra y numero",
+            "  - AC-1: sangria de lista",
+            "- AC-1 (MANUAL) : espacio antes de los dos puntos",
+        ] {
+            assert!(
+                ac_de(linea).is_none(),
+                "{linea:?} no es un AC y el parser lo acepto"
+            );
+        }
+        // Y las formas que SI son AC siguen siendolo.
+        for (linea, esperado) in [
+            ("- AC-1: normal", "AC-1"),
+            ("- AC-12: dos digitos", "AC-12"),
+            ("- AC-4b: sufijo", "AC-4b"),
+            ("- AC-11 (MANUAL): anotado", "AC-11"),
+            ("- AC-11 (lo mira una persona): anotacion larga", "AC-11"),
+        ] {
+            assert_eq!(ac_de(linea).as_deref(), Some(esperado), "{linea:?}");
+        }
+    }
+
+    #[test]
+    fn los_siete_que_faltaban_y_ninguno_mas() {
+        // AC-6. Sobre los specs REALES: el arreglo tiene que traer exactamente
+        // los AC medidos y ninguno inventado. Eran SIETE cuando se midio para
+        // escribir el spec; son ocho porque el spec de esta feature agrego el
+        // suyo al corpus, que es justo lo que el AC-8 dice que tiene que pasar. Se asserta la DIFERENCIA
+        // nombrada, no el total: el total sube con cada spec nuevo y un assert
+        // sobre el seria un detector-de-cambios.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs");
+        let Ok(entradas) = std::fs::read_dir(&dir) else {
+            return; // sin docs/ en el sandbox de build
+        };
+        // `ac_de` como era antes de la #68: los dos puntos PEGADOS al numero.
+        fn ac_de_viejo(linea: &str) -> Option<String> {
+            let resto = linea.strip_prefix("- AC-")?;
+            let numero: String = resto.chars().take_while(char::is_ascii_digit).collect();
+            if numero.is_empty() || !resto[numero.len()..].starts_with(':') {
+                return None;
+            }
+            Some(format!("AC-{numero}"))
+        }
+        let mut nuevos: Vec<String> = Vec::new();
+        let mut specs = 0usize;
+        for entrada in entradas.flatten() {
+            let path = entrada.path();
+            let nombre = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !nombre.starts_with("spec-feature-") {
+                continue;
+            }
+            let Ok(texto) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            specs += 1;
+            for linea in crate::markdown::lineas_fuera_de_bloque(&texto) {
+                let t = linea.trim();
+                if let Some(ac) = ac_de(t)
+                    && ac_de_viejo(t).is_none()
+                {
+                    nuevos.push(format!("{}:{ac}", nombre.trim_start_matches("spec-feature-")));
+                }
+            }
+        }
+        assert!(specs >= 20, "esperaba el corpus real, lei {specs} specs");
+        nuevos.sort();
+        assert_eq!(
+            nuevos,
+            vec![
+                "16-atlassian-auto-push.md:AC-4b",
+                "51-revision-adversarial-y-modelos-por-rol.md:AC-12b",
+                "51-revision-adversarial-y-modelos-por-rol.md:AC-12c",
+                "64-el-arnes-no-promete-enforcement-que-no-hace.md:AC-12",
+                "65-el-arnes-cierra-lo-resuelto-aguas-arriba.md:AC-11",
+                "66-el-stop-hook-no-entra-en-bucle.md:AC-13",
+                "67-los-dos-parsers-del-review-no-se-contradicen.md:AC-11",
+                // El octavo es el AC-8 de ESTA feature, escrito a proposito con
+                // la forma que desaparecia. Que aparezca aca es el AC-8
+                // cumpliendose: la feature se prueba sobre si misma, y si el
+                // arreglo se revierte, este AC se vuelve a perder.
+                "68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man.md:AC-8",
+            ],
+            "el arreglo trae AC distintos de los siete medidos"
+        );
     }
 
     #[test]

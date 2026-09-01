@@ -7510,3 +7510,121 @@ fn el_gate_no_lee_un_sello_indentado() {
         "borro el sello citado con sangria, que es prosa:\n{review}"
     );
 }
+
+// =========================================================================
+// Feature #68: el arnes no pierde los AC que pide revisar a mano.
+// =========================================================================
+
+#[test]
+fn el_ac_manual_aparece() {
+    // AC-1. `verify` decia "10 AC (10 en total)" sobre specs de once, y "0
+    // manual(es)" sobre specs que pedian auditoria a mano. La maquinaria de
+    // manuales ya existia entera —`Estado::Manual`, el simbolo `[--]`, el
+    // conteo, `bloquea() == false`—: lo unico roto era que el parser tiraba el
+    // AC antes de llegar ahi.
+    let (dir, bin, _spec) = feature_con_spec(
+        "- AC-1: Given algo, When pasa, Then otra.\n  \
+         Comando: `true`\n\
+         - AC-2 (MANUAL): Given esto, When se audita, Then lo mira una persona.\n",
+    );
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 manual(es)"));
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    assert!(reporte.contains("AC-2"), "el AC manual no llego al reporte");
+    assert!(
+        reporte.contains("manual"),
+        "el AC-2 no quedo marcado como manual:\n{reporte}"
+    );
+    // Y no bloquea el cierre: un AC manual no es un rojo.
+    enable_verify_rule(&dir.path().join("hp"));
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn el_gate_exige_fila_para_el_manual() {
+    // AC-2. El corazon de la feature: la marca "esto lo mira una persona" tiene
+    // que OBLIGAR a que una persona lo mire. Antes la eximia, porque el gate del
+    // review saca su lista del mismo parser que perdia el AC.
+    let (dir, bin, spec) = feature_lista_para_revisar();
+    let texto = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        texto.replace(
+            "- AC-2: Given mas, When pasa, Then otra.",
+            "- AC-2 (MANUAL): Given mas, When se audita, Then lo mira una persona.",
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+    // Un review que solo responde por el AC-1 ya no alcanza.
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        "# Review\n| AC-1 | docs/spec-feature-1-demo.md:1 | cubierto |\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("AC-2"));
+    // Con su fila, pasa.
+    std::fs::write(
+        dir.path().join("docs/review-1.md"),
+        "# Review\n\
+         | AC-1 | docs/spec-feature-1-demo.md:1 | cubierto |\n\
+         | AC-2 | docs/spec-feature-1-demo.md:2 | auditado a mano |\n",
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["revision", "--feature", "1", "--veredicto", "approved"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn las_features_cerradas_no_se_mueven() {
+    // AC-7. El arreglo cambia lo que se LEE de cuatro specs ya cerrados, cuyos
+    // reviews no tienen fila para su AC manual. Cerrar es un acto que ya ocurrio:
+    // ningun comando puede reabrirlo ni empezar a fallar por eso.
+    let (dir, bin, spec) = feature_lista_para_revisar();
+    let texto = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        texto.replace(
+            "- AC-2: Given mas, When pasa, Then otra.",
+            "- AC-2 (MANUAL): Given mas, When se audita, Then lo mira una persona.",
+        ),
+    )
+    .unwrap();
+    cmd(&bin)
+        .args(["approve-spec", "--feature", "1", "--yes"])
+        .assert()
+        .success();
+    // Se cierra por un camino que NO pasa por el gate del review.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "x"])
+        .assert()
+        .success();
+    let antes = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    // Los comandos que recorren el backlog siguen andando y no la tocan.
+    for args in [
+        vec!["status"],
+        vec!["next"],
+        vec!["journey"],
+        vec!["doctor", "--json"],
+    ] {
+        cmd(&bin).args(&args).assert();
+    }
+    let despues = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    assert_eq!(antes, despues, "un comando de solo lectura movio el backlog");
+}
