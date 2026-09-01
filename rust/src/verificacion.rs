@@ -191,6 +191,24 @@ pub fn parsear(spec: &str) -> Vec<Verificacion> {
     out
 }
 
+/// Las lineas que ARRANCAN como AC y no se pueden leer.
+///
+/// Es la misma condicion que `parsear` ya evalua para no colgarle el `Comando:`
+/// de una linea ilegible al AC de arriba (feature #68) — solo que ahi moria
+/// adentro de la funcion y nadie la podia preguntar. La #68 lo dejo declarado
+/// como limite conocido: el criterio desaparecia y nadie se enteraba.
+///
+/// Pura, como `parsear`: se puede correr sobre los specs reales del repo sin
+/// tocar disco.
+pub fn lineas_ac_ilegibles(spec: &str) -> Vec<String> {
+    crate::markdown::lineas_fuera_de_bloque(spec)
+        .into_iter()
+        .map(str::trim)
+        .filter(|t| t.starts_with("- AC-") && ac_de(t).is_none())
+        .map(str::to_string)
+        .collect()
+}
+
 /// `- AC-12: ...` -> `AC-12`. Tambien `- AC-4b:` -> `AC-4b` y
 /// `- AC-11 (MANUAL):` -> `AC-11`.
 ///
@@ -964,6 +982,80 @@ mod tests {
     // -----------------------------------------------------------------
     // Feature #68: el arnes no pierde los AC que pide revisar a mano.
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // Feature #69: una linea AC ilegible no desaparece en silencio.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn no_hay_falsos_ilegibles() {
+        // AC-3. Avisar de mas es peor que no avisar: un aviso que salta siempre
+        // se deja de leer, y entonces el dia que importa nadie lo mira.
+        let spec = "- AC-1: normal\n\
+            - AC-4b: sufijo\n\
+            - AC-11 (MANUAL): anotado\n\
+            - AC-11 (lo mira una persona): anotacion larga\n\
+            - ACR-1: no es un AC\n\
+            - Alcance: tampoco\n\
+            - AC de la feature: prosa que arranca parecido\n\
+            texto suelto\n\
+            | AC-1 | fila de tabla |\n";
+        assert!(
+            lineas_ac_ilegibles(spec).is_empty(),
+            "falsos positivos: {:?}",
+            lineas_ac_ilegibles(spec)
+        );
+        // Y las que SI son ilegibles aparecen, con su texto entero.
+        let spec = "- AC-7 Given algo, When pasa\n- AC-: sin numero\n- AC-1 (sin cerrar: x\n";
+        assert_eq!(
+            lineas_ac_ilegibles(spec),
+            vec![
+                "- AC-7 Given algo, When pasa".to_string(),
+                "- AC-: sin numero".to_string(),
+                "- AC-1 (sin cerrar: x".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn el_bloque_de_codigo_no_dispara_el_aviso() {
+        // AC-5. Un spec que DOCUMENTA la forma de un AC escribe ejemplos rotos a
+        // proposito. Sale gratis porque se usa el parser unico de la #67, y se
+        // fija aca para que no se pierda si alguien lo toca.
+        let spec = "- AC-1: real\n```\n- AC-7 Given algo, sin dos puntos\n```\n~~~\n- AC-: rota\n~~~\n";
+        assert!(lineas_ac_ilegibles(spec).is_empty());
+        // Fuera del bloque, la misma linea si avisa.
+        assert_eq!(lineas_ac_ilegibles("- AC-7 Given algo, sin dos puntos\n").len(), 1);
+    }
+
+    #[test]
+    fn el_corpus_real_no_tiene_ilegibles() {
+        // AC-4. Medido antes de escribir el spec: el arreglo no cambia nada de
+        // lo que existe, se pone en medio del proximo typo. Si manana alguien
+        // escribe uno, este test lo agarra en la corrida siguiente.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs");
+        let Ok(entradas) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        let mut specs = 0usize;
+        let mut malas: Vec<String> = Vec::new();
+        for entrada in entradas.flatten() {
+            let path = entrada.path();
+            let nombre = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !nombre.starts_with("spec-feature-") {
+                continue;
+            }
+            let Ok(texto) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            specs += 1;
+            for l in lineas_ac_ilegibles(&texto) {
+                malas.push(format!("{nombre}: {l}"));
+            }
+        }
+        assert!(specs >= 20, "esperaba el corpus real, lei {specs} specs");
+        assert!(malas.is_empty(), "hay AC ilegibles en specs reales: {malas:#?}");
+    }
 
     #[test]
     fn el_sufijo_de_letra_es_un_ac_propio() {

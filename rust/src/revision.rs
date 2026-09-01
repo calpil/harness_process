@@ -642,6 +642,35 @@ pub fn acs_sin_fila(raices: &[&Path], spec: &str, review: &str) -> Vec<String> {
         .collect()
 }
 
+/// ¿La lista de AC de este spec sirve para medir la cobertura de un review?
+///
+/// Devuelve el motivo por el que NO sirve, o `None` si sirve.
+///
+/// Existe en un solo lugar a proposito: el gate del cierre y `estampar` hacian
+/// la misma pregunta con su propia copia, y en la #69 eso ya costo un test rojo
+/// —el gate rechazaba un spec con un AC ilegible y `estampar` lo estampaba
+/// igual—. Es el patron que cerro la #67 (un formato, un parser) aplicado a una
+/// decision: una pregunta, una respuesta.
+pub fn motivo_spec_inservible(fid: &str, spec: &str) -> Option<String> {
+    let ilegibles = crate::verificacion::lineas_ac_ilegibles(spec);
+    if !ilegibles.is_empty() {
+        return Some(format!(
+            "El spec de la feature #{fid} tiene {} linea(s) que dicen ser un AC y no se pueden leer:\n    {}\n    \
+             Un review no puede cubrir un criterio que el arnes no leyo.\n    \
+             Forma esperada: `- AC-<n>[letra] [(anotacion)]: ...`",
+            ilegibles.len(),
+            ilegibles.join("\n    ")
+        ));
+    }
+    if crate::verificacion::parsear(spec).is_empty() {
+        return Some(format!(
+            "El spec de la feature #{fid} no declara ningun AC-n.\n    \
+             Sin AC, comprobar la cobertura del review no comprueba nada."
+        ));
+    }
+    None
+}
+
 /// Gate de cierre: con la regla activa, `done` exige un review estampado y
 /// `approved`. Solo LEE; estampar es `revision --veredicto`.
 pub fn gate(
@@ -702,13 +731,10 @@ pub fn gate(
             )),
         });
     };
-    if crate::verificacion::parsear(&spec).is_empty() {
+    if let Some(motivo) = motivo_spec_inservible(fid, &spec) {
         return Err(Exit {
             code: 2,
-            message: Some(format!(
-                "[GATE] El spec de la feature #{fid} no declara ningun AC-n.\n    \
-                 Sin AC, comprobar la cobertura del review no comprueba nada."
-            )),
+            message: Some(format!("[GATE] {motivo}")),
         });
     }
     let faltan = acs_sin_fila(&raices_de_citas(paths), &spec, &texto);
