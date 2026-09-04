@@ -289,6 +289,17 @@ de cuatro lineas:
   esa linea), verificada al estampar Y de nuevo en el cierre. Eso sube el costo
   de fabricar un review falso de cinco segundos a leer el codigo. No lo vuelve
   imposible: lo que el arnes NO comprueba es que la cita sea PERTINENTE al AC.
+- **Y cuando una cita no resuelve, el gate dice contra QUE resolvio** (feature
+  #70). Antes contestaba lo mismo para dos casos distintos —"un archivo que exista
+  y una linea que exista en el"— sin nombrar ninguna de sus raices, asi que un
+  reviewer que citaba un repo hermano probaba `../repo/archivo:353` y la ruta
+  absoluta, las dos se rechazaban por la FORMA, y el mensaje lo mandaba a buscar
+  un archivo que estaba donde el creia. Lo que hacia entonces era citar el
+  documento que el mismo habia escrito en la columna que el gate comprueba: el
+  gate satisfecho con una cita que no era la evidencia. Ahora separa "la forma de
+  la ruta no se acepta" de "no se encontro", lista las raices en orden, y ofrece
+  la forma de citar un repo hermano **solo en los layouts donde resuelve** — un
+  remedio que no funciona es peor que ninguno.
 
 El corolario general, que vale mas que el mecanismo: **una barrera se documenta
 por lo que filtra, no por lo que uno quisiera que filtrara.** Un gate descrito de

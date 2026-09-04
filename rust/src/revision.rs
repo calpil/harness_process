@@ -629,6 +629,100 @@ fn fila_responde(raices: &[&Path], linea: &str, ac: &str) -> bool {
             .any(|(ruta, n)| evaluar_cita(raices, ruta, *n) == Cita::Resuelve)
 }
 
+/// Por que el gate no pudo usar las citas de un AC, dicho de forma que se pueda
+/// arreglar sin adivinar.
+///
+/// El mensaje viejo decia lo mismo para dos casos distintos —"un archivo que
+/// exista y una linea que exista en el"— y no nombraba NINGUNA de las raices
+/// contra las que resolvia. Con eso, un reviewer que cita el codigo de un repo
+/// hermano prueba `../repo/archivo.go:353` y la ruta absoluta, las dos se
+/// rechazan por la FORMA, y el mensaje lo manda a buscar un archivo que estaba
+/// justo donde el creia. Lo que paso de verdad: termino citando el documento que
+/// el mismo habia escrito, en la columna que el gate comprueba, y el gate se dio
+/// por satisfecho con una cita que no era la evidencia.
+///
+/// La forma que SI anda —relativa al padre, sin `../`— no estaba nombrada en
+/// ningun lado (feature #70).
+pub fn diagnostico_de_citas(raices: &[&Path], filas: &[&str], ac: &str) -> String {
+    let mut fuera_de_forma: Vec<String> = Vec::new();
+    let mut sin_encontrar: Vec<String> = Vec::new();
+    for l in filas.iter().filter(|l| menciona(l, ac)) {
+        for (ruta, n) in citas_de(l) {
+            if ruta.contains("..") || Path::new(&ruta).is_absolute() {
+                fuera_de_forma.push(format!("{ruta}:{n}"));
+            } else if evaluar_cita(raices, &ruta, n) != Cita::Resuelve {
+                sin_encontrar.push(format!("{ruta}:{n}"));
+            }
+        }
+    }
+    let mut out = String::new();
+    if !fuera_de_forma.is_empty() {
+        out.push_str(&format!(
+            "\n    {ac}: {} no se rechaza porque falte el archivo, sino por la FORMA de la ruta:\n    \
+             el gate no acepta `..` ni rutas absolutas, para que un review no pueda citar\n    \
+             fuera del arbol. Escribila relativa a una de las raices de abajo.",
+            fuera_de_forma.join(", ")
+        ));
+    }
+    if !sin_encontrar.is_empty() {
+        out.push_str(&format!(
+            "\n    {ac}: no se encontro {}.",
+            sin_encontrar.join(", ")
+        ));
+    }
+    if !out.is_empty() {
+        out.push_str("\n    Raices contra las que se resolvio, en orden:");
+        for r in raices {
+            out.push_str(&format!("\n      - {}", r.display()));
+        }
+    }
+    out
+}
+
+/// La forma de citar un archivo de un repo HERMANO, si el layout la admite.
+///
+/// Solo se ofrece cuando `repo_root` es distinto de `root` (layout `subdir`):
+/// ahi `repo_root` ES el directorio que contiene los repos vecinos, y una cita
+/// relativa a el resuelve. En layout `root` los dos coinciden, los hermanos
+/// quedan fuera de toda raiz y **no se ofrece nada**: un remedio que no funciona
+/// es peor que ninguno, porque manda a la persona a probar algo que va a fallar
+/// (`docs/lecciones/remedios-que-la-herramienta-sugiere.md`).
+pub fn forma_repo_hermano(repo_root: &Path, root: &Path) -> Option<String> {
+    (repo_root != root).then(|| {
+        format!(
+            "Para un archivo de un repo hermano, la ruta va relativa a {} y SIN `../`:\n      \
+             <repo-hermano>/<archivo>:<linea>",
+            repo_root.display()
+        )
+    })
+}
+
+/// El diagnostico completo para los AC que quedaron sin cubrir: por que fallo
+/// cada cita, contra que raices se probo, y la forma de citar un repo hermano si
+/// el layout la admite.
+///
+/// Lo arman los DOS sitios que rechazan —el gate del cierre y `estampar`—
+/// llamando aca, y no cada uno por su cuenta: la #69 ya costo un test rojo por
+/// tener dos copias de la misma pregunta.
+pub fn porque_no_resolvieron(
+    raices: &[&Path],
+    paths: &HarnessPaths,
+    review: &str,
+    faltan: &[String],
+) -> String {
+    let filas: Vec<&str> = lineas_fuera_de_bloque(review);
+    let mut out = String::new();
+    for ac in faltan {
+        out.push_str(&diagnostico_de_citas(raices, &filas, ac));
+    }
+    if !out.is_empty()
+        && let Some(forma) = forma_repo_hermano(&paths.repo_root, &paths.root)
+    {
+        out.push_str(&format!("\n    {forma}"));
+    }
+    out
+}
+
 /// Los AC del SPEC que el review no responde con una cita. Vacio = cubierto.
 ///
 /// La lista sale del spec, no del review: si saliera del review, un review
@@ -737,7 +831,8 @@ pub fn gate(
             message: Some(format!("[GATE] {motivo}")),
         });
     }
-    let faltan = acs_sin_fila(&raices_de_citas(paths), &spec, &texto);
+    let raices = raices_de_citas(paths);
+    let faltan = acs_sin_fila(&raices, &spec, &texto);
     if !faltan.is_empty() {
         return Err(Exit {
             code: 2,
@@ -746,9 +841,10 @@ pub fn gate(
                  Cada AC-n necesita una fila que lo nombre y cite `archivo:linea`;\n    \
                  una fila sin cita es una afirmacion, no una verificacion.\n    \
                  Completa el review y volve a registrarlo:\n      \
-                 sh harness_cli revision --feature {fid} --veredicto approved",
+                 sh harness_cli revision --feature {fid} --veredicto approved{}",
                 faltan.len(),
-                faltan.join(", ")
+                faltan.join(", "),
+                porque_no_resolvieron(&raices, paths, &texto, &faltan)
             )),
         });
     }
@@ -1167,6 +1263,118 @@ mod tests {
 #[cfg(test)]
 mod tests_68 {
     use super::*;
+
+    // -----------------------------------------------------------------
+    // Feature #70: el gate dice contra que resolvio.
+    // -----------------------------------------------------------------
+
+    /// Un multi-repo de mentira: el padre con dos repos hermanos adentro y el
+    /// worktree de la feature al costado. Es el layout `subdir`.
+    fn multirepo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let padre = dir.path().to_path_buf();
+        let arnes = padre.join("harness_process");
+        let wt = padre.join("harness_process-wt/70-x");
+        let hermano = padre.join("ms-media-service/handlers");
+        for d in [&arnes, &wt, &hermano] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(hermano.join("portal_documents.go"), "l1\nl2\nl3\n").unwrap();
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        (dir, padre, arnes, wt)
+    }
+
+    #[test]
+    fn el_repo_hermano_resuelve_en_subdir() {
+        // AC-3. Es lo que YA pasa hoy, y por eso la premisa del ticket era falsa:
+        // en layout `subdir`, `repo_root` ES el directorio que contiene los
+        // repos vecinos. Se fija para que no se pierda —y para que el remedio
+        // que ofrece el AC-1 no mienta al ofrecerlo.
+        let (_d, padre, arnes, wt) = multirepo();
+        let plans = wt.join("docs");
+        let raices = raices_desde(&plans, &padre, &arnes);
+        assert_eq!(
+            evaluar_cita(&raices, "ms-media-service/handlers/portal_documents.go", 3),
+            Cita::Resuelve
+        );
+        // Y una linea que no existe sigue sin resolver: no se aflojo nada.
+        assert_eq!(
+            evaluar_cita(&raices, "ms-media-service/handlers/portal_documents.go", 9),
+            Cita::NoResuelve
+        );
+    }
+
+    #[test]
+    fn el_mensaje_lista_las_raices() {
+        // AC-1. El mensaje viejo no nombraba NINGUNA raiz, asi que no habia como
+        // deducir cual era la forma que andaba.
+        let (_d, padre, arnes, wt) = multirepo();
+        let plans = wt.join("docs");
+        let raices = raices_desde(&plans, &padre, &arnes);
+        let filas = vec!["| AC-1 | no-existe/archivo.go:3 | cubierto |"];
+        let msg = diagnostico_de_citas(&raices, &filas, "AC-1");
+        assert!(msg.contains("no se encontro no-existe/archivo.go:3"), "{msg}");
+        assert!(msg.contains("Raices contra las que se resolvio"), "{msg}");
+        for r in &raices {
+            assert!(msg.contains(&r.display().to_string()), "falta la raiz {r:?}:\n{msg}");
+        }
+    }
+
+    #[test]
+    fn el_mensaje_distingue_forma_de_ausencia() {
+        // AC-2. Las dos formas que una persona escribe por instinto se rechazan
+        // por la FORMA, y el mensaje viejo decia lo mismo que cuando falta el
+        // archivo: mandaba a buscar algo que estaba justo donde el reviewer creia.
+        let (_d, padre, arnes, wt) = multirepo();
+        let plans = wt.join("docs");
+        let raices = raices_desde(&plans, &padre, &arnes);
+        for cita in [
+            "../ms-media-service/handlers/portal_documents.go:3",
+            "/tmp/ms-media-service/handlers/portal_documents.go:3",
+        ] {
+            let fila = format!("| AC-1 | {cita} | cubierto |");
+            let msg = diagnostico_de_citas(&raices, &[fila.as_str()], "AC-1");
+            assert!(msg.contains("por la FORMA de la ruta"), "{cita}:\n{msg}");
+            assert!(msg.contains("no acepta `..` ni rutas absolutas"), "{cita}:\n{msg}");
+            assert!(
+                !msg.contains("no se encontro"),
+                "una ruta fuera de forma no puede reportarse como archivo ausente:\n{msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn el_remedio_no_miente_en_layout_root() {
+        // AC-4. En layout `root` los hermanos quedan fuera de toda raiz, asi que
+        // ofrecer esa forma mandaria a la persona a probar algo que va a fallar
+        // (`docs/lecciones/remedios-que-la-herramienta-sugiere.md`).
+        let (_d, padre, arnes, wt) = multirepo();
+        assert!(forma_repo_hermano(&padre, &arnes).is_some(), "subdir la ofrece");
+        assert!(
+            forma_repo_hermano(&arnes, &arnes).is_none(),
+            "layout root no puede ofrecer una forma que ahi no resuelve"
+        );
+        // Y de hecho no resuelve, que es la razon por la que no se ofrece.
+        let plans = wt.join("docs");
+        let raices = raices_desde(&plans, &arnes, &arnes);
+        assert_eq!(
+            evaluar_cita(&raices, "ms-media-service/handlers/portal_documents.go", 3),
+            Cita::NoResuelve
+        );
+    }
+
+    #[test]
+    fn el_gate_verde_no_explica_nada() {
+        // AC-5. El diagnostico aparece cuando hace falta. Un gate que explica
+        // siempre se deja de leer, y entonces el dia que importa nadie lo mira.
+        let (_d, padre, arnes, wt) = multirepo();
+        let plans = wt.join("docs");
+        let raices = raices_desde(&plans, &padre, &arnes);
+        let filas = vec!["| AC-1 | ms-media-service/handlers/portal_documents.go:3 | ok |"];
+        assert_eq!(diagnostico_de_citas(&raices, &filas, "AC-1"), "");
+        // Y tampoco explica por un AC que la fila no menciona.
+        assert_eq!(diagnostico_de_citas(&raices, &filas, "AC-2"), "");
+    }
 
     #[test]
     fn el_sufijo_de_letra_no_cubre_al_ac_pelado() {

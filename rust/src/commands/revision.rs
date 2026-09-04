@@ -124,15 +124,17 @@ fn estampar(
     }
 
     // La parte que DECIDE. Si falla, no se escribe nada.
-    let faltan = acs_sin_fila(&crate::revision::raices_de_citas(paths), &spec, &review);
+    let raices = crate::revision::raices_de_citas(paths);
+    let faltan = acs_sin_fila(&raices, &spec, &review);
     if !faltan.is_empty() {
         anyhow::bail!(
             "{rel} no responde por {} AC del spec: {}.\n    \
              Cada AC-n necesita una fila que lo nombre y cite `archivo:linea`,\n    \
              con un archivo que exista y una linea que exista en el.\n    \
-             Una fila sin cita que resuelva es una afirmacion, no una verificacion.",
+             Una fila sin cita que resuelva es una afirmacion, no una verificacion.{}",
             faltan.len(),
-            faltan.join(", ")
+            faltan.join(", "),
+            crate::revision::porque_no_resolvieron(&raices, paths, &review, &faltan)
         );
     }
 
