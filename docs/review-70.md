@@ -1,4 +1,5 @@
 # Review — feature #70: el gate de citas dice contra que resolvio
+Revisado: approved · 2026-09-04T20:01:24Z · estampado por `harness revision --veredicto`
 
 Revision adversarial sobre el propio trabajo. El mandato fue romperlo.
 
