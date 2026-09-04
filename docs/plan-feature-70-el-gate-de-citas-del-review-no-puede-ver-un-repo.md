@@ -26,3 +26,6 @@ Microservicios:
      implementer DEBE preguntar al usuario que decision aplicar ANTES de
      implementar ese feat/fase/tarea, y registrar aqui la respuesta. -->
 - 
+
+---
+Cerrado: 2026-09-04T20:01:32Z - status=done - el gate dice contra que resolvio; la premisa del ticket era falsa y se comprobo antes de construir
