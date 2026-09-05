@@ -3,8 +3,8 @@ nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
 triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion, orden, rollback, deshacer, transaccional, efecto irreversible, aislamiento, worktree, paralelo, atribuir, declarar, estado prematuro]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
-origen: [21, 44, 60, 61, 62, 72]
-usos: 4
+origen: [21, 44, 60, 61, 62, 71, 72]
+usos: 5
 ultimo_uso: 2026-09-05
 ultima_actualizacion: 2026-09-05
 estado: activa
@@ -66,6 +66,28 @@ Si es de todas, guardarlo adentro de una hace que su supervivencia dependa de
 como alguien resuelva un conflicto. Eso es disciplina, no estructura. El arreglo
 no fue detectar el conflicto: fue sacar el dato del branch, y entonces no hay
 conflicto que resolver mal.
+
+La feature #71 encontro la version dura del mismo caso, y conviene tenerla
+aparte porque la pregunta de arriba no alcanza. El `close` escribia el sello de
+cierre —`docs/estado-feature-<id>-<slug>.md`, que lleva adentro el cuerpo de
+`progress/current-<id>.md` y es su UNICA copia porque `progress/` esta
+gitignorado— en el `docs/` de la feature, y despues borraba ese worktree. No
+habia conflicto que resolver mal: el archivo simplemente dejaba de existir.
+
+Sobrevivia por una coincidencia: en un repo donde `docs/` es parte del repo
+principal, el merge se lo llevaba antes del borrado. En un proyecto donde
+`docs/` es un repo APARTE —el de realestate— no viajaba, y se perdio de verdad
+(la #124: hubo que reconstruirlo a mano, y el cuerpo literal es irrecuperable).
+Los 63 sellos que si sobrevivieron alimentaban la impresion de que el mecanismo
+andaba.
+
+Segunda pregunta, entonces, para cuando la primera dice "es de la unidad":
+*¿algo del mismo comando destruye el lugar donde lo escribo?* Si la respuesta es
+si, el dato no vive ahi por mas que conceptualmente le pertenezca a la unidad.
+Y una vez movido a la raiz, la escritura pudo bajar a la fase del estado: estaba
+en la fase de "los artefactos que viajan en la rama" por una razon fisica que
+dejo de existir. **Cuando arreglas donde se escribe algo, volve a mirar cuando
+se escribe: la fase muchas veces era una consecuencia del lugar.**
 
 **2. El pendiente que hay que acordarse de anotar.** Cuando algo best-effort
 falla, la tentacion es escribir el pendiente en un archivo. Pero eso hereda el

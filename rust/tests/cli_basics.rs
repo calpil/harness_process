@@ -399,15 +399,11 @@ fn close_should_not_touch_the_state_of_the_other_active_feature() {
     // ...y su stamp de autocheck tampoco se borro (AC-10).
     assert!(dir.path().join("hp/progress/.last_autocheck-2").exists());
     // El archivado de la #1 se llevo SU estado, no el de la #2.
-    // Feature #72: con worktree —y ahora abrir dos features exige tenerlo— el
-    // estado se archiva en el `docs/` de ESA feature, no en el compartido. El
-    // cierre `blocked` no integra, asi que el worktree sigue ahi.
-    let wt_1 = feature_en_backlog(dir.path(), "1")["worktree"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    // Feature #72: abrir dos features exige que las dos tengan worktree.
+    // Feature #71: y el estado archivado vuelve al `docs/` de la RAIZ, que es
+    // donde estan todos los demas y donde ningun cierre lo puede borrar.
     let archivado =
-        std::fs::read_to_string(Path::new(&wt_1).join("docs/estado-feature-1-uno.md")).unwrap();
+        std::fs::read_to_string(dir.path().join("docs/estado-feature-1-uno.md")).unwrap();
     assert!(archivado.contains("Feature #1"), "{archivado}");
     assert!(
         !archivado.contains("Feature #2: Dos"),
@@ -797,9 +793,12 @@ fn close_should_archive_current_state_and_reset_it() {
         ])
         .assert()
         .success()
+        // Feature #71: el mensaje ademas avisa que el sello queda sin commitear,
+        // porque vive en la raiz y ningun merge se lo lleva.
         .stdout(predicate::str::contains(
-            "Feature #1 cerrada como done. Estado archivado en docs/estado-feature-1-demo.md.",
-        ));
+            "Feature #1 cerrada como done. Estado archivado en docs/estado-feature-1-demo.md",
+        ))
+        .stdout(predicate::str::contains("sin commitear"));
     let current = std::fs::read_to_string(dir.path().join("hp/progress/current.md")).unwrap();
     assert!(current.starts_with("# Estado Actual\n\nSin feature activa.\n"));
     assert!(dir.path().join("docs/estado-feature-1-demo.md").exists());
@@ -6913,9 +6912,21 @@ fn cierre_exitoso_hace_todo_lo_de_siempre() {
         "bitacora en el PRD"
     );
     assert!(!wt.exists(), "worktree borrado");
+    // Feature #71: el estado archivado ya NO viaja en el merge. Se escribe en
+    // el `docs/` de la RAIZ despues de integrar, porque escribirlo en la rama
+    // significaba escribirlo en un worktree que el propio cierre borra —y con
+    // un `docs/` que es repo aparte, eso lo perdia (caso #124 de realestate).
+    // Lo que este test cuida sigue siendo lo mismo: que despues del cierre el
+    // archivo EXISTA y tenga el sello. Cambio donde hay que buscarlo.
+    let sello = raiz.join("docs/estado-feature-1-cobranza.md");
+    assert!(sello.is_file(), "el estado archivado quedo en la raiz: {sello:?}");
     assert!(
-        git_en(raiz, &["show", "main:docs/estado-feature-1-cobranza.md"]).contains("Estado archivado"),
-        "el estado archivado viajo en el merge"
+        std::fs::read_to_string(&sello).unwrap().contains("Estado archivado"),
+        "y lleva el sello"
+    );
+    assert!(
+        !git_en(raiz, &["ls-files", "docs/estado-feature-1-cobranza.md"]).contains("estado-feature"),
+        "queda sin commitear, que es lo que el cierre anuncia"
     );
 }
 
@@ -6980,16 +6991,31 @@ fn estado_archivado_apunta_a_donde_quedo_el_archivo() {
         !salida.contains("Estado archivado en ../"),
         "no puede nombrar un worktree, y menos el que acaba de borrar:\n{salida}"
     );
-    // Y el archivo esta ahi de verdad, en la rama destino.
+    // Y el archivo esta ahi de verdad. Feature #71: se comprueba en DISCO y ya
+    // no con `git show main:...`. El sello dejo de viajar en la rama —se
+    // escribe en la raiz, despues de integrar— asi que preguntarle a git seria
+    // preguntar en el lugar equivocado. La propiedad que este test cuida no
+    // cambio: la ruta impresa apunta a un archivo que existe.
+    let sello = raiz.join("docs/estado-feature-1-cobranza.md");
     assert!(
-        git_en(raiz, &["show", "main:docs/estado-feature-1-cobranza.md"])
-            .contains("Estado archivado"),
-        "el archivo tiene que existir en la ruta que se imprimio"
+        sello.is_file(),
+        "el archivo tiene que existir en la ruta que se imprimio: {sello:?}"
+    );
+    assert!(
+        std::fs::read_to_string(&sello).unwrap().contains("Estado archivado"),
+        "y tiene que ser el sello, no un archivo cualquiera"
     );
 }
 
-/// AC-6: si el cierre NO integra, el worktree sigue vivo y la ruta real es la
-/// que vale.
+/// AC-6 de la #63, reescrito por la #71: el sello queda en la RAIZ integre o no
+/// integre el cierre.
+///
+/// El test original afirmaba que sin integrar la ruta que vale es la del
+/// worktree, porque ahi se escribia. Esa distincion desaparecio: hay una sola
+/// ubicacion, y por eso el mensaje ya no tiene que elegir entre dos candidatas.
+/// Lo que se cuida sigue siendo lo mismo —que el cierre informe donde quedo y
+/// que ahi este— y ahora ademas se cuida que NO quede en el worktree, que era
+/// la mitad del bug.
 #[test]
 fn estado_archivado_sin_integrar_mantiene_la_ruta_real() {
     let (dir, bin) = sandbox_git();
@@ -7007,19 +7033,25 @@ fn estado_archivado_sin_integrar_mantiene_la_ruta_real() {
         .clone();
     let salida = String::from_utf8_lossy(&salida);
 
-    // Sin integrar el worktree sigue existiendo, asi que la ruta real resuelve.
+    // Sin integrar, el worktree sigue existiendo.
     let wt = raiz.parent().unwrap().join(format!(
         "{}-wt/1-cobranza",
         raiz.file_name().unwrap().to_string_lossy()
     ));
     assert!(wt.is_dir(), "el cierre pending conserva el worktree");
     assert!(
-        salida.contains("Estado archivado en"),
-        "igual informa donde quedo:\n{salida}"
+        salida.contains("Estado archivado en docs/estado-feature-1-cobranza.md"),
+        "informa la ruta de la raiz:\n{salida}"
     );
     assert!(
-        wt.join("docs/estado-feature-1-cobranza.md").is_file(),
-        "y el archivo esta en el worktree, que es lo que la ruta dice"
+        raiz.join("docs/estado-feature-1-cobranza.md").is_file(),
+        "y el archivo esta ahi"
+    );
+    // Feature #71: y NO en el worktree. Escribirlo ahi es lo que lo perdia
+    // cuando el cierre si integraba y borraba el worktree a continuacion.
+    assert!(
+        !wt.join("docs/estado-feature-1-cobranza.md").exists(),
+        "no puede quedar una segunda copia en el worktree"
     );
 }
 
@@ -7997,4 +8029,90 @@ fn el_gate_se_niega_con_un_ac_ilegible() {
         .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
         .assert()
         .code(2);
+}
+
+#[test]
+fn close_should_not_archive_the_state_into_the_worktree_it_deletes() {
+    // Feature #71: `close` escribe `docs/estado-feature-<id>-<slug>.md` en el
+    // `docs/` de la FEATURE, y despues borra el worktree. Cuando `docs/` es un
+    // repo aparte, ese archivo no viaja con el merge del repo principal: el
+    // cierre imprime que lo archivo y el archivo no existe en ningun lado.
+    //
+    // Encontrado cerrando la #124 de realestate. Lo que se pierde con el no es
+    // solo el sello: el cuerpo de `progress/current-<id>.md` vive ADENTRO de ese
+    // archivo, y `progress/` esta gitignorado, asi que no hay otra copia.
+    let (dir, bin) = sandbox_git_con_docs_aparte();
+    cmd(&bin).args(["add", "--name", "Se Pierde"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    let salida = cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success();
+
+    // AC-1: el estado archivado tiene que existir DESPUES del cierre, en algun
+    // lado que el propio cierre no haya borrado. Se afirma sobre el ARCHIVO, no
+    // sobre el exit code: el exit code ya era 0 con el bug.
+    let canonico = dir.path().join("docs/estado-feature-1-se-pierde.md");
+    assert!(
+        canonico.is_file(),
+        "el estado archivado no quedo en el docs/ del repo principal: {canonico:?}"
+    );
+    // AC-4: y conserva el cuerpo del estado vivo, que es lo unico que documenta
+    // la evidencia de la feature — `progress/` esta gitignorado y el cierre
+    // borra `current-<id>.md`, asi que no hay segunda copia.
+    let texto = std::fs::read_to_string(&canonico).unwrap();
+    assert!(texto.contains("Feature #1: Se Pierde"), "{texto}");
+    assert!(texto.contains("Evidencia"), "sin el cuerpo del estado vivo: {texto}");
+    assert!(!dir.path().join("hp/progress/current-1.md").exists(), "el vivo se borro");
+
+    // AC-3: y el mensaje nombra ESA ruta, no una candidata que podria no
+    // existir. Se comprueba resolviendo lo que el cierre imprimio.
+    let out = String::from_utf8_lossy(&salida.get_output().stdout).into_owned();
+    let nombrada = out
+        .split("Estado archivado en ")
+        .nth(1)
+        .and_then(|r| r.split('.').next().map(|p| format!("{p}.md")))
+        .unwrap_or_else(|| panic!("el cierre no dijo donde archivo: {out}"));
+    assert!(
+        dir.path().join(&nombrada).is_file(),
+        "el cierre nombro `{nombrada}`, que no existe. Salida:\n{out}"
+    );
+    let _ = std::fs::remove_dir_all(dir.path().join("docs-wt"));
+}
+
+#[test]
+fn close_should_not_leave_a_seal_for_an_integration_that_failed() {
+    // AC-5 (feature #71): el sello afirma que la feature cerro. Si la
+    // integracion se aborta, ese sello no puede quedar escrito. Antes se
+    // escribia en la fase 1 —por una razon que ya no existe— y sobrevivia a un
+    // merge fallido.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Conflictiva"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    // Las dos ramas tocan la MISMA linea: el merge va a conflictuar.
+    let wt = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
+    let wt = PathBuf::from(wt);
+    std::fs::write(wt.join("README.md"), "# desde la feature\n").unwrap();
+    git_en(&wt, &["add", "-A"]);
+    git_en(&wt, &["commit", "-q", "-m", "feat: readme de la feature"]);
+    std::fs::write(dir.path().join("README.md"), "# desde main\n").unwrap();
+    git_en(dir.path(), &["add", "-A"]);
+    git_en(dir.path(), &["commit", "-q", "-m", "docs: readme de main"]);
+
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .failure();
+
+    assert!(
+        !dir.path().join("docs/estado-feature-1-conflictiva.md").exists(),
+        "quedo un sello de cierre para una integracion que no ocurrio"
+    );
+    assert_ne!(
+        feature_en_backlog(dir.path(), "1")["status"],
+        "done",
+        "y el backlog tampoco dice cerrada"
+    );
 }
