@@ -45,6 +45,46 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## El backlog sabe de dependencias entre features (feature #75)
+
+Una feature puede declarar de que otras depende:
+
+```sh
+harness_cli add --name "Curador" --depends-on 17          # al crearla
+harness_cli depende --feature 21 --de 17                  # o despues
+harness_cli depende --feature 21 --de 17 --quitar         # y se deshace
+```
+
+Con eso:
+
+- **`next` no la ofrece** hasta que sus dependencias cierren. Y si no queda
+  ninguna ofrecible POR ESE MOTIVO, lo dice nombrando quien espera a que — en vez
+  del viejo "No hay features pending" sobre un backlog lleno de pendings.
+- **`start` te avisa** si la arrancas igual, y **no te bloquea**: la decision es
+  tuya, pero el backlog sabia algo que vos quiza no.
+- **`status`** lista las dependencias abiertas de lo que esta en curso.
+
+Un id que no existe, una feature que depende de si misma, o un ciclo (directo o
+transitivo) se **rechazan sin escribir nada**, y el mensaje del ciclo nombra el
+camino completo: `#3 -> #1 -> #2 -> #3`.
+
+`superseded` y `resuelto-aguas-arriba` **satisfacen** una dependencia: el trabajo
+existe en otra feature o en otro repo, y esperar a algo que no va a cerrar nunca
+te dejaria colgado. `blocked` y `pending` no satisfacen.
+
+**Y una feature que se traba siempre deja de trabarse en silencio.** A partir del
+N-esimo cierre `blocked` (`rules.bloqueos_antes_de_decidir`, default 2), el
+cierre exige una nota que diga si la causa es la misma:
+
+```
+[GATE] Feature #12: esta feature se cierra como `blocked` por 3a vez y el cierre
+       no dice por que. Deci si la causa es la misma o cambio.
+```
+
+**Nada se migra.** El campo `depends_on` y el contador `bloqueos` son opcionales
+y nacen ausentes: una feature que no los declara se comporta exactamente igual
+que antes de esta feature.
+
 ## Un AC puede declarar varias verificaciones y ahora se corren todas (feature #73)
 
 Si un criterio necesita mas de un comando, escribi una linea `Comando:` por

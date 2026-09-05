@@ -8189,3 +8189,239 @@ fn close_should_not_leave_a_seal_for_an_integration_that_failed() {
         "y el backlog tampoco dice cerrada"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature #75: dependencias entre features y el circuit breaker.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn add_should_refuse_a_dependency_that_does_not_exist() {
+    // AC-1: un id inventado no se guarda. Se comprueba que la feature NO quedo
+    // creada, no solo que el comando salio 2.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Base"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Encima", "--depends-on", "99"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("#99"))
+        .stderr(predicate::str::contains("no existe"));
+
+    let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    assert_eq!(
+        data["features"].as_array().unwrap().len(),
+        1,
+        "la feature no se creo: {texto}"
+    );
+}
+
+#[test]
+fn depende_should_refuse_a_cycle_and_leave_the_backlog_untouched() {
+    // AC-5: el ciclo se rechaza nombrando el camino, y nada se escribe.
+    //
+    // Este test reemplaza a uno que se llamaba `add_should_refuse_a_dependency_cycle`
+    // y NO probaba un ciclo: por `add` el grafo es un DAG por construccion —una
+    // feature nueva solo puede depender de ids anteriores— asi que ahi el ciclo
+    // es inalcanzable. El nombre afirmaba algo que el cuerpo no hacia, que es
+    // justo el defecto que la feature #73 documento.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "A"]).assert().success();
+    cmd(&bin).args(["add", "--name", "B"]).assert().success();
+    cmd(&bin).args(["add", "--name", "C"]).assert().success();
+
+    // Cadena valida: #1 -> #2 -> #3.
+    cmd(&bin).args(["depende", "--feature", "1", "--de", "2"]).assert().success();
+    cmd(&bin).args(["depende", "--feature", "2", "--de", "3"]).assert().success();
+
+    // Y ahora #3 -> #1 cierra el ciclo.
+    cmd(&bin)
+        .args(["depende", "--feature", "3", "--de", "1"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("ciclo"))
+        .stderr(predicate::str::contains("#3 -> #1 -> #2 -> #3"))
+        .stderr(predicate::str::contains("El backlog no se toco"));
+
+    let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    assert!(
+        data["features"][2].get("depends_on").is_none(),
+        "la #3 no quedo con dependencias: {texto}"
+    );
+}
+
+#[test]
+fn depende_should_declare_a_dependency_between_existing_features() {
+    // El recorrido P1 del spec: las dos features YA existen. Es imposible desde
+    // `add`, que crea una nueva, y por eso este comando existe.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Base"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Encima"]).assert().success();
+
+    cmd(&bin)
+        .args(["depende", "--feature", "2", "--de", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("depende de #1"))
+        .stdout(predicate::str::contains("#1 Base (pending)"));
+
+    // Y se puede deshacer.
+    cmd(&bin)
+        .args(["depende", "--feature", "2", "--de", "1", "--quitar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(nada)"));
+    let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    assert!(
+        data["features"][1].get("depends_on").is_none(),
+        "al quitar la ultima, el campo se va: {texto}"
+    );
+}
+
+#[test]
+fn next_should_skip_features_with_open_dependencies_and_say_so() {
+    // AC-2: la que espera no se ofrece, y el silencio no es una opcion — si no
+    // queda ninguna POR ESE MOTIVO, se dice cual espera a que.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Base"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Encima", "--depends-on", "1"])
+        .assert()
+        .success();
+
+    // Con la #1 pending, `next` ofrece la #1 (no tiene dependencias).
+    cmd(&bin)
+        .arg("next")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"Base\""));
+
+    // Cerrada la #1, la #2 se libera.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .arg("next")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"Encima\""));
+}
+
+#[test]
+fn next_should_name_what_is_waiting_when_nothing_is_available() {
+    // AC-2, la mitad que importa: un backlog lleno de pendings que no dice
+    // "no hay features pending" sino POR QUE no ofrece ninguna.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Base"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Encima", "--depends-on", "1"])
+        .assert()
+        .success();
+    // La #1 se traba: deja de satisfacer y no queda ninguna ofrecible.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "trabada"])
+        .assert()
+        .success();
+
+    cmd(&bin)
+        .arg("next")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dependencias abiertas"))
+        .stdout(predicate::str::contains("#2 Encima espera"))
+        .stdout(predicate::str::contains("#1 Base (blocked)"));
+}
+
+#[test]
+fn start_should_warn_about_open_dependencies_without_blocking() {
+    // AC-3: avisa y arranca igual. La decision es del usuario.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Base"]).assert().success();
+    cmd(&bin)
+        .args(["add", "--name", "Encima", "--depends-on", "1"])
+        .assert()
+        .success();
+
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dependencia(s) SIN cerrar"))
+        .stdout(predicate::str::contains("#1 Base (pending)"))
+        .stdout(predicate::str::contains("la decision es tuya"));
+
+    // Y arranco de verdad: no fue solo un aviso.
+    assert!(dir.path().join("hp/progress/current-2.md").is_file());
+}
+
+#[test]
+fn close_should_demand_a_reason_after_repeated_blocks() {
+    // AC-4, la mitad que dispara. Esta condicion NUNCA se dio en el backlog
+    // real (84 cierres, cero features bloqueadas dos veces), asi que este test
+    // es toda la evidencia de que el gate funciona.
+    let (_dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Cronica"]).assert().success();
+
+    // Primer y segundo blocked: pasan sin nota (umbral default 2).
+    for _ in 0..2 {
+        cmd(&bin)
+            .args(["close", "--feature", "1", "--status", "blocked"])
+            .assert()
+            .success();
+    }
+    // El tercero exige decir por que.
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("por 3a vez"))
+        .stderr(predicate::str::contains("bloqueos_antes_de_decidir"));
+
+    // Y con la nota, pasa.
+    cmd(&bin)
+        .args([
+            "close", "--feature", "1", "--status", "blocked", "--note",
+            "la misma causa: falta el token de Atlassian",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn close_should_not_demand_a_reason_before_the_threshold() {
+    // AC-4, la otra mitad: el gate no puede dispararse antes de tiempo. Sin
+    // este test, uno que exigiera nota SIEMPRE tambien pasaria el de arriba.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Una"]).assert().success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked"])
+        .assert()
+        .success();
+
+    let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    assert_eq!(data["features"][0]["bloqueos"], 1, "se conto una vez: {texto}");
+}
+
+#[test]
+fn features_without_depends_on_should_behave_exactly_as_before() {
+    // AC-6: el campo es opcional y su ausencia no cambia nada.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Sola"]).assert().success();
+
+    let texto = std::fs::read_to_string(dir.path().join("hp/feature_list.json")).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    assert!(
+        data["features"][0].get("depends_on").is_none(),
+        "sin --depends-on el campo no se escribe: {texto}"
+    );
+    assert!(
+        data["features"][0].get("bloqueos").is_none(),
+        "y el contador tampoco nace"
+    );
+    cmd(&bin).arg("next").assert().success().stdout(predicate::str::contains("Sola"));
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+}

@@ -45,6 +45,24 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   tiene huella y no es `$HOME`, tambien con aviso `[i]` (feature #10); marker con
   otro valor (`root`) => el propio dir, sin inferencia ni aviso.
 - `features.rs`: carga/guarda `feature_list.json` y selecciona la feature activa.
+- `dependencias.rs`: que feature espera a cual, y que feature se traba siempre
+  (feature #75). Dos preguntas que comparten archivo porque comparten el dato
+  —el backlog— y nada mas. Todo PURO: `motivo_invalido` (id inexistente,
+  auto-referencia o ciclo, EN ESE ORDEN, porque decir "ciclo" sobre un id que ni
+  existe confunde dos problemas), `ciclo_que_formaria` (devuelve el CAMINO,
+  `#3 -> #1 -> #2 -> #3`, no un booleano), `abiertas` y `motivo_exige_nota`. El
+  campo `depends_on` del backlog **no es** el `depends_on` de `graph/derive.rs`:
+  aquel relaciona piezas de codigo, este features. Mismo nombre, dominios
+  distintos, y no se reusa uno por el otro. `superseded` y
+  `resuelto-aguas-arriba` SATISFACEN una dependencia —el trabajo existe en otro
+  lado y esperar a algo que no va a cerrar nunca colgaria a quien depende—;
+  `blocked` y `pending` no. Una dependencia a un id que ya no esta se reporta
+  abierta con estado `ausente`: desaparecer no es estar hecha. El contador de
+  bloqueos (`rules.bloqueos_antes_de_decidir`, default 2) exige explicar la causa
+  al N-esimo cierre `blocked`; su condicion NUNCA se dio en 84 cierres reales y
+  se implemento por decision del usuario con esa medicion a la vista, asi que sus
+  dos tests —uno que lo dispara, otro que comprueba que no se dispara antes— son
+  toda su evidencia.
 - `aislamiento.rs`: si una feature esta AISLADA o no (feature #72). `decidir()` es
   PURA —no toca git ni disco— y devuelve `Aislar` / `Seguir(NoAislado)` /
   `Rechazar(Rechazo)`. Esa separacion es lo que impide volver al "avisar y

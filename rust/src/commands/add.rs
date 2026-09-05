@@ -18,6 +18,7 @@ pub fn run(
     acceptance: &[String],
     prd_ref: Option<&str>,
     kind: Option<&str>,
+    depends_on: &[String],
 ) -> anyhow::Result<()> {
     // AC-10: un kind invalido se rechaza ANTES de tocar el backlog, con la
     // lista de validos en el mensaje.
@@ -54,6 +55,20 @@ pub fn run(
         .max()
         .unwrap_or(0);
     let fid = max_id + 1;
+    // Feature #75 (AC-1, AC-5): las dependencias se validan contra el backlog
+    // ANTES de escribir nada — id inexistente, auto-referencia o ciclo. Es el
+    // mismo criterio que el `--kind` invalido de arriba: una referencia mala no
+    // deja una feature a medio cargar.
+    if !depends_on.is_empty()
+        && let Some(motivo) =
+            crate::dependencias::motivo_invalido(&data, &fid.to_string(), depends_on)
+    {
+        return Err(crate::exit::Exit {
+            code: 2,
+            message: Some(format!("--depends-on invalido: {motivo}")),
+        }
+        .into());
+    }
     let mut feature = Map::new();
     feature.insert("id".to_string(), json!(fid));
     feature.insert("name".to_string(), json!(name));
@@ -66,6 +81,14 @@ pub fn run(
         Value::Array(acceptance.iter().map(|s| json!(s)).collect()),
     );
     feature.insert("status".to_string(), json!("pending"));
+    // Campo OPCIONAL (feature #75): sin --depends-on no se escribe nada, y una
+    // feature sin el campo se comporta exactamente como antes.
+    if !depends_on.is_empty() {
+        feature.insert(
+            "depends_on".to_string(),
+            Value::Array(depends_on.iter().map(|d| json!(d)).collect()),
+        );
+    }
     // Campo OPCIONAL (feature #16): sin --kind el backlog queda como siempre,
     // asi que las features ya cargadas no se migran ni se tocan (AC-9).
     if let Some(k) = kind.filter(|k| *k != "feature") {

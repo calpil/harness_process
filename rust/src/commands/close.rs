@@ -237,6 +237,22 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     // archivado el estado, reescrito el indice, dejado la linea en history.md,
     // guardado la memoria en el hub y dicho "Feature #N cerrada". Nueve
     // afirmaciones sobre un trabajo que no estaba integrado.
+    // Feature #75 (AC-4): el circuit breaker. Una feature que ya se trabo N
+    // veces no se puede volver a trabar sin decir por que. Va en la FASE 0
+    // porque es de lo que puede NEGARSE: si se negara despues, el backlog ya
+    // diria `blocked`.
+    if status == "blocked" {
+        let previos = crate::dependencias::bloqueos_previos(feature_at(&data, idx));
+        let umbral = crate::dependencias::bloqueos_antes_de_decidir(&data);
+        if let Some(motivo) = crate::dependencias::motivo_exige_nota(previos, umbral, &note_text) {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!("[GATE] Feature #{feature_id}: {motivo}")),
+            }
+            .into());
+        }
+    }
+
     let integracion = planificar_integracion(paths, &data, idx, status, to, &feature_id)?;
 
     // --- FASE 1: los artefactos que tienen que VIAJAR EN LA RAMA ---
@@ -274,6 +290,15 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         let feature = feature_mut(&mut data, idx)?;
         feature.insert("status".to_string(), json!(status));
         feature.insert("closed_at".to_string(), json!(stamp.clone()));
+        // AC-4: se cuenta DESPUES de que el cierre ocurrio, con el resto del
+        // estado. Contarlo antes haria que un cierre negado sumara igual.
+        if status == "blocked" {
+            let previos = feature
+                .get("bloqueos")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            feature.insert("bloqueos".to_string(), json!(previos + 1));
+        }
         if !note_text.is_empty() {
             feature.insert("note".to_string(), json!(note_text.clone()));
         }
