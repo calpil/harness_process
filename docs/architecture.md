@@ -136,9 +136,17 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   tres semanticas distintas. `tests/conventions_check.sh un-solo-parser` impide
   que aparezca un quinto.
 - `verificacion.rs`: AC ejecutables (feature #23). `parsear()` es **pura** —lee
-  el texto del spec y devuelve `Verificacion { ac, comando: Option<String> }`—, y
+  el texto del spec y devuelve `Verificacion { ac, comandos: Vec<String> }`—, y
   esa pureza es lo que permite probar la compatibilidad contra los cientos de AC
-  reales del repo sin ejecutar un solo comando. El nombre de un AC es
+  reales del repo sin ejecutar un solo comando. Un AC declara TODAS las
+  verificaciones que necesite, una linea `Comando:` cada una, y `verify` las
+  corre todas dejando una fila por comando en el reporte (feature #73). Ese
+  campo era `comando: Option<String>` y el segundo `Comando:` de un mismo AC se
+  descartaba sin marca: el AC-8 de la #72 declaro cuatro, se corrio uno y el
+  reporte dijo "1 verde, 0 en rojo". Los dos tests que debian cuidarlo pasaban
+  —uno afirmaba el descarte como intencion, el otro tenia un oraculo que contaba
+  "solo el primero, como en `parsear`"—, que es la forma mas cara de este
+  defecto: el test escrito para acompañar a la implementacion en vez de medirla. El nombre de un AC es
   `AC-<digitos><letras?>` y admite una anotacion entre parentesis que no entra en
   el nombre (`- AC-11 (MANUAL):` es `AC-11`, `- AC-4b:` es `AC-4b`): antes se
   exigian los dos puntos pegados a los digitos y eso tiraba siete AC reales,
@@ -147,7 +155,7 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   compara nombres de AC token a token: cuando la #68 sumo letras, la guarda de la
   #64 —escrita para nombres de solo digitos— quedo incompleta y una fila de
   `AC-4b` volvio a dar por cubierto al `AC-4`. `ejecutar()` corre UN comando desde la
-  raiz con `wait-timeout` (`rules.verify_timeout_segundos`, default 300) y
+  raiz —`verify` lo llama una vez por cada comando del AC— con `wait-timeout` (`rules.verify_timeout_segundos`, default 300) y
   clasifica en el enum `Estado` (`Verde` / `Rojo` / `Timeout` / `Manual` /
   `Vacio`); un AC sin comando es `Manual` y **nunca** bloquea. `Vacio` (feature
   #44) es el AC que salio 0 **sin ejecutar ningun caso**: lo decide
@@ -156,7 +164,10 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   forma. Ese `None` es lo que evita que el detector opine sobre un `grep` o un
   `bash`. `rojos_del_reporte()` deriva del enum via `Estado::desde_etiqueta()` en
   vez de comparar contra cadenas sueltas, para que un estado nuevo no se filtre
-  por el cierre — que es como la #37 se llevo puesto el emisor de Jira. `gate()` es lo unico que usa el
+  por el cierre — que es como la #37 se llevo puesto el emisor de Jira— y
+  deduplica con `sin_repetir()`, la MISMA funcion que usa el mensaje de `verify`:
+  con una fila por comando, un AC con dos comandos rojos aparece dos veces, y dos
+  listas distintas de "AC en rojo" seria la divergencia de siempre. `gate()` es lo unico que usa el
   cierre: LEE `docs/verify-<id>.md` y no llama a `ejecutar()` — la promesa "cerrar
   no dispara shell" es estructural, no disciplina. El parser saltea los bloques
   ``` porque un spec que documenta la sintaxis no puede terminar ejecutando su

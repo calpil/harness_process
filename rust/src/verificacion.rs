@@ -34,8 +34,22 @@ pub const MAX_SALIDA_BYTES: usize = 4 * 1024 * 1024;
 pub struct Verificacion {
     /// `AC-1`, `AC-12`, ...
     pub ac: String,
-    /// `None` = verificacion manual, a cargo del reviewer. NO es un fallo.
-    pub comando: Option<String>,
+    /// Los comandos que el AC declara, en el orden en que estan escritos.
+    ///
+    /// Feature #73: esto era `Option<String>` —UN comando— y el segundo
+    /// `Comando:` de un mismo AC se descartaba sin marca. El AC-8 de la #72
+    /// declaraba cuatro y `verify` corrio uno, reportando "1 verde, 0 en rojo".
+    /// El modelo lo hacia inevitable: no habia donde poner el segundo.
+    ///
+    /// Vacio = verificacion MANUAL, a cargo del reviewer. NO es un fallo.
+    pub comandos: Vec<String>,
+}
+
+impl Verificacion {
+    /// True si el AC no declara ninguna verificacion ejecutable.
+    pub fn es_manual(&self) -> bool {
+        self.comandos.is_empty()
+    }
 }
 
 /// Como quedo un AC tras la corrida.
@@ -171,7 +185,10 @@ pub fn parsear(spec: &str) -> Vec<Verificacion> {
         let t = linea.trim();
         if let Some(ac) = ac_de(t) {
             ac_ilegible = false;
-            out.push(Verificacion { ac, comando: None });
+            out.push(Verificacion {
+                ac,
+                comandos: Vec::new(),
+            });
             continue;
         }
         if t.starts_with("- AC-") {
@@ -180,12 +197,16 @@ pub fn parsear(spec: &str) -> Vec<Verificacion> {
         }
         // `Comando:` pertenece al ultimo AC abierto (decision del usuario
         // 2026-08-17, OBS-1: la prueba va pegada al criterio).
+        // Feature #73: se acumulan TODOS. Antes habia un `ultimo.comando.is_none()`
+        // que hacia que el primero ganara y los demas desaparecieran: un AC con
+        // cuatro verificaciones quedaba verde por la primera. La guarda de la
+        // #68 (`!ac_ilegible`) sigue igual y es la que impide que el `Comando:`
+        // de un AC que no se pudo leer se le cuelgue al AC de arriba.
         if let Some(cmd) = comando_de(t)
             && !ac_ilegible
             && let Some(ultimo) = out.last_mut()
-            && ultimo.comando.is_none()
         {
-            ultimo.comando = Some(cmd);
+            ultimo.comandos.push(cmd);
         }
     }
     out
@@ -566,8 +587,25 @@ pub fn render_reporte_desde(
 
 /// Lee un reporte ya escrito y dice que AC quedaron bloqueando. Es lo UNICO que
 /// usa el cierre: `close` nunca ejecuta un comando (AC-16).
+/// Los nombres de AC de una lista, sin repetir y conservando el orden.
+///
+/// Feature #73: con una fila por comando, un AC con dos comandos rojos aparece
+/// dos veces. Los DOS lugares que hablan de "AC en rojo" —el mensaje de
+/// `verify` y el gate del cierre, que lo lee del reporte— tienen que dar la
+/// misma lista, y por eso deduplican con la misma funcion en vez de cada uno
+/// con la suya. Dos implementaciones de la misma pregunta que divergen es la
+/// familia de bug mas repetida de este repo (features #64, #67, #69).
+pub fn sin_repetir(acs: impl IntoIterator<Item = String>) -> Vec<String> {
+    acs.into_iter().fold(Vec::new(), |mut out: Vec<String>, ac| {
+        if !out.contains(&ac) {
+            out.push(ac);
+        }
+        out
+    })
+}
+
 pub fn rojos_del_reporte(texto: &str) -> Vec<String> {
-    texto
+    let filas = texto
         .lines()
         .filter(|l| l.starts_with("| AC-"))
         .filter_map(|l| {
@@ -581,7 +619,8 @@ pub fn rojos_del_reporte(texto: &str) -> Vec<String> {
             let bloquea = Estado::desde_etiqueta(celdas.get(2)?).is_none_or(Estado::bloquea);
             bloquea.then(|| (*ac).to_string())
         })
-        .collect()
+        .collect::<Vec<String>>();
+    sin_repetir(filas)
 }
 
 /// Lee `rules.require_verify_green` (default false: la regla nace apagada, como
@@ -617,7 +656,7 @@ pub fn gate(
     };
     let declarados = parsear(&texto_spec)
         .into_iter()
-        .filter(|v| v.comando.is_some())
+        .filter(|v| !v.es_manual())
         .count();
     if declarados == 0 {
         // AC-13: la regla activa no rompe features cuyos AC no declaran nada.
@@ -795,23 +834,46 @@ mod tests {
         let v = parsear(spec);
         assert_eq!(v.len(), 2);
         assert_eq!(v[0].ac, "AC-1");
-        assert_eq!(v[0].comando.as_deref(), Some("bash tests/smoke.sh"));
+        assert_eq!(v[0].comandos, vec!["bash tests/smoke.sh".to_string()]);
         assert_eq!(v[1].ac, "AC-2");
-        assert_eq!(v[1].comando, None);
+        assert!(v[1].es_manual());
     }
 
     #[test]
     fn parse_should_accept_the_command_without_backticks() {
         let spec = "- AC-1: algo.\n  Comando: cargo test\n";
-        assert_eq!(parsear(spec)[0].comando.as_deref(), Some("cargo test"));
+        assert_eq!(parsear(spec)[0].comandos, vec!["cargo test".to_string()]);
     }
 
+    /// AC-1 de la #73: un AC se queda con TODOS sus comandos, en orden.
+    ///
+    /// Este test se llamaba `parse_should_keep_only_the_first_command_of_an_ac`
+    /// y afirmaba lo contrario. No estaba mal escrito: describia con precision
+    /// lo que el codigo hacia. Lo que faltaba era preguntarse si eso era lo que
+    /// tenia que hacer — el AC-8 de la #72 declaro cuatro verificaciones y
+    /// quedo verde por la primera, con este test en verde al lado.
     #[test]
-    fn parse_should_keep_only_the_first_command_of_an_ac() {
-        let spec = "- AC-1: algo.\n  Comando: `uno`\n  Comando: `dos`\n";
+    fn parse_should_keep_every_command_of_an_ac_in_order() {
+        let spec = "- AC-1: algo.\n  Comando: `uno`\n  Comando: `dos`\n  Comando: `tres`\n";
         let v = parsear(spec);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].comando.as_deref(), Some("uno"));
+        assert_eq!(v.len(), 1, "sigue siendo UN criterio");
+        assert_eq!(
+            v[0].comandos,
+            vec!["uno".to_string(), "dos".to_string(), "tres".to_string()],
+            "los tres, en el orden en que estan escritos"
+        );
+        assert!(!v[0].es_manual());
+    }
+
+    /// Y los comandos van a SU AC: el de abajo no se lleva los de arriba.
+    #[test]
+    fn parse_should_not_leak_commands_into_the_next_ac() {
+        let spec = "- AC-1: uno.\n  Comando: `a`\n  Comando: `b`\n\
+                    - AC-2: dos.\n  Comando: `c`\n";
+        let v = parsear(spec);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].comandos, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(v[1].comandos, vec!["c".to_string()]);
     }
 
     #[test]
@@ -836,7 +898,7 @@ mod tests {
                     - AC-1: Given lo real, Then esto si.\n  Comando: `true`\n";
         let v = parsear(spec);
         assert_eq!(v.len(), 1, "el ejemplo del bloque se colo: {v:?}");
-        assert_eq!(v[0].comando.as_deref(), Some("true"));
+        assert_eq!(v[0].comandos, vec!["true".to_string()]);
     }
 
     #[test]
@@ -1073,7 +1135,7 @@ mod tests {
         let v = parsear("- AC-11 (MANUAL): audita esto\n");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].ac, "AC-11");
-        assert!(v[0].comando.is_none(), "un AC manual no declara comando");
+        assert!(v[0].es_manual(), "un AC manual no declara comando");
     }
 
     #[test]
@@ -1087,8 +1149,8 @@ mod tests {
         // corresponde.
         let v = parsear("- AC-1: uno\n- AC-2 (MANUAL): dos\n  Comando: `mio`\n");
         assert_eq!(v.len(), 2);
-        assert!(v[0].comando.is_none(), "AC-1 se quedo con el comando de AC-2");
-        assert_eq!(v[1].comando.as_deref(), Some("mio"));
+        assert!(v[0].es_manual(), "AC-1 se quedo con el comando de AC-2");
+        assert_eq!(v[1].comandos, vec!["mio".to_string()]);
 
         // Y con una linea que ARRANCA como AC pero es ilegible de verdad, el
         // comando no se le cuelga a nadie: vale mas perderlo que adjudicarselo
@@ -1096,7 +1158,7 @@ mod tests {
         let v = parsear("- AC-1: uno\n- AC-: rota\n  Comando: `ajeno`\n");
         assert_eq!(v.len(), 1);
         assert!(
-            v[0].comando.is_none(),
+            v[0].es_manual(),
             "el comando de una linea ilegible se le colgo a AC-1"
         );
     }
@@ -1198,6 +1260,7 @@ mod tests {
                 // misma forma sin querer probar nada: es la evidencia de que el
                 // arreglo de la #68 sigue haciendo falta en el uso normal.
                 "71-el-close-archiva-el-sello-de-cierre-en-el-worktr.md:AC-8",
+                "73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a.md:AC-9",
             ],
             "el arreglo trae AC distintos de los medidos en el corpus real"
         );
@@ -1234,18 +1297,22 @@ mod tests {
             specs += 1;
             let hallados = parsear(&texto);
             acs += hallados.len();
-            let con_comando = hallados.iter().filter(|v| v.comando.is_some()).count();
+            // Feature #73: se comparan COMANDOS contra COMANDOS. Antes se
+            // comparaban AC-con-comando contra lineas `Comando:`, que solo
+            // coincide si ningun AC declara mas de una — justo lo que la
+            // feature vino a permitir.
+            let comandos: usize = hallados.iter().map(|v| v.comandos.len()).sum();
             let declarados = declaraciones_fuera_de_bloques(&texto);
             assert_eq!(
-                con_comando,
+                comandos,
                 declarados,
-                "{}: el parser reporto {con_comando} comando(s) y el spec declara {declarados}",
+                "{}: el parser reporto {comandos} comando(s) y el spec declara {declarados}",
                 path.display()
             );
             // Y ningun comando sale vacio: un `Comando:` sin nada detras seria
             // un AC que dice verificarse y no verifica nada.
             for v in &hallados {
-                if let Some(c) = &v.comando {
+                for c in &v.comandos {
                     assert!(!c.trim().is_empty(), "{}: {} con comando vacio", path.display(), v.ac);
                 }
             }
@@ -1272,8 +1339,14 @@ mod tests {
             if t.starts_with("- AC-") {
                 ac_abierto = true;
             } else if t.starts_with("Comando:") && ac_abierto {
+                // Feature #73: se cuentan TODOS. Esta linea decia
+                // `ac_abierto = false; // solo el primero cuenta, como en parsear`
+                // — o sea que el oraculo estaba escrito para imitar el bug. El
+                // test prometia "el parser no inventa ni pierde comandos" y
+                // contaba solo el primero, asi que pasaba en verde mientras el
+                // AC-8 de la #72 perdia tres. Un oraculo que copia a la
+                // implementacion no verifica: la acompaña.
                 n += 1;
-                ac_abierto = false; // solo el primero cuenta, como en `parsear`
             }
         }
         n

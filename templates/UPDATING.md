@@ -45,6 +45,39 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## Un AC puede declarar varias verificaciones y ahora se corren todas (feature #73)
+
+Si un criterio necesita mas de un comando, escribi una linea `Comando:` por
+cada uno debajo del AC:
+
+```
+- AC-8: Given los cambios, When se prueban e instalan, Then queda todo coherente.
+  Comando: `cd rust && cargo test --locked`
+  Comando: `cd rust && cargo clippy --all-targets --locked -- -D warnings`
+  Comando: `bash tests/setup_smoke.sh`
+```
+
+**Hasta ahora `verify` corria SOLO el primero y no lo decia.** El AC quedaba
+verde por esa unica verificacion y el reporte no mencionaba las otras: paso de
+verdad con el AC-8 de la feature #72, que declaraba cuatro comandos, corrio uno
+y reporto `1 verde(s), 0 en rojo`.
+
+Ahora:
+
+- Se ejecutan **todos**, en el orden en que estan escritos. Que uno falle no
+  corta los siguientes: el valor del reporte es ver todo lo que esta roto.
+- `docs/verify-<id>.md` lleva **una fila por comando**, cada una con su estado,
+  su exit code y su duracion. El AC aparece en todas.
+- El AC queda rojo si **cualquiera** de sus comandos falla, y el gate del cierre
+  lo nombra una sola vez aunque falle mas de uno.
+
+**Lo que no cambia:** la sintaxis del spec, los AC de un solo comando (se
+comportan identico) y los AC sin comando, que siguen siendo `manual` y no
+bloquean. Los reportes ya escritos se siguen leyendo igual.
+
+**Lo que cuesta:** un AC con cuatro comandos tarda la suma de los cuatro. Cada
+uno conserva su propio timeout (`rules.verify_timeout_segundos`).
+
 ## El sello de cierre deja de escribirse en el worktree que el cierre borra (feature #71)
 
 Al cerrar, el arnes escribe `docs/estado-feature-<id>-<slug>.md`: el sello del

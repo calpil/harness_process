@@ -40,7 +40,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
         .map_err(|e| Exit::msg(format!("No se pudo leer {}: {e}", rel_spec.display())))?;
     let verificaciones = filtrar(parsear(&texto), solo)?;
 
-    let con_comando = verificaciones.iter().filter(|v| v.comando.is_some()).count();
+    let con_comando = verificaciones.iter().filter(|v| !v.es_manual()).count();
     if con_comando == 0 {
         // Compatibilidad (AC-2): un spec sin `Comando:` no es un error. Los 310
         // AC ya escritos caen aca y salen con 0.
@@ -81,7 +81,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
 
     let mut resultados: Vec<Resultado> = Vec::with_capacity(verificaciones.len());
     for v in &verificaciones {
-        let Some(comando) = v.comando.as_deref() else {
+        if v.es_manual() {
             resultados.push(Resultado {
                 ac: v.ac.clone(),
                 comando: None,
@@ -91,30 +91,36 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
                 salida: String::new(),
             });
             continue;
-        };
-        // AC-4: el comando se IMPRIME antes de correr. Nada a ciegas.
-        if !as_json {
-            println!("{}  $ {comando}", v.ac);
         }
-        let (estado, exit, ms, salida) = ejecutar(comando, raiz, timeout);
-        if !as_json {
-            println!("       {} {} ({ms} ms)", estado.simbolo(), estado.etiqueta());
-            if estado.bloquea() && !salida.is_empty() {
-                for linea in salida.lines() {
-                    println!("       | {linea}");
+        // Feature #73: un resultado POR COMANDO. Antes era uno por AC, y por eso
+        // un AC con cuatro verificaciones solo podia contar una.
+        for comando in &v.comandos {
+            // AC-4: el comando se IMPRIME antes de correr. Nada a ciegas.
+            if !as_json {
+                println!("{}  $ {comando}", v.ac);
+            }
+            let (estado, exit, ms, salida) = ejecutar(comando, raiz, timeout);
+            if !as_json {
+                println!("       {} {} ({ms} ms)", estado.simbolo(), estado.etiqueta());
+                if estado.bloquea() && !salida.is_empty() {
+                    for linea in salida.lines() {
+                        println!("       | {linea}");
+                    }
                 }
             }
+            // AC-6: uno que falla o se cuelga no corta la corrida; se sigue con
+            // los demas, porque el valor del reporte es ver TODO lo que esta
+            // roto. Desde la #73 eso vale tambien ENTRE los comandos de un
+            // mismo AC.
+            resultados.push(Resultado {
+                ac: v.ac.clone(),
+                comando: Some(comando.clone()),
+                estado,
+                exit,
+                duracion_ms: ms,
+                salida,
+            });
         }
-        // AC-6: uno que falla o se cuelga no corta la corrida; se sigue con los
-        // demas, porque el valor del reporte es ver TODO lo que esta roto.
-        resultados.push(Resultado {
-            ac: v.ac.clone(),
-            comando: Some(comando.to_string()),
-            estado,
-            exit,
-            duracion_ms: ms,
-            salida,
-        });
     }
 
     let stamp = now_stamp();
@@ -164,13 +170,13 @@ pub fn run(paths: &HarnessPaths, fid: &str, as_json: bool, solo: Option<&str>) -
     }
     // Exit 1 con la lista: el que corre esto quiere saber QUE fallo sin abrir
     // el reporte.
+    // Feature #73: con una fila por comando, un AC con dos comandos rojos
+    // aparecia dos veces ("AC en rojo: AC-1, AC-1"). Se deduplica con la MISMA
+    // funcion que usa el gate del cierre: los dos hablan de criterios, no de
+    // corridas, y no pueden dar listas distintas.
     Err(Exit::msg(format!(
         "AC en rojo: {}",
-        bloqueantes
-            .iter()
-            .map(|r| r.ac.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
+        verificacion::sin_repetir(bloqueantes.iter().map(|r| r.ac.clone())).join(", ")
     ))
     .into())
 }
