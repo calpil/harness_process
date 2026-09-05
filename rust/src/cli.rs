@@ -66,6 +66,18 @@ pub enum Command {
         #[arg(long)]
         publicar: bool,
     },
+    /// Declara de que otras features depende una (feature #75)
+    Depende {
+        #[arg(long)]
+        feature: String,
+        /// Los ids de los que depende. Se valida contra el backlog: un id que no
+        /// existe, o que formaria un ciclo, se rechaza sin escribir nada.
+        #[arg(long = "de", required = true)]
+        de: Vec<String>,
+        /// Quita esas dependencias en vez de agregarlas.
+        #[arg(long)]
+        quitar: bool,
+    },
     /// Registra un hito intermedio de la feature activa
     Advance {
         #[arg(long)]
@@ -120,6 +132,11 @@ pub enum Command {
         /// Que es esto en Jira: `feature` (default), `bug` o `task`.
         #[arg(long)]
         kind: Option<String>,
+        /// De que otras features depende esta (feature #75). `next` no la va a
+        /// ofrecer hasta que esas cierren, y `start` avisa si la arrancas igual.
+        /// Un id que no existe, o que formaria un ciclo, se rechaza.
+        #[arg(long = "depends-on")]
+        depends_on: Vec<String>,
     },
     /// PRDs anidados: el arbol de producto de docs/prd/
     Prd {
@@ -559,6 +576,11 @@ pub fn run() -> anyhow::Result<()> {
                 publicar,
             },
         ),
+        Command::Depende {
+            feature,
+            de,
+            quitar,
+        } => commands::depende::run(&HarnessPaths::resolve()?, &feature, &de, quitar),
         Command::Advance {
             feature,
             nota,
@@ -591,6 +613,7 @@ pub fn run() -> anyhow::Result<()> {
             acceptance,
             prd,
             kind,
+            depends_on,
         } => commands::add::run(
             &HarnessPaths::resolve()?,
             &name,
@@ -598,6 +621,7 @@ pub fn run() -> anyhow::Result<()> {
             &acceptance,
             prd.as_deref(),
             kind.as_deref(),
+            &depends_on,
         ),
         Command::Prd { command } => match command {
             PrdCommand::Add { name, parent } => {

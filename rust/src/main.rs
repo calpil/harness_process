@@ -9,6 +9,7 @@ mod cli;
 mod commands;
 mod consolidacion;
 mod contexto;
+mod dependencias;
 mod curador;
 mod documentos;
 mod exit;

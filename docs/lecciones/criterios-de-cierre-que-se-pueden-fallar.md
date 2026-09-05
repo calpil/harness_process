@@ -1,10 +1,10 @@
 ---
 nombre: criterios-de-cierre-que-se-pueden-fallar
 descripcion: Un criterio que no se puede fallar no verifica nada: solo tranquiliza.
-triggers: [criterios de cierre, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso]
+triggers: [criterios de cierre, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test]
 relacionadas: [hitos-del-prd, probar-contra-datos-reales, promesas-estructurales-vs-disciplina]
-origen: [20, 23, 63, 73]
-usos: 3
+origen: [20, 23, 63, 73, 75]
+usos: 4
 ultimo_uso: 2026-09-05
 ultima_actualizacion: 2026-09-05
 estado: activa
@@ -278,6 +278,48 @@ nombre suena a decision de diseño, y nadie discute una decision documentada.
 
 Regla corta: **un oraculo que se deriva de la implementacion no verifica,
 acompaña**. Y un test verde no es evidencia de nada hasta que lo viste fallar.
+
+## Caminar el recorrido P1 es la prueba de alcance (feature #75)
+
+El spec de la #75 tenia este recorrido P1: *"Alan declara que la #21 depende de
+la #17 y `next` deja de ofrecerle la #21"*. Se implemento `add --depends-on`,
+los ocho AC quedaron verdes, y recien al escribir un test salio que **ese
+recorrido era imposible**: las dos features ya existian y `add` crea una nueva.
+Habia que agregar un comando (`depende`) que la ficha no pedia.
+
+No fue un AC mal escrito: cada AC era correcto por separado. Lo que faltaba era
+la pregunta de arriba — *¿puedo caminar el recorrido de punta a punta con lo que
+construi?*
+
+Y tenia una segunda consecuencia que sola no se veia: la deteccion de ciclos del
+AC-5 era **codigo inalcanzable**. Por `add`, una feature nueva solo puede
+depender de ids anteriores, asi que el grafo es un DAG por construccion y el
+ciclo no puede ocurrir. Ese AC solo se podia satisfacer con tests unitarios sobre
+una funcion que la CLI nunca iba a llamar en ese estado.
+
+**Procedimiento, antes de dar por cerrada una feature:** tomar el recorrido P1
+del spec literalmente, con los datos que existen de verdad, y ejecutarlo. Si hace
+falta un paso que no construiste, el alcance estaba incompleto — no el recorrido.
+
+Regla corta: **un AC verde no prueba que la feature sirva; el recorrido si**.
+
+## El nombre del test tiene que describir el CUERPO, no el AC (feature #75)
+
+La seccion de arriba sobre el oraculo copiado (#73) se escribio un dia antes de
+esto, y aun asi paso de nuevo, en el trabajo siguiente:
+`add_should_refuse_a_dependency_cycle` no rechazaba ningun ciclo — su cuerpo
+terminaba comprobando una cadena valida, porque el ciclo era inalcanzable por ese
+camino.
+
+El disparador es concreto y vale reconocerlo: **estas implementando el AC-5, y
+nombras el test por el AC en vez de por lo que el cuerpo comprueba.** El nombre
+sale de la intencion; el cuerpo, de lo que se pudo escribir. Cuando los dos se
+separan, el nombre gana la lectura y nadie vuelve a mirar el cuerpo.
+
+Que la leccion ya estuviera escrita no alcanzo — igual que la advertencia de la
+#23 no alcanzo para la #44. Lo que si lo detecta es barato: **releer el nombre
+del test DESPUES de escribir el cuerpo**, y preguntarse si un desconocido que
+solo lee el nombre entenderia lo que ahi se comprueba.
 
 ## El arnes que prueba el rojo tambien miente, y de dos formas
 

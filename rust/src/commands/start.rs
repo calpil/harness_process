@@ -143,6 +143,13 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
         .map(|o| format!("#{} {}", o.id, o.nombre))
         .collect();
 
+    // Feature #75 (AC-3): las dependencias abiertas se AVISAN y no bloquean.
+    // La decision de arrancar igual es del usuario —puede estar adelantando
+    // trabajo a proposito— pero no puede ser silenciosa: el backlog sabe algo
+    // que quien arranca quiza no.
+    let dependencias_abiertas =
+        crate::dependencias::abiertas(&data, crate::features::feature_at(&data, idx));
+
     // Feature #72 (AC-1): el aislamiento se resuelve ANTES de escribir nada.
     // Este orden es el arreglo: mientras el estado se marcaba primero, un
     // arranque que no conseguia worktree dejaba igual la feature `in_progress`,
@@ -276,6 +283,18 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
         }
         // AC-1: no aislada se DICE, no se insinua entre parentesis.
         Resuelto::SinAislar(motivo) => println!("{}", motivo.aviso()),
+    }
+    if !dependencias_abiertas.is_empty() {
+        println!(
+            "  [!] Arranca con {} dependencia(s) SIN cerrar: {}",
+            dependencias_abiertas.len(),
+            dependencias_abiertas
+                .iter()
+                .map(crate::dependencias::Abierta::etiqueta)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!("      No se bloquea: la decision es tuya. Pero el backlog decia que esto iba despues.");
     }
     if !otras_activas.is_empty() {
         println!(

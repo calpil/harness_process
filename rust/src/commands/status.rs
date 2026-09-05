@@ -61,6 +61,26 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
     if let Some(aviso) = aviso_de_features_sin_aislar(features) {
         println!("{aviso}");
     }
+    // Feature #75 (AC-7): las dependencias abiertas de lo que esta en curso.
+    // Van aca y no en la linea de cada feature porque son la excepcion: la
+    // mayoria no declara ninguna, y una columna vacia en 75 filas es ruido.
+    for f in features.iter().filter(|f| feature_status(f) == Some("in_progress")) {
+        let abiertas = crate::dependencias::abiertas(&data, f);
+        if abiertas.is_empty() {
+            continue;
+        }
+        println!(
+            "[!] #{} {} espera {} dependencia(s): {}",
+            py_str(f.get("id")),
+            py_str(f.get("name")),
+            abiertas.len(),
+            abiertas
+                .iter()
+                .map(crate::dependencias::Abierta::etiqueta)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     for f in features {
         let services = f
             .get("microservicios")
