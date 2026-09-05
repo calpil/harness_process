@@ -2927,6 +2927,79 @@ fn verify_should_write_a_report_per_ac() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Feature #73: un AC con varias verificaciones las corre TODAS.
+// ---------------------------------------------------------------------------
+
+/// Un AC con tres comandos, uno de ellos rojo, y otro AC de un solo comando
+/// para comprobar de paso que ese caso no cambio.
+const AC_MULTI: &str = "- AC-1: Given tres verificaciones, Then las tres corren.\n\
+     \u{20} Comando: `touch uno.txt`\n  Comando: `exit 7`\n  Comando: `touch tres.txt`\n\
+     - AC-2: Given una sola, Then sigue igual.\n  Comando: `true`";
+
+#[test]
+fn verify_should_run_every_command_an_ac_declares() {
+    // AC-1: los tres se ejecutan. Se comprueba por el EFECTO de cada uno —los
+    // archivos que dejan— y no por la salida, que es lo que dejaba pasar el bug:
+    // el reporte decia verde y nadie miraba si el comando habia corrido.
+    //
+    // El del medio falla a proposito: que uno se caiga no puede impedir que se
+    // corra el siguiente.
+    let (dir, bin, _spec) = feature_con_spec(AC_MULTI);
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("AC-1  $ touch uno.txt"))
+        .stdout(predicate::str::contains("AC-1  $ exit 7"))
+        .stdout(predicate::str::contains("AC-1  $ touch tres.txt"));
+
+    let raiz = dir.path();
+    assert!(raiz.join("uno.txt").is_file(), "el primero no corrio");
+    assert!(raiz.join("tres.txt").is_file(), "el tercero no corrio (el fallo del segundo lo corto)");
+}
+
+#[test]
+fn verify_should_write_one_report_row_per_command() {
+    // AC-2: una fila por COMANDO, cada una con su estado y su exit code.
+    let (dir, bin, _spec) = feature_con_spec(AC_MULTI);
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    cmd(&bin).args(["verify", "--feature", "1"]).assert().code(1);
+
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    let filas: Vec<&str> = reporte.lines().filter(|l| l.starts_with("| AC-1 |")).collect();
+    assert_eq!(filas.len(), 3, "tres comandos, tres filas:\n{reporte}");
+    assert!(reporte.contains("| AC-1 | verde | `touch uno.txt`"), "{reporte}");
+    assert!(reporte.contains("| AC-1 | rojo | `exit 7`"), "{reporte}");
+    assert!(reporte.contains("| AC-1 | verde | `touch tres.txt`"), "{reporte}");
+    // Y el exit code del que fallo esta a la vista.
+    assert!(reporte.contains("| 7 |"), "falta el exit code: {reporte}");
+    // El AC de un solo comando sigue teniendo su unica fila (AC-4).
+    let filas2: Vec<&str> = reporte.lines().filter(|l| l.starts_with("| AC-2 |")).collect();
+    assert_eq!(filas2.len(), 1, "{reporte}");
+}
+
+#[test]
+fn verify_should_fail_an_ac_when_any_of_its_commands_fails() {
+    // AC-3: el AC no puede quedar verde porque su primer comando lo este, y el
+    // gate lo nombra UNA sola vez aunque falle mas de un comando.
+    let dos_rojos = "- AC-1: Given dos que fallan, Then el AC es rojo una sola vez.\n\
+         \u{20} Comando: `exit 3`\n  Comando: `exit 5`";
+    let (dir, bin, _spec) = feature_con_spec(dos_rojos);
+    cmd(&bin).args(["approve-spec", "--yes"]).assert().success();
+    let salida = cmd(&bin)
+        .args(["verify", "--feature", "1"])
+        .assert()
+        .code(1);
+
+    let err = String::from_utf8_lossy(&salida.get_output().stderr).into_owned();
+    assert!(err.contains("AC-1"), "{err}");
+    assert_eq!(err.matches("AC-1").count(), 1, "el AC se nombra una sola vez: {err}");
+    let reporte = std::fs::read_to_string(dir.path().join("docs/verify-1.md")).unwrap();
+    assert!(!reporte.contains("| AC-1 | verde |"), "ninguna fila verde:\n{reporte}");
+}
+
 #[test]
 fn verify_should_include_output_of_failures() {
     // AC-9: se diagnostica leyendo el reporte, sin re-correr.
