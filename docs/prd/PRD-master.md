@@ -262,3 +262,4 @@ con su fecha.>
 - #68 el arnes no pierde los AC que pide revisar a mano -> done 2026-09-01 · spec: docs/spec-feature-68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man.md · impl: docs/impl-68.md
 - #69 una linea AC ilegible no desaparece en silencio -> done 2026-09-01 · spec: docs/spec-feature-69-una-linea-ac-ilegible-no-desaparece-en-silencio.md · impl: docs/impl-69.md
 - #70 El gate de citas del review no puede ver un repo hermano: una feature de backend no puede citar su codigo -> done 2026-09-04 · spec: docs/spec-feature-70-el-gate-de-citas-del-review-no-puede-ver-un-repo.md · impl: docs/impl-70.md
+- #72 El paralelo aisla los cambios y acota los workflows -> done 2026-09-05 · spec: docs/spec-feature-72-el-paralelo-aisla-los-cambios-y-acota-los-workfl.md · impl: docs/impl-72.md
