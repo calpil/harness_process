@@ -45,6 +45,17 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   tiene huella y no es `$HOME`, tambien con aviso `[i]` (feature #10); marker con
   otro valor (`root`) => el propio dir, sin inferencia ni aviso.
 - `features.rs`: carga/guarda `feature_list.json` y selecciona la feature activa.
+- `aislamiento.rs`: si una feature esta AISLADA o no (feature #72). `decidir()` es
+  PURA —no toca git ni disco— y devuelve `Aislar` / `Seguir(NoAislado)` /
+  `Rechazar(Rechazo)`. Esa separacion es lo que impide volver al "avisar y
+  seguir": lo que decide no tiene con que continuar. Cuatro motivos de rechazo,
+  cada uno con su mensaje accionable: `--sin-worktree` con otra feature abierta,
+  una ocupante que escribe en el checkout compartido, dos features al mismo
+  worktree, y el fallo de git —que antes era un `println!("[i] ...")` y dejaba la
+  feature `in_progress` sin rama, que es como el diagnostico del 2026-09-04
+  encontro a #98, #122 y #126. Lo que NO promete: impedir que alguien escriba
+  fuera de su worktree con un `cd`; promete que el arnes no va a DECLARAR aislada
+  una feature que no lo esta.
 - `plan.rs`: plantilla y firma del plan (`plan_signature` = dict
   path/mtime/size/hash), `is_plan_stale`, `plan_staleness_message`, `write_plan`,
   `update_plan_sig`.
@@ -369,6 +380,13 @@ de cada instalador (`CLAUDE_MODEL_*` en `setup_harness.sh`, `$claudeModels` en
 que nazcan en esa rama. El checkout principal no cambia de rama nunca.
 
 - `rust/src/git.rs`: ramas, worktrees, merge, push y commit sin trailers de IA.
+  Desde la #72 tambien `repo_de_docs` (el `docs/` que es un repo aparte y por eso
+  necesita SU worktree: en el del repo principal queda vacio),
+  `rango_de_integracion` (todos los commits que el merge se lleva, marcando los
+  que tambien viven en la rama de otra feature) y `CandadoDeIntegracion` (dos
+  cierres sobre el mismo destino no corren a la vez). `close --status done`
+  integra LOCAL: publicar pasa a ser `--publicar`, porque el push automatico es
+  como se publico un commit que se habia acordado dejar local.
   Sin repo git, todo degrada a no hacer nada. El merge corre SIEMPRE en un
   worktree temporal `--detach` (feature #61: antes habia una excepcion muda
   cuando el destino era la rama abierta, y ahi el merge usaba el checkout del

@@ -45,6 +45,86 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## El paralelo aisla, y el cierre no publica solo (feature #72)
+
+Un diagnostico del 2026-09-04 encontro tres features (`#98`, `#122`, `#126`)
+marcadas `in_progress` sin rama ni worktree, escribiendo las tres en el mismo
+checkout, y un incidente verificado: se publico el arreglo de una feature y con
+el se fue un commit de otra que se habia acordado dejar local, porque era su
+padre. Cuatro cambios de comportamiento salen de ahi.
+
+**1. Un arranque que no consigue aislamiento ya no arranca.** Antes `start`
+marcaba `in_progress` primero y despues intentaba el worktree; si git fallaba, lo
+imprimia con `[i]` y seguia. Ahora el aislamiento se resuelve ANTES de escribir
+nada y un rechazo deja el backlog intacto. En concreto:
+
+- `--sin-worktree` solo vale si NO hay otra feature abierta. Con otra abierta,
+  se rechaza y se dice cual.
+- Una feature abierta sin worktree ocupa el checkout compartido: mientras siga
+  abierta, no arranca ninguna otra.
+- Sin repo git pasa lo mismo: **una feature a la vez**. Esto REVOCA, para el caso
+  sin git, la promesa de la feature #47 de tener varias en paralelo. Es
+  deliberado: sin worktrees no hay forma de atribuir un cambio a una feature.
+- Un `worktree` declarado en el backlog cuya carpeta ya no existe NO cuenta como
+  aislamiento.
+
+**2. Un `docs/` que es otro repo git tiene su propio worktree** (`../docs-wt/<id>-<slug>`).
+Antes quedaba vacio dentro del worktree principal, y ese directorio vacio fue la
+excusa con la que una sesion arranco `--sin-worktree`. Al cerrar, sus artefactos
+se commitean y el arnes **no** los integra ni borra ese worktree: mergear en el
+repo de documentacion del usuario es decision suya, y el cierre te da el comando.
+
+**3. El cierre muestra el rango completo y ya no publica solo.**
+`close --status done --to <rama>` imprime origen, destino y todos los commits que
+el merge se lleva, y se NIEGA si alguno pertenece tambien a la rama de otra
+feature. La publicacion pasa a ser explicita:
+
+```sh
+harness_cli close --feature 12 --status done --to develop              # integra LOCAL
+harness_cli close --feature 12 --status done --to develop --publicar   # ademas hace push
+```
+
+Sin `--publicar` el cierre deja el `git push` escrito para que lo corras vos.
+Ademas, dos cierres del arnes hacia el mismo destino se serializan con un
+candado: no corren a la vez.
+
+**4. El Stop deja de reclamarte lo de otra sesion.** `commit_guard.sh` recorria
+todos los repos hermanos sin atribuir nada, y —peor— nunca miraba el worktree
+donde la sesion trabaja. Ahora, si corres desde el worktree de una feature de
+este proyecto, revisa ESE worktree; lo que hay en los checkouts compartidos se
+informa una vez y no bloquea. El barrido completo sigue disponible:
+
+```sh
+HARNESS_COMMIT_GUARD_SCOPE=global sh harness_process/commit_guard.sh
+```
+
+**Y una para la delegacion.** Si delegas en paralelo, declara la cuenta antes y
+registra CADA resultado, incluidos los que fallaron:
+
+```sh
+harness_cli revision --feature 12 --esperar-tareas 4
+harness_cli revision --feature 12 --tarea rev-a --tarea-ac AC-1 --tarea-estado ok
+harness_cli revision --feature 12 --tarea rev-b --tarea-ac AC-2 --tarea-estado fallo
+```
+
+Solo `ok` cubre; `fallo`, `cancelada`, `sin-resultado` y `sin-evidencia` bloquean
+`approved` y `done` hasta que esa verificacion quede cubierta. Vale el ULTIMO
+estado de cada tarea, asi que una que fallo y despues se cubre desbloquea sin
+perder su historia. Borrar las lineas de las fallidas no completa la cobertura:
+para eso esta la cuenta declarada antes. El motivo es concreto — un workflow de
+revision registro 74 arranques para 14 tareas con 12 fallidas, y su script
+filtro los nulos: el resultado que llego decia "sin hallazgos".
+
+**Antes de actualizar**, `harness_cli status` te lista las features abiertas sin
+worktree, que son las que esta regla afecta. El arnes no las migra solo: no mueve
+commits, no cambia ramas, no borra worktrees y no para procesos.
+
+**Lo que esto NO hace.** No es un sandbox: un `git push` a mano desde otra
+terminal no pasa por ningun hook. Y no controla los reintentos internos del
+runtime del agente — la preferencia de tamano de workflow es un consejo
+documentado del proveedor, no un limite configurable, y el arnes no la presenta
+como garantia.
+
 ## El paquete de contexto (feature #56)
 
 Antes de leer el repo, el agente pide el material ya juntado:

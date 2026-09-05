@@ -1,12 +1,12 @@
 ---
 nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
-triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion, orden, rollback, deshacer, transaccional, efecto irreversible]
+triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion, orden, rollback, deshacer, transaccional, efecto irreversible, aislamiento, worktree, paralelo, atribuir, declarar, estado prematuro]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
-origen: [21, 44, 60, 61, 62]
-usos: 2
-ultimo_uso: 2026-08-24
-ultima_actualizacion: 2026-08-27
+origen: [21, 44, 60, 61, 62, 72]
+usos: 4
+ultimo_uso: 2026-09-05
+ultima_actualizacion: 2026-09-05
 estado: activa
 ---
 
@@ -132,6 +132,45 @@ Procedimiento:
 
 Regla corta: **los efectos que no se pueden deshacer van ultimos**. Y el mensaje
 de exito es uno de ellos: una vez que lo leyeron, ya no se puede desdecir.
+
+### La variante que volvio dos veces: DECLARAR antes de conseguir (feature #72)
+
+La #62 ordeno los efectos de `close` por reversibilidad. La #72 encontro la
+misma forma otras dos veces, y en las dos el problema no era el rollback: era que
+el sistema **afirmaba un hecho antes de asegurarlo**.
+
+| Donde | Que afirmaba | Cuando era cierto |
+| --- | --- | --- |
+| `start` | `status: in_progress` + `worktree: <ruta>` | recien despues de que `git worktree add` funcionara |
+| `close` | "commits que se llevan: (ninguno)" | recien despues de commitear el worktree de la feature |
+
+En `start` el costo fue medible: tres features (`#98`, `#122`, `#126`) quedaron
+`in_progress` sin rama ni worktree, escribiendo las tres en el mismo checkout,
+porque el estado se escribia primero y el fallo de git se imprimia con un `[i]`.
+En `close`, el rango se calculaba antes del commit, asi que el cierre anunciaba
+un rango vacio y a la linea siguiente commiteaba y mergeaba.
+
+Los dos son el mismo bug con distinto disfraz, y ninguno es un problema de
+reversibilidad: el JSON se podia reescribir, la linea impresa no. La pregunta que
+los detecta no es "¿esto se puede deshacer?" sino:
+
+> **¿Lo que estoy por escribir o imprimir ya es cierto en este punto del codigo?**
+
+Procedimiento, ademas del de arriba:
+
+1. Para cada afirmacion que el codigo emite —un campo de estado, una linea de
+   consola, un evento— buscá **la linea exacta** donde eso pasa a ser cierto.
+2. Si la afirmacion esta antes, moverla despues. No agregues una correccion
+   posterior ("en realidad eran 2 commits"): nadie lee la segunda linea.
+3. Si no se puede mover porque el dato se necesita antes, **recalcula y volve a
+   preguntar** justo antes de actuar. En `close` quedo: commit -> rango
+   definitivo -> re-chequeo de ajenos -> merge. El primer chequeo no se saco;
+   se le agrego el segundo, sobre el dato ya definitivo.
+
+Y el sintoma que lo delata en una revision: un `println!` con un `[i]` seguido de
+codigo que sigue como si nada. **Un `[i]` antes de un `continue` implicito casi
+siempre es una promesa que se acaba de romper en silencio** — es la misma familia
+que "un `[i]` no es un pendiente", un nivel mas arriba.
 
 ## El mismo principio, aplicado a ARREGLAR un bug (feature #44)
 

@@ -72,6 +72,9 @@ pub struct CierreOpts<'a> {
     /// Rama destino del `done` (GitFlow). Sin ella el arnes se niega: la
     /// decide el USUARIO.
     pub to: Option<&'a str>,
+    /// Publicar el destino en origin despues del merge (feature #72 / AC-3).
+    /// Por defecto NO: el merge queda local y el push se pide aparte.
+    pub publicar: bool,
 }
 
 pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Result<()> {
@@ -83,6 +86,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         leccion,
         leccion_motivo,
         to,
+        publicar,
     } = opts;
     let mut data = load_features(paths)?;
     let idx = find_feature_index(&data, fid)?;
@@ -253,7 +257,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     )?;
 
     // --- FASE 2: integrar. Si falla, NADA del estado se escribio ---
-    ejecutar_integracion(&integracion, &feature_id)?;
+    ejecutar_integracion(&integracion, &feature_id, publicar)?;
 
     // --- FASE 3: recien ahora, el estado. El cierre ya ocurrio ---
     {
@@ -497,6 +501,16 @@ enum PlanDeIntegracion {
         rama: String,
         destino: String,
         worktree: Option<std::path::PathBuf>,
+        /// Feature #72 / AC-3: TODO lo que el merge se lleva, para poder
+        /// mostrarlo antes de hacerlo.
+        rango: Vec<crate::git::Commit>,
+        /// Las ramas de las otras features, para RECALCULAR el rango despues de
+        /// commitear el worktree: lo que se muestra tiene que ser lo que se
+        /// integra, y antes del commit todavia falta un commit.
+        otras_ramas: Vec<String>,
+        /// El worktree del repo `docs/`, si docs es un repo aparte (feature #72
+        /// / AC-2). El arnes NO lo integra solo: es otro repo del usuario.
+        docs_worktree: Option<std::path::PathBuf>,
     },
 }
 
@@ -541,7 +555,7 @@ fn planificar_integracion(
     to: Option<&str>,
     feature_id: &str,
 ) -> anyhow::Result<PlanDeIntegracion> {
-    let (rama, worktree) = {
+    let (rama, worktree, docs_worktree) = {
         let Some(feature) = feature_at(data, idx).as_object() else {
             return Ok(PlanDeIntegracion::Nada { conservacion: None });
         };
@@ -550,6 +564,11 @@ fn planificar_integracion(
             feature
                 .get("worktree")
                 .and_then(Value::as_str)
+                .map(std::path::PathBuf::from),
+            feature
+                .get("docs_worktree")
+                .and_then(Value::as_str)
+                .filter(|d| !d.trim().is_empty())
                 .map(std::path::PathBuf::from),
         )
     };
@@ -606,22 +625,82 @@ fn planificar_integracion(
         .into());
     }
 
+    // Feature #72 / AC-3: que se lleva esta integracion, exactamente. Las ramas
+    // de las OTRAS features son lo que permite decir "este commit no es tuyo"
+    // sin adivinar por autor ni por fecha.
+    let otras = ramas_de_otras_features(data, feature_id);
+    let rango = crate::git::rango_de_integracion(&principal, destino, &rama, &otras);
+    let ajenos: Vec<&crate::git::Commit> = rango.iter().filter(|c| c.ajeno.is_some()).collect();
+    if !ajenos.is_empty() {
+        return Err(Exit {
+            code: 2,
+            message: Some(mensaje_de_commits_ajenos(&rango, destino, &rama, feature_id)),
+        }
+        .into());
+    }
+
     Ok(PlanDeIntegracion::Integrar {
         principal,
         rama,
         destino: destino.to_string(),
         worktree,
+        rango,
+        otras_ramas: otras,
+        docs_worktree,
     })
+}
+
+/// Las ramas de las demas features del backlog (activas o no): cualquiera de
+/// ellas puede tener trabajo que todavia no se publico.
+fn ramas_de_otras_features(data: &Value, feature_id: &str) -> Vec<String> {
+    crate::features::features_slice(data)
+        .iter()
+        .filter(|f| crate::pycompat::py_str(f.get("id")) != feature_id)
+        .filter_map(|f| f.get("branch").and_then(Value::as_str))
+        .filter(|b| !b.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// El bloqueo del AC-3, con el rango completo a la vista.
+fn mensaje_de_commits_ajenos(
+    rango: &[crate::git::Commit],
+    destino: &str,
+    rama: &str,
+    feature_id: &str,
+) -> String {
+    let mut m = format!(
+        "[GitFlow] La feature #{feature_id} no se integra: el rango {rama} -> {destino} arrastra trabajo de otra feature.\n\n    Rango completo ({} commit(s)):\n",
+        rango.len()
+    );
+    for c in rango {
+        let corto: String = c.sha.chars().take(9).collect();
+        match &c.ajeno {
+            Some(otra) => m.push_str(&format!("      {corto}  {}   <-- AJENO, tambien esta en {otra}\n", c.titulo)),
+            None => m.push_str(&format!("      {corto}  {}\n", c.titulo)),
+        }
+    }
+    m.push_str(
+        "\n    Esto ya paso una vez: se publico un arreglo y con el se fue un commit de otra\n             feature que se habia acordado dejar local, porque era su padre.\n\n             Salidas:\n             \x20 1. Integra primero la otra feature, si su trabajo tambien va.\n             \x20 2. O rehaz esta rama sobre el destino limpio, sin el commit ajeno.\n             La decision es tuya: el arnes no elige que trabajo ajeno publicar.",
+    );
+    m
 }
 
 /// FASE 2: ejecuta el plan de integracion. Lo unico que puede fallar aca es un
 /// conflicto de merge REAL, que no se puede saber sin intentarlo.
-fn ejecutar_integracion(plan: &PlanDeIntegracion, feature_id: &str) -> anyhow::Result<()> {
+fn ejecutar_integracion(
+    plan: &PlanDeIntegracion,
+    feature_id: &str,
+    publicar: bool,
+) -> anyhow::Result<()> {
     let PlanDeIntegracion::Integrar {
         principal,
         rama,
         destino,
         worktree,
+        rango,
+        otras_ramas,
+        docs_worktree,
     } = plan
     else {
         if let PlanDeIntegracion::Nada {
@@ -633,16 +712,54 @@ fn ejecutar_integracion(plan: &PlanDeIntegracion, feature_id: &str) -> anyhow::R
         return Ok(());
     };
 
+    // AC-3: dos cierres del arnes sobre el mismo destino no corren a la vez.
+    // El candado se suelta solo al terminar esta funcion.
+    let _candado = crate::git::CandadoDeIntegracion::tomar(principal, destino)
+        .map_err(|e| Exit::msg(format!("[GitFlow] {e}")))?;
+
     println!("[GitFlow] integrando {rama} -> {destino}");
     // El trabajo de la feature vive en su worktree: si quedo algo sin
     // commitear, se commitea AHI (nunca en el checkout principal) para que el
     // merge se lo lleve. Sin trailers de IA (AC-16).
+    //
+    // Va ANTES de mostrar el rango a proposito: mientras se mostraba primero,
+    // el cierre anunciaba "(ninguno todavia)" y a la linea siguiente commiteaba
+    // y mergeaba. Un rango que no incluye lo que se va a integrar es la misma
+    // clase de mentira que el AC-3 vino a cerrar, un paso mas adelante.
     if let Some(wt) = worktree.as_ref().filter(|w| w.is_dir()) {
         match crate::git::commit_todo(wt, &format!("chore(harness): cierre de la feature #{feature_id}")) {
             Ok(true) => println!("  cambios del worktree commiteados en {rama}"),
             Ok(false) => {}
             Err(err) => println!("  [i] no pude commitear el worktree: {err:#}"),
         }
+    }
+
+    // AC-3: origen, destino y TODO el rango, ya definitivo, ANTES del merge.
+    let final_ = crate::git::rango_de_integracion(principal, destino, rama, otras_ramas);
+    let mostrar = if final_.is_empty() { rango } else { &final_ };
+    println!("  origen : {rama}");
+    println!("  destino: {destino}");
+    if mostrar.is_empty() {
+        println!("  commits que se llevan (0): la rama no aporta nada sobre {destino}");
+    } else {
+        println!("  commits que se llevan ({}):", mostrar.len());
+        for c in mostrar {
+            let corto: String = c.sha.chars().take(9).collect();
+            let marca = match &c.ajeno {
+                Some(otra) => format!("   <-- AJENO, tambien en {otra}"),
+                None => String::new(),
+            };
+            println!("    {corto}  {}{marca}", c.titulo);
+        }
+    }
+    // Y se vuelve a preguntar sobre el rango DEFINITIVO: el chequeo de la fase 1
+    // corrio sobre un rango al que todavia le faltaba el commit del worktree.
+    if mostrar.iter().any(|c| c.ajeno.is_some()) {
+        return Err(Exit {
+            code: 2,
+            message: Some(mensaje_de_commits_ajenos(mostrar, destino, rama, feature_id)),
+        }
+        .into());
     }
     if let Err(err) = crate::git::merge_en(principal, destino, rama) {
         // AC-18: el merge se abortó; nada quedó a medias.
@@ -653,10 +770,37 @@ fn ejecutar_integracion(plan: &PlanDeIntegracion, feature_id: &str) -> anyhow::R
     }
     println!("  merge hecho (sin trailers de IA)");
 
-    match crate::git::push(principal, destino) {
-        Ok(()) => println!("  {destino} publicada en origin"),
-        Err(err) => println!("  [i] merge local hecho, pero no pude publicar {destino}: {err:#}"),
+    // AC-3: no se publica sin autorizacion. Antes esto era un `push` automatico
+    // justo despues del merge, y por eso el incidente del 2026-09-03 no
+    // necesito que nadie pidiera publicar: alcanzo con cerrar.
+    if publicar {
+        match crate::git::push(principal, destino) {
+            Ok(()) => println!("  {destino} publicada en origin (lo pediste con --publicar)"),
+            Err(err) => println!("  [i] merge local hecho, pero no pude publicar {destino}: {err:#}"),
+        }
+    } else {
+        println!("  merge LOCAL. No se publico nada: revisa el rango de arriba y, si va,");
+        println!("    git -C {} push origin {destino}", principal.display());
     }
+    // Feature #72 / AC-2: si `docs/` es un repo aparte, los artefactos de esta
+    // feature (spec, plan, impl, review) viven en SU worktree, sobre una rama de
+    // ESE repo. El arnes lo commitea para que nada quede sin guardar, pero NO lo
+    // integra ni lo borra: es otro repo del usuario y su destino es una decision
+    // suya, igual que `--to` en el principal. Callarse esto dejaria los
+    // artefactos varados en una rama que nadie nombra.
+    if let Some(dwt) = docs_worktree.as_ref().filter(|d| d.is_dir()) {
+        match crate::git::commit_todo(dwt, &format!("docs(harness): cierre de la feature #{feature_id}")) {
+            Ok(true) => println!("  artefactos de docs commiteados en {}", dwt.display()),
+            Ok(false) => {}
+            Err(err) => println!("  [i] no pude commitear el worktree de docs: {err:#}"),
+        }
+        let rama_docs = crate::git::rama_actual(dwt).unwrap_or_else(|| rama.clone());
+        println!("  [!] `docs/` es un repo APARTE: sus artefactos quedan en la rama {rama_docs}");
+        println!("      de ese repo, sin integrar. El arnes no elige su destino. Cuando lo sepas:");
+        println!("        git -C <repo docs> merge --no-ff {rama_docs}");
+        println!("      El worktree {} NO se borra: adentro esta el review.", dwt.display());
+    }
+
     // AC-19: se borra el worktree, se conserva la rama.
     if let Some(wt) = worktree {
         match crate::git::borrar_worktree(principal, wt) {

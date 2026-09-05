@@ -216,6 +216,68 @@ modo_nombra_archivos() {
     ok "nombra-archivos: nombra los ajenos, respeta los exentos y ofrece la tercera salida"
 }
 
+# Feature #72 (AC-4): el Stop de una sesion no la bloquea por lo de la otra.
+#
+# Sandbox con DOS sesiones de verdad: un repo de proyecto con su worktree de
+# feature (la sesion A) y un repo hermano sucio que es de otra (la sesion B).
+# Antes, correr el guard desde A reclamaba lo de B — el diagnostico del
+# 2026-09-04 encontro el mismo archivo bloqueando dos sesiones distintas.
+sandbox_dos_sesiones() {
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/harness-guard2.XXXXXX")"
+    mkdir -p "$tmp/hp/docs"
+    cp "$REPO_ROOT/commit_guard.sh" "$tmp/hp/commit_guard.sh"
+    printf 'root\n' > "$tmp/hp/.harness_layout"
+    printf '# Constitution\n' > "$tmp/hp/docs/constitution.md"
+
+    # El repo del proyecto (la sesion A trabaja en su worktree).
+    mkdir -p "$tmp/hp/proyecto"
+    git -C "$tmp/hp/proyecto" init -q -b main
+    git -C "$tmp/hp/proyecto" config user.email t@e.c
+    git -C "$tmp/hp/proyecto" config user.name T
+    printf 'base\n' > "$tmp/hp/proyecto/README.md"
+    git -C "$tmp/hp/proyecto" add -A
+    git -C "$tmp/hp/proyecto" commit -qm init
+    git -C "$tmp/hp/proyecto" worktree add -q -b feature/1-a "$tmp/hp/proyecto-wt-1a" main
+
+    # El repo hermano de la OTRA sesion, sucio.
+    mkdir -p "$tmp/hp/otroservicio"
+    git -C "$tmp/hp/otroservicio" init -q
+    printf 'trabajo de la otra sesion\n' > "$tmp/hp/otroservicio/de-la-otra.txt"
+    echo "$tmp"
+}
+
+modo_sesion_no_reclama_lo_ajeno() {
+    tmp="$(sandbox_dos_sesiones)"
+    # La sesion A corre el guard DESDE su worktree, con el arbol limpio.
+    salida="$(cd "$tmp/hp/proyecto-wt-1a" && bash "$tmp/hp/commit_guard.sh" </dev/null 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" != "0" ]; then
+        rm -rf "$tmp"
+        fail "sesion-acotada: exit $rc, esperaba 0. La sesion A no tiene nada sucio. Dijo: $salida"
+    fi
+    printf '%s' "$salida" | grep -q "de-la-otra.txt" \
+        && { rm -rf "$tmp"; fail "sesion-acotada: reclamo un archivo de la otra sesion. Dijo: $salida"; }
+    printf '%s' "$salida" | grep -q "Sin atribuir a esta sesion" \
+        || { rm -rf "$tmp"; fail "sesion-acotada: no informo lo no atribuible. Dijo: $salida"; }
+
+    # Y lo PROPIO si lo ve: el worktree es justo lo que el barrido global no miraba.
+    printf 'mio sin commitear\n' > "$tmp/hp/proyecto-wt-1a/mio.txt"
+    salida2="$(cd "$tmp/hp/proyecto-wt-1a" && bash "$tmp/hp/commit_guard.sh" </dev/null 2>&1)" && rc2=0 || rc2=$?
+    if [ "$rc2" != "2" ]; then
+        rm -rf "$tmp"
+        fail "sesion-acotada: exit $rc2 con lo propio sucio, esperaba 2. Dijo: $salida2"
+    fi
+    printf '%s' "$salida2" | grep -q "mio.txt" \
+        || { rm -rf "$tmp"; fail "sesion-acotada: no nombro lo propio. Dijo: $salida2"; }
+
+    # El barrido global sigue disponible EXPLICITAMENTE (AC-4).
+    salida3="$(cd "$tmp/hp/proyecto-wt-1a" && HARNESS_COMMIT_GUARD_SCOPE=global bash "$tmp/hp/commit_guard.sh" </dev/null 2>&1)" && rc3=0 || rc3=$?
+    rm -rf "$tmp"
+    [ "$rc3" = "2" ] || fail "sesion-acotada: el scope global no bloqueo (exit $rc3). Dijo: $salida3"
+    printf '%s' "$salida3" | grep -q "otroservicio" \
+        || fail "sesion-acotada: el scope global no miro el repo hermano. Dijo: $salida3"
+    ok "sesion-acotada: mira lo propio, informa lo ajeno sin bloquear, y el global sigue disponible"
+}
+
 case "$MODO" in
     limite)          modo_limite ;;
     no-cuelga)       modo_no_cuelga ;;
@@ -224,6 +286,7 @@ case "$MODO" in
     stop-por-json)   modo_stop_por_json ;;
     bloquea)         modo_bloquea ;;
     nombra-archivos) modo_nombra_archivos ;;
+    sesion-acotada)  modo_sesion_no_reclama_lo_ajeno ;;
     todos)
         modo_limite
         modo_no_cuelga
@@ -232,7 +295,8 @@ case "$MODO" in
         modo_stop_por_json
         modo_bloquea
         modo_nombra_archivos
-        ok "commit_guard: los siete modos verdes"
+        modo_sesion_no_reclama_lo_ajeno
+        ok "commit_guard: los ocho modos verdes"
         ;;
-    *) fail "modo desconocido: $MODO (limite | no-cuelga | prueba-del-rojo | stop-por-env | stop-por-json | bloquea | nombra-archivos | todos)" ;;
+    *) fail "modo desconocido: $MODO (limite | no-cuelga | prueba-del-rojo | stop-por-env | stop-por-json | bloquea | nombra-archivos | sesion-acotada | todos)" ;;
 esac

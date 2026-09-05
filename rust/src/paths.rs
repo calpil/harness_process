@@ -46,12 +46,25 @@ impl HarnessPaths {
     /// siempre. El ESTADO (`feature_list.json`, `progress/`) no cambia nunca:
     /// es unico y del repo principal (AC-7).
     pub fn para_feature(&self, feature: &serde_json::Map<String, serde_json::Value>) -> HarnessPaths {
-        let plans = feature
-            .get("worktree")
+        // Feature #72 / AC-2: si `docs/` es un repo aparte, la feature tiene su
+        // PROPIO worktree de docs y manda ese. Sin esta rama, el `docs/` del
+        // worktree principal esta vacio —el repo docs no viaja con el— y el
+        // spec terminaba escrito en un directorio muerto, o peor, de vuelta en
+        // el docs/ compartido de todas las features.
+        let docs_propio = feature
+            .get("docs_worktree")
             .and_then(serde_json::Value::as_str)
-            .map(|wt| PathBuf::from(wt).join("docs"))
-            .filter(|docs| docs.parent().is_some_and(Path::exists))
-            .unwrap_or_else(|| self.plans.clone());
+            .filter(|d| !d.trim().is_empty())
+            .map(PathBuf::from);
+        let plans = match docs_propio {
+            Some(d) => d,
+            None => feature
+                .get("worktree")
+                .and_then(serde_json::Value::as_str)
+                .map(|wt| PathBuf::from(wt).join("docs"))
+                .filter(|docs| docs.parent().is_some_and(Path::exists))
+                .unwrap_or_else(|| self.plans.clone()),
+        };
         HarnessPaths {
             root: self.root.clone(),
             features: self.features.clone(),

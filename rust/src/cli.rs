@@ -60,6 +60,11 @@ pub enum Command {
         /// Por que no hubo nada que aprender (obligatorio con `--leccion ninguna`).
         #[arg(long = "leccion-motivo")]
         leccion_motivo: Option<String>,
+        /// Publica la rama destino en origin despues del merge. Sin este flag
+        /// el cierre integra LOCAL y te deja el comando (feature #72 / AC-3):
+        /// publicar es una decision, no una consecuencia de cerrar.
+        #[arg(long)]
+        publicar: bool,
     },
     /// Registra un hito intermedio de la feature activa
     Advance {
@@ -208,6 +213,23 @@ pub enum Command {
         /// Exige una fila por cada AC-n del spec, citando `archivo:linea` (feature #64).
         #[arg(long)]
         veredicto: Option<String>,
+        /// Registra una tarea DELEGADA y su estado terminal (feature #72 / AC-6).
+        /// Va con --tarea-ac y --tarea-estado.
+        #[arg(long)]
+        tarea: Option<String>,
+        /// El AC-n que esa tarea tenia que cubrir.
+        #[arg(long = "tarea-ac")]
+        tarea_ac: Option<String>,
+        /// Como termino: ok | fallo | cancelada | sin-resultado | sin-evidencia.
+        /// Solo `ok` cubre; el resto deja el resultado incompleto y bloquea el
+        /// cierre, que es justo lo que un `filter(Boolean)` borraba.
+        #[arg(long = "tarea-estado", value_parser = clap::builder::PossibleValuesParser::new(crate::revision::ESTADOS_DE_TAREA))]
+        tarea_estado: Option<String>,
+        /// Cuantas tareas espera esta delegacion. Se declara ANTES: con la
+        /// cuenta a la vista, borrar las lineas de las que fallaron ya no
+        /// completa la cobertura.
+        #[arg(long = "esperar-tareas")]
+        esperar_tareas: Option<usize>,
         #[arg(long)]
         json: bool,
     },
@@ -522,6 +544,7 @@ pub fn run() -> anyhow::Result<()> {
             resuelto_en,
             leccion,
             leccion_motivo,
+            publicar,
         } => commands::close::run(
             &HarnessPaths::resolve()?,
             &feature,
@@ -533,6 +556,7 @@ pub fn run() -> anyhow::Result<()> {
                 leccion: leccion.as_deref(),
                 leccion_motivo: leccion_motivo.as_deref(),
                 to: to.as_deref(),
+                publicar,
             },
         ),
         Command::Advance {
@@ -736,12 +760,22 @@ pub fn run() -> anyhow::Result<()> {
             feature,
             max_lineas,
             veredicto,
+            tarea,
+            tarea_ac,
+            tarea_estado,
+            esperar_tareas,
             json,
         } => commands::revision::run(
             &HarnessPaths::resolve()?,
             feature.as_deref(),
             max_lineas,
             veredicto.as_deref(),
+            commands::revision::Delegacion {
+                tarea: tarea.as_deref(),
+                ac: tarea_ac.as_deref(),
+                estado: tarea_estado.as_deref(),
+                esperadas: esperar_tareas,
+            },
             json,
         ),
         Command::Graph { command } => graph::run(command),

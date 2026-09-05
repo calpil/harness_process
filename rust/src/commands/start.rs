@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 
+use crate::aislamiento::{Contexto, Decision, NoAislado, Ocupacion, Rechazo};
 use crate::features::{
     feature_at, feature_mut, feature_status, features_slice, find_feature_index, load_features,
     save_features,
@@ -13,48 +14,122 @@ use crate::progress::{log, now_stamp};
 use crate::pycompat::{py_str, relpath};
 use crate::spec::{update_spec_sig, write_spec};
 
-/// Crea (o reusa) la rama y el worktree de la feature y los guarda en el
-/// backlog. Best-effort: si no hay repo git, se avisa y se sigue (AC-5).
-fn preparar_aislamiento(
+/// Las otras features `in_progress`, con el arbol en que escribe cada una.
+///
+/// Es lo que `aislamiento::decidir` necesita para saber si este arranque
+/// pisaria a alguien (feature #72 / AC-1).
+fn ocupaciones(data: &Value, fid: &str) -> Vec<Ocupacion> {
+    features_slice(data)
+        .iter()
+        .filter(|f| feature_status(f) == Some("in_progress") && py_str(f.get("id")) != fid)
+        .map(|f| Ocupacion {
+            id: py_str(f.get("id")),
+            nombre: py_str(f.get("name")),
+            // AC-1 pide verificar la IDENTIDAD del worktree, no creerle al
+            // backlog: un `worktree` declarado cuya carpeta ya no existe no
+            // aisla a nadie. Sin esta comprobacion, una feature que perdio su
+            // worktree seguia contando como aislada y le abria la puerta a la
+            // siguiente para compartir checkout.
+            worktree: f
+                .get("worktree")
+                .and_then(Value::as_str)
+                .filter(|w| !w.trim().is_empty())
+                .map(std::path::PathBuf::from)
+                .filter(|w| w.is_dir()),
+        })
+        .collect()
+}
+
+/// Prepara el aislamiento de la feature SIN tocar el backlog.
+///
+/// Feature #72: antes esto se llamaba despues de haber marcado `in_progress`, y
+/// cualquier fallo se imprimia con `[i]` y seguia de largo. Un arranque que no
+/// consigue aislamiento ahora devuelve `Err`, y como el estado todavia no se
+/// escribio, el backlog queda exactamente como estaba (AC-1).
+fn resolver_aislamiento(
     paths: &HarnessPaths,
-    data: &mut Value,
+    data: &Value,
     idx: usize,
     sin_worktree: bool,
-) -> anyhow::Result<Option<crate::git::Aislamiento>> {
-    if sin_worktree {
-        return Ok(None);
-    }
+) -> anyhow::Result<Resuelto> {
     // El aislamiento es del repo del PROYECTO, no del dir del arnes.
-    let Some(principal) = crate::git::repo_principal(&paths.repo_root) else {
-        return Ok(None);
+    let principal = crate::git::repo_principal(&paths.repo_root);
+    let feature = crate::features::feature_at(data, idx);
+    let fid = py_str(feature.get("id"));
+    let slug = crate::plan::slugify(feature.get("name").and_then(Value::as_str).unwrap_or_default());
+    let kind = feature.get("kind").and_then(Value::as_str);
+    let destino = principal
+        .as_deref()
+        .map(|p| crate::git::ruta_worktree(p, &fid, &slug));
+    let otras = ocupaciones(data, &fid);
+
+    let ctx = Contexto {
+        repo: principal.as_deref(),
+        destino,
+        otras: &otras,
+        sin_worktree,
     };
-    let (fid, slug, kind) = {
-        let feature = feature_mut(data, idx)?;
-        (
-            py_str(feature.get("id")),
-            crate::plan::slugify(feature.get("name").and_then(Value::as_str).unwrap_or_default()),
-            feature
-                .get("kind")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        )
-    };
-    match crate::git::preparar(&principal, &fid, &slug, kind.as_deref(), None) {
-        Ok(a) => {
-            let feature = feature_mut(data, idx)?;
-            feature.insert("branch".to_string(), json!(a.rama));
-            feature.insert(
-                "worktree".to_string(),
-                json!(a.worktree.to_string_lossy().to_string()),
-            );
-            Ok(Some(a))
-        }
-        Err(err) => {
-            // Nunca bloquea el arranque: se avisa y se trabaja como siempre.
-            println!("[i] Sin worktree para la feature #{fid}: {err:#}");
-            Ok(None)
+    match crate::aislamiento::decidir(&ctx) {
+        Decision::Rechazar(r) => Err(rechazo(&fid, &r)),
+        Decision::Seguir(motivo) => Ok(Resuelto::SinAislar(motivo)),
+        Decision::Aislar => {
+            let principal = principal.unwrap_or_else(|| paths.repo_root.clone());
+            let a = crate::git::preparar(&principal, &fid, &slug, kind, None).map_err(|err| {
+                // El fallback silencioso del AC-1: esto era un `println!`.
+                rechazo(
+                    &fid,
+                    &Rechazo::FalloDeGit {
+                        detalle: format!("{err:#}"),
+                    },
+                )
+            })?;
+            let docs = preparar_docs(paths, &fid, &slug, kind)?;
+            Ok(Resuelto::Aislada(a, docs))
         }
     }
+}
+
+/// El worktree del repo `docs/`, cuando docs es un repo aparte (AC-2).
+///
+/// Si docs es su propio repo y no se le puede dar worktree, el arranque se
+/// RECHAZA: caer al `docs/` compartido seria escribir el spec de esta feature
+/// en el arbol de todas, que es justo lo que el AC-2 prohibe. Un `docs/` que
+/// viaja con el repo principal devuelve `None` y no hay nada que preparar.
+fn preparar_docs(
+    paths: &HarnessPaths,
+    fid: &str,
+    slug: &str,
+    kind: Option<&str>,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
+    let Some(repo_docs) = crate::git::repo_de_docs(&paths.repo_root) else {
+        return Ok(None);
+    };
+    match crate::git::preparar(&repo_docs, fid, slug, kind, None) {
+        Ok(a) => Ok(Some(a.worktree)),
+        Err(err) => Err(rechazo(
+            fid,
+            &Rechazo::FalloDeGit {
+                detalle: format!("docs/ es un repo aparte y no se le pudo dar worktree: {err:#}"),
+            },
+        )),
+    }
+}
+
+/// Un rechazo del AC-1, con la forma que ya usa el resto del arnes: exit 1 y
+/// un mensaje que dice que hacer.
+fn rechazo(fid: &str, r: &Rechazo) -> anyhow::Error {
+    crate::exit::Exit::msg(format!(
+        "[GATE] No se arranca la feature #{fid}: {}\n\nEl backlog no se toco: la feature sigue como estaba.",
+        r.mensaje()
+    ))
+    .into()
+}
+
+/// Lo que quedo resuelto para esta feature.
+enum Resuelto {
+    /// Rama y worktree propios, y —si docs es un repo aparte— su worktree.
+    Aislada(crate::git::Aislamiento, Option<std::path::PathBuf>),
+    SinAislar(NoAislado),
 }
 
 pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Result<()> {
@@ -63,23 +138,47 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
     // Feature #47 (AC-1): varias features pueden estar in_progress a la vez.
     // Ya no se rechaza la segunda: cada una se aisla en su rama y su worktree,
     // y su estado vivo es un archivo propio.
-    let otras_activas: Vec<String> = features_slice(&data)
+    let otras_activas: Vec<String> = ocupaciones(&data, fid)
         .iter()
-        .filter(|f| feature_status(f) == Some("in_progress") && py_str(f.get("id")) != fid)
-        .map(|f| format!("#{} {}", py_str(f.get("id")), py_str(f.get("name"))))
+        .map(|o| format!("#{} {}", o.id, o.nombre))
         .collect();
+
+    // Feature #72 (AC-1): el aislamiento se resuelve ANTES de escribir nada.
+    // Este orden es el arreglo: mientras el estado se marcaba primero, un
+    // arranque que no conseguia worktree dejaba igual la feature `in_progress`,
+    // y asi es como el diagnostico encontro a #98, #122 y #126 compartiendo
+    // checkout. Un `?` aca sale sin haber tocado `feature_list.json`.
+    let resuelto = resolver_aislamiento(paths, &data, idx, sin_worktree)?;
+
+    // Recien ahora, con el aislamiento ya conseguido, la feature pasa a activa.
     {
         let feature = feature_mut(&mut data, idx)?;
         feature.insert("status".to_string(), json!("in_progress"));
         feature.insert("started_at".to_string(), json!(now_stamp()));
+        match &resuelto {
+            Resuelto::Aislada(a, docs) => {
+                feature.insert("branch".to_string(), json!(a.rama));
+                feature.insert(
+                    "worktree".to_string(),
+                    json!(a.worktree.to_string_lossy().to_string()),
+                );
+                feature.insert("aislada".to_string(), json!(true));
+                // AC-2: donde vive el docs/ de ESTA feature. Sin este campo,
+                // `para_feature` apuntaria al docs vacio del worktree.
+                if let Some(d) = docs {
+                    feature.insert(
+                        "docs_worktree".to_string(),
+                        json!(d.to_string_lossy().to_string()),
+                    );
+                }
+            }
+            // Queda ESCRITO que no esta aislada: es lo que despues lee
+            // `ocupaciones` para negarle el paralelo a la siguiente.
+            Resuelto::SinAislar(_) => {
+                feature.insert("aislada".to_string(), json!(false));
+            }
+        }
     }
-    save_features(paths, &data)?;
-
-    // Feature #47: rama + worktree por feature ANTES de escribir nada, para que
-    // el plan, el spec y toda la evidencia nazcan DENTRO del worktree de esta
-    // feature y viajen con su rama. Sin repo git (o con --sin-worktree) se
-    // trabaja como siempre (AC-5, AC-6).
-    let aislamiento = preparar_aislamiento(paths, &mut data, idx, sin_worktree)?;
     save_features(paths, &data)?;
     // Las rutas de docs se resuelven DESDE la feature: su worktree manda, no el
     // directorio donde se ejecuto el comando.
@@ -166,14 +265,17 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
     // dispara autocheck y no toca el stamp de las otras.
     crate::progress::touch_autocheck_stamp_de(paths, &feature_id);
     println!("Feature #{feature_id} iniciada. Plan: {rel_plan}");
-    match &aislamiento {
-        Some(a) => {
+    match &resuelto {
+        Resuelto::Aislada(a, docs) => {
             let verbo = if a.reusado { "reusados" } else { "creados" };
             println!("  Rama y worktree {verbo}: {} en {}", a.rama, a.worktree.display());
             println!("  Trabaja ahi: cd {}", a.worktree.display());
+            if let Some(d) = docs {
+                println!("  docs/ es un repo aparte: su worktree es {}", d.display());
+            }
         }
-        None if sin_worktree => println!("  (--sin-worktree: se trabaja en el checkout actual)"),
-        None => println!("  (sin aislamiento: no hay repo git utilizable; se trabaja en el checkout actual)"),
+        // AC-1: no aislada se DICE, no se insinua entre parentesis.
+        Resuelto::SinAislar(motivo) => println!("{}", motivo.aviso()),
     }
     if !otras_activas.is_empty() {
         println!(

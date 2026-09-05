@@ -100,6 +100,48 @@ delegarlo al implementer: tu salida es el spec + el plan, no el diff.
    linea, con sus opciones). El implementer preguntara al usuario que decision
    aplicar ANTES de implementar; no dejes decisiones implicitas en la prosa.
 
+## Delegar en paralelo, acotado (feature #72)
+
+Delegar no es repartir: es acotar. Un workflow de revision registro **74
+arranques para 14 tareas, con 12 fallidas**, y el resultado que llego decia
+"sin hallazgos" porque el script filtro los nulos. Nadie mintio: se borro la
+evidencia de que faltaba evidencia.
+
+- **Cada tarea CITA su AC-n**, declara los archivos que va a tocar y de que otra
+  tarea depende. Una tarea sin AC no se puede revisar: no hay contra que medirla.
+- **Hasta CUATRO tareas por etapa** en el modo habitual. NO se crea una tarea
+  nueva por cada hallazgo: ese segundo nivel sin tope es como se llega a 74
+  arranques para 14 tareas.
+- **La revision empieza cuando los escritores TERMINARON.** Una etapa que lee
+  mientras otra escribe esta midiendo un arbol a medias.
+- **Declara la cuenta ANTES de delegar**:
+  `sh "harness_process/harness_cli" revision --feature <id> --esperar-tareas <n>`.
+  Cuando cada tarea termina, registra su estado terminal:
+  `--tarea <id> --tarea-ac AC-n --tarea-estado ok|fallo|cancelada|sin-resultado|sin-evidencia`.
+  Solo `ok` cubre. Las otras cuatro se CONSERVAN y bloquean el cierre: una tarea
+  que fallo no es una tarea que no existio, y borrar su linea no completa la
+  cobertura porque la cuenta esperada ya esta declarada.
+- **Ante un fallo no se relanza por inercia.** Se muestran las tareas y los
+  intentos observados, y correr otra vez es decision del USUARIO.
+- **Lo que el arnes NO puede imponer, y por eso no promete**: los reintentos
+  internos del runtime. La preferencia `small` de workflows es un consejo
+  documentado del proveedor, no un limite configurable; el arnes no la va a
+  presentar como garantia estructural. Tampoco es un sandbox: un `git push` a
+  mano desde otra terminal no pasa por ningun hook.
+
+## El objetivo pedido ya esta resuelto (feature #72 / AC-7)
+
+Cuando entregaste lo que te pidieron y encontras algo adyacente:
+
+- Anotalo APARTE en `harness_process/progress/`, con lo que viste y donde.
+- **No abras** otra feature, otro workflow ni otra reparacion sin autorizacion
+  nueva del usuario.
+- El cierre explica lo verificado, lo pendiente y el motivo real de lo que se
+  vio; no encadena tareas.
+
+Encadenar hallazgos adyacentes es exactamente como una sesion se desvia del
+objetivo del usuario, y ya paso.
+
 ## Entregable
 
 - Feature activa identificada (pueden convivir varias, cada una en su worktree).
