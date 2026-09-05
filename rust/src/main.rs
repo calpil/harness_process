@@ -2,6 +2,7 @@
 //! El shim harness_cli lo prefiere sobre el fallback Python; ambas
 //! implementaciones deben mantenerse en paridad (ver UPDATING.md).
 
+mod aislamiento;
 mod atlassian;
 mod buscar;
 mod cli;

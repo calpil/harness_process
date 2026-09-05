@@ -53,6 +53,14 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
         linea.push_str(&format!(" otros={otros}"));
     }
     println!("{linea}");
+    // Feature #72 / AC-10: el preflight de la actualizacion. Las features
+    // abiertas SIN worktree escriben en el checkout compartido, y son las que la
+    // regla de aislamiento va a afectar. Se INVENTARIAN y nada mas: el arnes no
+    // mueve commits, no cambia ramas, no borra worktrees y no para procesos.
+    // Migrar trabajo vivo se coordina con el usuario, no se automatiza.
+    if let Some(aviso) = aviso_de_features_sin_aislar(features) {
+        println!("{aviso}");
+    }
     for f in features {
         let services = f
             .get("microservicios")
@@ -129,4 +137,73 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Las features abiertas que escriben en el checkout compartido (AC-10).
+///
+/// PURA: recibe las features y devuelve el aviso, o `None` si no hay ninguna.
+/// Solo informa — es un inventario, no una migracion. Vive en `status` y no en
+/// `doctor` a proposito: `doctor` diagnostica la INSTALACION y el estado del
+/// proceso es de otro lado (frontera de la feature #25).
+pub fn aviso_de_features_sin_aislar(features: &[Value]) -> Option<String> {
+    let sin_aislar: Vec<String> = features
+        .iter()
+        .filter(|f| feature_status(f) == Some("in_progress"))
+        .filter(|f| {
+            f.get("worktree")
+                .and_then(Value::as_str)
+                .is_none_or(|w| w.trim().is_empty())
+        })
+        .map(|f| format!("#{} {}", py_str(f.get("id")), py_str(f.get("name"))))
+        .collect();
+    if sin_aislar.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "[!] {} feature(s) abiertas SIN worktree, escribiendo en el checkout compartido: {}.\n    \
+         Su trabajo NO esta aislado. El arnes no las migra solo: no mueve commits, no cambia\n    \
+         ramas, no borra worktrees y no para procesos. Coordinalo con el usuario antes de tocarlas.",
+        sin_aislar.len(),
+        sin_aislar.join(", ")
+    ))
+}
+
+#[cfg(test)]
+mod tests_72 {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use serde_json::json;
+
+    fn features(v: serde_json::Value) -> Vec<Value> {
+        v.as_array().unwrap().clone()
+    }
+
+    /// AC-10: el inventario nombra a las que quedaron sin aislar y a nadie mas.
+    #[test]
+    fn el_preflight_nombra_solo_las_abiertas_sin_worktree() {
+        let f = features(json!([
+            {"id": 98, "name": "Sin aislar", "status": "in_progress"},
+            {"id": 122, "name": "Tampoco", "status": "in_progress", "worktree": "   "},
+            {"id": 121, "name": "Aislada", "status": "in_progress", "worktree": "/tmp/wt/121"},
+            {"id": 1, "name": "Cerrada", "status": "done"}
+        ]));
+        let a = aviso_de_features_sin_aislar(&f).unwrap();
+        assert!(a.contains("#98 Sin aislar"), "{a}");
+        assert!(a.contains("#122 Tampoco"), "un worktree en blanco no aisla: {a}");
+        assert!(!a.contains("#121"), "la aislada no entra: {a}");
+        assert!(!a.contains("Cerrada"), "las cerradas no entran: {a}");
+        assert!(a.contains("2 feature(s)"), "{a}");
+        // Y dice lo que NO va a hacer, que es la mitad del AC-10.
+        assert!(a.contains("no mueve commits"), "{a}");
+        assert!(a.contains("Coordinalo con el usuario"), "{a}");
+    }
+
+    #[test]
+    fn el_preflight_calla_cuando_todo_esta_aislado() {
+        let f = features(json!([
+            {"id": 1, "name": "A", "status": "in_progress", "worktree": "/tmp/wt/1"},
+            {"id": 2, "name": "B", "status": "pending"}
+        ]));
+        assert_eq!(aviso_de_features_sin_aislar(&f), None);
+    }
 }

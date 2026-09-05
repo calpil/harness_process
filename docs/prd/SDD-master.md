@@ -240,7 +240,8 @@ el detalle a su propio ADR y enlazalo aqui.>
 
 | # | Decision | Alternativas descartadas | Por que | Fecha |
 | --- | --- | --- | --- | --- |
-| D1 | <lo que se decidio> | <opcion B, opcion C> | <razon> | <YYYY-MM-DD> |
+| D1 | El aislamiento de una feature se DECIDE en una funcion pura (`aislamiento::decidir`) y se ejecuta despues; un arranque que no lo consigue no arranca | (a) avisar con `[i]` y seguir, como estaba; (b) una regla `require_aislamiento` apagada por defecto | Avisar y seguir dejo tres features `in_progress` sin rama ni worktree escribiendo en el mismo checkout. Una regla opcional habria repetido el problema en toda instalacion que no la active. Separar decidir de ejecutar es lo que impide volver al fallback: la parte que decide no tiene con que continuar | 2026-09-05 |
+| D2 | La publicacion del cierre pasa a ser explicita (`close --publicar`); sin el flag el merge queda local y se imprime el comando | (a) seguir publicando siempre; (b) preguntar interactivamente | Un `push` automatico despues del merge publico un commit que se habia acordado dejar local, porque era el padre del que si iba. Preguntar no sirve: el cierre corre en hooks y en sesiones sin nadie mirando | 2026-09-05 |
 
 ## 5. Datos
 

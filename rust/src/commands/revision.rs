@@ -13,11 +13,77 @@ use crate::revision::{
     MAX_LINEAS_DEFAULT, VEREDICTOS, acs_sin_fila, armar, linea_sello, review_path, review_rel,
 };
 
+/// Lo que el usuario pidio registrar sobre la delegacion (feature #72 / AC-6).
+pub struct Delegacion<'a> {
+    pub tarea: Option<&'a str>,
+    pub ac: Option<&'a str>,
+    pub estado: Option<&'a str>,
+    pub esperadas: Option<usize>,
+}
+
+/// Escribe una linea del binario al final del review, creando el archivo si
+/// hace falta. Es append: el registro de una tarea NO borra el de otra, porque
+/// perder registros es exactamente el defecto que este AC cierra.
+fn anotar(ruta: &std::path::Path, linea: &str) -> anyhow::Result<()> {
+    let previo = std::fs::read_to_string(ruta).unwrap_or_default();
+    if previo.lines().any(|l| l.trim() == linea.trim()) {
+        return Ok(()); // idempotente: registrar dos veces lo mismo no duplica.
+    }
+    let mut out = previo;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(linea);
+    out.push('\n');
+    if let Some(padre) = ruta.parent() {
+        std::fs::create_dir_all(padre)?;
+    }
+    crate::features::write_text_atomic(ruta, &out)
+}
+
+/// Registra lo que se pidio de la delegacion. Devuelve `true` si hizo algo.
+fn registrar_delegacion(
+    paths: &HarnessPaths,
+    fid: &str,
+    d: &Delegacion<'_>,
+) -> anyhow::Result<bool> {
+    let ruta = review_path(paths, fid);
+    let stamp = crate::progress::now_stamp();
+    let mut hizo = false;
+
+    if let Some(n) = d.esperadas {
+        anotar(&ruta, &crate::revision::linea_esperadas(n, &stamp))?;
+        println!("[OK] Delegacion de la feature #{fid}: {n} tarea(s) esperadas.");
+        println!("    Registrado en {}", review_rel(fid));
+        hizo = true;
+    }
+
+    match (d.tarea, d.ac, d.estado) {
+        (None, None, None) => {}
+        (Some(t), Some(ac), Some(e)) => {
+            anotar(&ruta, &crate::revision::linea_tarea(t, ac, e, &stamp))?;
+            println!("[OK] Tarea `{t}` ({ac}) registrada como `{e}` en {}", review_rel(fid));
+            if e != "ok" {
+                println!(
+                    "    Queda como cobertura FALTANTE: el cierre no va a aceptar `done`\n                         hasta que ese {ac} tenga un resultado utilizable."
+                );
+            }
+            hizo = true;
+        }
+        _ => anyhow::bail!(
+            "Para registrar una tarea hacen falta las tres: --tarea <id> --tarea-ac <AC-n> --tarea-estado <estado>.\n                 Estados: {}.",
+            crate::revision::ESTADOS_DE_TAREA.join(" | ")
+        ),
+    }
+    Ok(hizo)
+}
+
 pub fn run(
     paths: &HarnessPaths,
     fid: Option<&str>,
     max_lineas: Option<usize>,
     veredicto: Option<&str>,
+    delegacion: Delegacion<'_>,
     json: bool,
 ) -> anyhow::Result<()> {
     let data = load_features(paths)?;
@@ -31,8 +97,16 @@ pub fn run(
         anyhow::bail!("feature_list.json: feature invalida");
     };
 
+    // AC-6: registrar la delegacion es lo primero, para que un `--tarea ... --veredicto`
+    // en el mismo comando estampe CONTRA lo recien registrado y no contra el estado previo.
+    let fid_real = crate::pycompat::py_str(feature.get("id"));
+    let registro = registrar_delegacion(paths, &fid_real, &delegacion)?;
+
     if let Some(v) = veredicto {
         return estampar(paths, feature, v);
+    }
+    if registro {
+        return Ok(());
     }
 
     let paquete = armar(paths, feature, max_lineas.unwrap_or(MAX_LINEAS_DEFAULT));
@@ -136,6 +210,16 @@ fn estampar(
             faltan.join(", "),
             crate::revision::porque_no_resolvieron(&raices, paths, &review, &faltan)
         );
+    }
+
+    // AC-6: la MISMA pregunta que hace el gate del cierre. Un `approved` sobre
+    // una delegacion con tareas fallidas seria un sello que el cierre va a
+    // rechazar, y esa divergencia entre estampar y el gate es exactamente lo que
+    // la #69 tuvo que cerrar una vez.
+    if veredicto == "approved"
+        && let Some(motivo) = crate::revision::motivo_delegacion_incompleta(&review)
+    {
+        anyhow::bail!("{rel}: {motivo}");
     }
 
     // La parte que ESCRIBE. Idempotente: reemplaza el sello anterior si lo hay.

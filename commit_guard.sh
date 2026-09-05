@@ -115,6 +115,51 @@ es_artefacto_del_arnes() {
     return 1
 }
 
+# Feature #72 (AC-4): a QUIEN le pertenece lo sucio.
+#
+# El guard recorria `$REPO_ROOT/*` y preguntaba por el estado git completo de
+# cada repo hermano, sin atribuir nada a una sesion. Con dos sesiones abiertas
+# eso significa que cada una termina el turno reclamando los cambios de la otra:
+# el diagnostico del 2026-09-04 encontro el MISMO `docs/urlmap-117-comandos.md`
+# bloqueando dos sesiones distintas, tres veces.
+#
+# Peor: cuando la sesion trabaja en el worktree de su feature —que vive FUERA de
+# $REPO_ROOT, en `../<repo>-wt/<id>-<slug>`— el guard ni siquiera miraba ahi. O
+# sea que reclamaba lo ajeno y no miraba lo propio.
+#
+# La atribucion posible es una sola y es estructural: el directorio desde el que
+# corre la sesion. Si es un worktree secundario, ese worktree es su feature y lo
+# demas no es suyo. Si no lo es, no hay a quien atribuir: ese es el caso
+# AMBIGUO, y ahi se conserva el barrido global —informado una vez, no una
+# reparacion en cadena.
+#
+# HARNESS_COMMIT_GUARD_SCOPE=global fuerza el barrido completo aunque haya
+# worktree: el chequeo global sigue disponible, no queda desactivado.
+SESION_WT=""
+if [ "${HARNESS_COMMIT_GUARD_SCOPE:-auto}" != "global" ]; then
+    guard_top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    guard_comun=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+    if [ -n "$guard_top" ] && [ -n "$guard_comun" ]; then
+        # Worktree SECUNDARIO: el .git comun apunta a otro repo que no es este.
+        guard_principal=$(dirname "$guard_comun")
+        guard_top_abs=$(cd "$guard_top" 2>/dev/null && pwd -P)
+        guard_principal_abs=$(cd "$guard_principal" 2>/dev/null && pwd -P)
+        guard_root_abs=$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)
+        if [ -n "$guard_top_abs" ] && [ "$guard_top_abs" != "$guard_principal_abs" ]; then
+            # Y tiene que ser un worktree DE ESTE proyecto. Sin esta condicion,
+            # correr el guard parado en el worktree de OTRO repo lo hacia
+            # revisar un arbol ajeno y callarse sobre el propio: lo encontro
+            # tests/stop_hook_check.sh, que corre desde el worktree del arnes
+            # contra un proyecto de fixture. Es el mismo cuidado que
+            # paths.rs:worktree_actual ya documentaba para el binario.
+            if [ "$guard_principal_abs" = "$guard_root_abs" ] \
+                || [ "$(dirname "$guard_principal_abs")" = "$guard_root_abs" ]; then
+                SESION_WT="$guard_top_abs"
+            fi
+        fi
+    fi
+fi
+
 # 0 solo si hubo cambios y TODOS son artefactos del arnes.
 # Feature #66: ademas de decidir, junta los archivos que NO estan exentos. El
 # mensaje nombraba solo el repo ("Cambios sin commitear en: docs"), y con eso el
@@ -148,6 +193,57 @@ EOF
 }
 
 DIRTY=""
+NO_ATRIBUIBLES=""
+
+# AC-4: con worktree de sesion, lo que se revisa es EL WORKTREE. Es lo unico
+# que le pertenece a esta sesion, y ademas es lo que el barrido global no
+# miraba nunca.
+if [ -n "$SESION_WT" ]; then
+    if [ -n "$(git -C "$SESION_WT" status --porcelain 2>/dev/null)" ]; then
+        if solo_artefactos_del_arnes "$SESION_WT"; then
+            echo "[i] $(basename "$SESION_WT"): solo artefactos del arnes sin commitear (los commitea 'close'); no cuenta como sucio."
+        else
+            DIRTY="$DIRTY $(basename "$SESION_WT")"
+        fi
+    fi
+    # Los repos compartidos NO se reclaman: pueden ser de otra sesion. Se
+    # informan UNA vez y no bloquean (AC-4).
+    for repo in "$REPO_ROOT"/*; do
+        [ -d "$repo" ] || continue
+        repo_abs=$(cd "$repo" && pwd -P)
+        [ "$repo_abs" = "$HARNESS_DIR" ] && continue
+        [ "$repo_abs" = "$SESION_WT" ] && continue
+        git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+        [ -z "$(git -C "$repo" rev-parse --show-prefix 2>/dev/null)" ] || continue
+        if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
+            NO_ATRIBUIBLES="$NO_ATRIBUIBLES $(basename "$repo")"
+        fi
+    done
+    if [ -n "$NO_ATRIBUIBLES" ]; then
+        echo "[i] Sin atribuir a esta sesion (checkout compartido, puede ser de otra):$NO_ATRIBUIBLES"
+        echo "[i] No se bloquea por eso. Para el barrido completo: HARNESS_COMMIT_GUARD_SCOPE=global"
+    fi
+    if [ -n "$DIRTY" ]; then
+        echo "Cambios sin commitear en:$DIRTY" >&2
+        if [ -n "$AJENOS" ]; then
+            echo "Archivos que no son artefactos del arnes:$AJENOS" >&2
+        fi
+        {
+            echo "Tres salidas, en este orden:"
+            echo "  1. Si el cambio es TUYO: commitealo por microservicio con Conventional Commits."
+            echo "  2. Si NO es tuyo (otra sesion, otro repo, trabajo del usuario): NO lo commitees."
+            echo "     Decilo y segui: commitear trabajo ajeno a medio hacer es peor que dejarlo sucio."
+            echo "  3. Solo si molesta de forma sostenida: HARNESS_COMMIT_GUARD_MODE=warn"
+            echo "     (avisa sin bloquear). \`off\` apaga el guard para TODO el repo, incluido tu codigo."
+        } >&2
+        if [ "$MODE" = "warn" ] || [ "$STOP_HOOK_ACTIVE" -eq 1 ]; then
+            exit 0
+        fi
+        exit 2
+    fi
+    exit 0
+fi
+
 for repo in "$REPO_ROOT"/*; do
     [ -d "$repo" ] || continue
     repo_abs=$(cd "$repo" && pwd -P)

@@ -48,6 +48,20 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   son unicos (del repo principal). Al cerrar como `done` hay que decir a que
   rama se integra: `close --feature <id> --status done --to <rama>`; el arnes se
   niega sin `--to` y hay que PREGUNTARLE AL USUARIO a cual va.
+- Aislamiento OBLIGATORIO (feature #72): un arranque que no consigue rama y
+  worktree NO arranca — no queda `in_progress` a medias. `--sin-worktree` solo
+  vale si no hay ninguna otra feature abierta, y deja la feature declarada NO
+  AISLADA, lo que le niega el paralelo a la siguiente. Sin repo git pasa lo
+  mismo: una feature a la vez. Si `docs/` es otro repo git, tiene su propio
+  worktree (`../docs-wt/<id>-<slug>`) y ahi viven el spec y el plan.
+- La integracion MUESTRA el rango completo de commits antes de mergear, y se
+  niega si arrastra trabajo de otra feature (paso: se publico un arreglo y con
+  el se fue un commit ajeno que era su padre). El cierre integra LOCAL: publicar
+  es una decision aparte, `close ... --publicar`.
+- Delegar en paralelo: hasta cuatro tareas por etapa, cada una citando su AC-n,
+  y la cuenta declarada antes con `revision --esperar-tareas <n>`. Una tarea que
+  fallo se registra y bloquea el cierre; borrar su linea no completa la
+  cobertura. El detalle esta en `harness_process/roles/leader.md`.
 - `progress/history.md`: bitacora append-only.
 - `docs/constitution.md`: principios no negociables (el spec y el plan los
   cumplen; el reviewer los verifica).

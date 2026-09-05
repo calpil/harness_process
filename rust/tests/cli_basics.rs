@@ -319,7 +319,11 @@ fn start_should_allow_a_second_feature_in_parallel() {
     // Feature #47 / AC-1: se acabo el "Ya hay feature in_progress". Las dos
     // quedan activas, cada una con SU estado vivo (AC-8), y current.md pasa a
     // ser el indice de ambas (AC-9).
-    let (dir, bin) = sandbox_with_binary();
+    //
+    // Feature #72: el sandbox pasa a tener git. El paralelo se conserva —es el
+    // paralelo UTIL que el spec de la #72 quiere conservar— pero ahora vale
+    // porque cada feature consigue su worktree, no porque nadie mire.
+    let (dir, bin) = sandbox_git();
     cmd(&bin).args(["add", "--name", "Uno"]).assert().success();
     cmd(&bin).args(["add", "--name", "Dos"]).assert().success();
     cmd(&bin)
@@ -358,7 +362,11 @@ fn start_should_allow_a_second_feature_in_parallel() {
 fn close_should_not_touch_the_state_of_the_other_active_feature() {
     // AC-11 (el bug de la feature #45, ahora imposible): cerrar una no puede
     // pisar el estado vivo de la otra.
-    let (dir, bin) = sandbox_with_binary();
+    //
+    // Feature #72: con git, porque abrir dos features exige que las dos esten
+    // aisladas. Lo que este test prueba —que cerrar una no pisa a la otra— no
+    // cambio; lo que cambio es que ahora hay que ganarse el derecho a las dos.
+    let (dir, bin) = sandbox_git();
     cmd(&bin).args(["add", "--name", "Uno"]).assert().success();
     cmd(&bin).args(["add", "--name", "Dos"]).assert().success();
     cmd(&bin)
@@ -391,8 +399,15 @@ fn close_should_not_touch_the_state_of_the_other_active_feature() {
     // ...y su stamp de autocheck tampoco se borro (AC-10).
     assert!(dir.path().join("hp/progress/.last_autocheck-2").exists());
     // El archivado de la #1 se llevo SU estado, no el de la #2.
+    // Feature #72: con worktree —y ahora abrir dos features exige tenerlo— el
+    // estado se archiva en el `docs/` de ESA feature, no en el compartido. El
+    // cierre `blocked` no integra, asi que el worktree sigue ahi.
+    let wt_1 = feature_en_backlog(dir.path(), "1")["worktree"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let archivado =
-        std::fs::read_to_string(dir.path().join("docs/estado-feature-1-uno.md")).unwrap();
+        std::fs::read_to_string(Path::new(&wt_1).join("docs/estado-feature-1-uno.md")).unwrap();
     assert!(archivado.contains("Feature #1"), "{archivado}");
     assert!(
         !archivado.contains("Feature #2: Dos"),
@@ -5261,8 +5276,10 @@ fn start_should_create_branch_and_worktree_per_feature() {
 
 #[test]
 fn start_should_keep_working_without_git_or_with_sin_worktree() {
-    // AC-5 y AC-6: sin repo git, o pidiendo el modo clasico, no hay aislamiento
-    // y el flujo sigue igual.
+    // AC-5 y AC-6 de la #47: sin repo git, o pidiendo el modo clasico, el flujo
+    // sigue funcionando. Feature #72 / AC-1: sigue funcionando pero ya no se
+    // describe como si nada faltara — el arranque DICE que la feature no quedo
+    // aislada, que es la diferencia entre informar y disimular.
     let (_dir, bin) = sandbox_with_binary(); // sin git
     cmd(&bin)
         .args(["add", "--name", "Sin Git"])
@@ -5272,7 +5289,8 @@ fn start_should_keep_working_without_git_or_with_sin_worktree() {
         .args(["start", "--feature", "1"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("sin aislamiento"));
+        .stdout(predicate::str::contains("Feature NO AISLADA"))
+        .stdout(predicate::str::contains("no hay repo git utilizable"));
 
     let (_dir2, bin2) = sandbox_git();
     cmd(&bin2)
@@ -5283,7 +5301,290 @@ fn start_should_keep_working_without_git_or_with_sin_worktree() {
         .args(["start", "--feature", "1", "--sin-worktree"])
         .assert()
         .success()
+        .stdout(predicate::str::contains("Feature NO AISLADA"))
         .stdout(predicate::str::contains("--sin-worktree"));
+}
+
+// ---------------------------------------------------------------------------
+// Feature #72: un arranque que no consigue aislamiento NO arranca.
+//
+// Los cuatro tests de aca abajo son de COMPORTAMIENTO: corren el binario contra
+// repos git de verdad y miran `feature_list.json`, no el fuente. Cada uno
+// reproduce una de las formas en que el diagnostico del 2026-09-04 encontro
+// features activas sin aislar.
+// ---------------------------------------------------------------------------
+
+/// Lo que el backlog dice de una feature, para poder afirmar que NO cambio.
+fn feature_en_backlog(raiz: &Path, id: &str) -> serde_json::Value {
+    let texto = std::fs::read_to_string(raiz.join("hp/feature_list.json")).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&texto).unwrap();
+    data["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["id"].to_string().trim_matches('"') == id)
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn start_should_refuse_sin_worktree_while_another_feature_is_open() {
+    // AC-1: el bypass inseguro. Es el comando exacto que corrieron #121, #122,
+    // #126 y #98 antes de terminar las cuatro en el mismo checkout.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    let antes = feature_en_backlog(dir.path(), "2");
+    cmd(&bin)
+        .args(["start", "--feature", "2", "--sin-worktree"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("#1 Primera"))
+        .stderr(predicate::str::contains("Arranca con worktree"));
+
+    // Lo que de verdad importa: el rechazo no dejo rastro.
+    let despues = feature_en_backlog(dir.path(), "2");
+    assert_eq!(antes, despues, "el backlog no se toco");
+    assert_ne!(despues["status"], "in_progress", "#2 no quedo activa");
+    assert!(
+        !dir.path().join("hp/progress/current-2.md").exists(),
+        "tampoco nacio su estado vivo"
+    );
+}
+
+#[test]
+fn start_should_refuse_when_git_fails_instead_of_warning_and_continuing() {
+    // AC-1, el caso central: `git worktree add` falla y ANTES eso se imprimia
+    // con `[i]` y el arranque seguia, dejando la feature in_progress sin rama
+    // ni worktree. Se fuerza el fallo ocupando la ruta del worktree con un
+    // directorio que no esta vacio y no es un worktree.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Choca"]).assert().success();
+
+    let raiz = dir.path();
+    let nombre = raiz.file_name().unwrap().to_string_lossy().into_owned();
+    let ocupada = raiz
+        .parent()
+        .unwrap()
+        .join(format!("{nombre}-wt"))
+        .join("1-choca");
+    std::fs::create_dir_all(&ocupada).unwrap();
+    std::fs::write(ocupada.join("ocupado.txt"), "algo de otro
+").unwrap();
+
+    let antes = feature_en_backlog(raiz, "1");
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("El arranque se cancela"));
+
+    let despues = feature_en_backlog(raiz, "1");
+    assert_eq!(antes, despues, "el backlog no se toco");
+    assert_ne!(despues["status"], "in_progress");
+    // Y el directorio ajeno sigue intacto: el arnes no lo limpio por su cuenta.
+    assert_eq!(
+        std::fs::read_to_string(ocupada.join("ocupado.txt")).unwrap(),
+        "algo de otro\n"
+    );
+    let _ = std::fs::remove_dir_all(ocupada.parent().unwrap());
+}
+
+#[test]
+fn start_should_refuse_a_second_feature_when_the_first_is_not_isolated() {
+    // AC-1: "el uso serial sin worktree no habilita paralelo de escritura".
+    // La primera arranca serial (legitimo); la segunda ya no entra.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Serial"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1", "--sin-worktree"])
+        .assert()
+        .success();
+
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("esta abierta SIN worktree"))
+        .stderr(predicate::str::contains("Cerra #1 Serial"));
+    assert!(!dir.path().join("hp/progress/current-2.md").exists());
+}
+
+#[test]
+fn close_should_refuse_to_drag_another_features_commit() {
+    // AC-3, el incidente del 2026-09-03: se publico el arreglo de una feature y
+    // con el se fue el commit de otra que se habia acordado dejar local, porque
+    // era su padre. El cierre hablaba de "la rama" y nunca del rango.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    let wt1 = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
+    let wt1 = PathBuf::from(wt1);
+    std::fs::write(wt1.join("de-la-1.txt"), "trabajo local de la 1\n").unwrap();
+    git_en(&wt1, &["add", "-A"]);
+    git_en(&wt1, &["commit", "-q", "-m", "feat: lo de la 1 (queda local)"]);
+
+    // La #2 se corta DESDE la rama de la #1: su commit tiene por padre el ajeno.
+    let rama1 = feature_en_backlog(dir.path(), "1")["branch"].as_str().unwrap().to_string();
+    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+    let wt2 = feature_en_backlog(dir.path(), "2")["worktree"].as_str().unwrap().to_string();
+    let wt2 = PathBuf::from(wt2);
+    git_en(&wt2, &["merge", "--no-ff", "-m", "trae la 1", &rama1]);
+    std::fs::write(wt2.join("de-la-2.txt"), "trabajo de la 2\n").unwrap();
+    git_en(&wt2, &["add", "-A"]);
+    git_en(&wt2, &["commit", "-q", "-m", "fix: lo de la 2"]);
+
+    let salida = cmd(&bin)
+        .args(["close", "--feature", "2", "--status", "done", "--to", "main"])
+        .assert()
+        .code(2);
+    let err = String::from_utf8_lossy(&salida.get_output().stderr).into_owned();
+    assert!(err.contains("arrastra trabajo de otra feature"), "{err}");
+    assert!(err.contains("AJENO"), "marca cual: {err}");
+    assert!(err.contains("lo de la 1 (queda local)"), "lo nombra: {err}");
+    assert!(err.contains("Rango completo"), "muestra el rango: {err}");
+    // Y no integro nada: main sigue sin los archivos.
+    assert!(!dir.path().join("de-la-2.txt").exists(), "no mergeo");
+    assert_ne!(
+        feature_en_backlog(dir.path(), "2")["status"],
+        "done",
+        "el backlog no dice cerrada"
+    );
+}
+
+#[test]
+fn close_should_not_publish_without_being_asked() {
+    // AC-3: publicar es una decision, no una consecuencia de cerrar. Antes el
+    // cierre hacia `git push` automatico justo despues del merge, asi que el
+    // incidente no necesito que nadie pidiera publicar: alcanzo con cerrar.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Sola"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    let wt = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
+    std::fs::write(PathBuf::from(&wt).join("algo.txt"), "x\n").unwrap();
+
+    let salida = cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&salida.get_output().stdout).into_owned();
+    assert!(out.contains("merge LOCAL"), "dice que no publico: {out}");
+    assert!(out.contains("push origin main"), "y deja el comando: {out}");
+    assert!(out.contains("origen :"), "muestra origen y destino: {out}");
+    assert!(out.contains("commits que se llevan"), "y el rango: {out}");
+}
+
+/// Sandbox donde `docs/` es un repo git APARTE del principal: el layout que
+/// tiene realestate y el que dejo sin aislar a la feature #98.
+fn sandbox_git_con_docs_aparte() -> (tempfile::TempDir, PathBuf) {
+    let (dir, bin) = sandbox_git();
+    let docs = dir.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["config", "user.email", "test@example.com"],
+        vec!["config", "user.name", "Test"],
+    ] {
+        Command::new("git").args(&args).current_dir(&docs).output().unwrap();
+    }
+    std::fs::write(docs.join("constitution.md"), "# reglas\n").unwrap();
+    Command::new("git").args(["add", "-A"]).current_dir(&docs).output().unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "init docs"])
+        .current_dir(&docs)
+        .output()
+        .unwrap();
+    (dir, bin)
+}
+
+#[test]
+fn start_should_give_a_separate_docs_repo_its_own_worktree() {
+    // AC-2: cada repo escribible tiene worktree propio de la feature. Sin esto,
+    // el spec se escribia en el `docs/` VACIO del worktree principal (el repo
+    // docs no viaja con el), y ese directorio vacio fue la excusa con la que la
+    // #98 arranco --sin-worktree.
+    let (dir, bin) = sandbox_git_con_docs_aparte();
+    cmd(&bin).args(["add", "--name", "Con Docs"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/ es un repo aparte"));
+
+    let f = feature_en_backlog(dir.path(), "1");
+    let docs_wt = f["docs_worktree"].as_str().unwrap().to_string();
+    let docs_wt = PathBuf::from(&docs_wt);
+    assert!(docs_wt.is_dir(), "el worktree de docs existe: {docs_wt:?}");
+
+    // El spec nacio EN el worktree de docs, y no en el docs/ compartido.
+    let specs: Vec<String> = std::fs::read_dir(&docs_wt)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("spec-feature-1-"))
+        .collect();
+    assert_eq!(specs.len(), 1, "el spec vive en el worktree de docs: {specs:?}");
+
+    let compartido = dir.path().join("docs");
+    let en_compartido: Vec<String> = std::fs::read_dir(&compartido)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("spec-feature-"))
+        .collect();
+    assert!(
+        en_compartido.is_empty(),
+        "el docs/ compartido no recibio nada: {en_compartido:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir.path().join("docs-wt"));
+}
+
+#[test]
+fn start_should_not_trust_a_worktree_that_no_longer_exists() {
+    // AC-1: "verifica la identidad de su rama y worktree". Una feature cuyo
+    // worktree se borro NO esta aislada, por mas que el backlog lo declare, y
+    // por lo tanto tampoco le habilita el paralelo a la siguiente.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Perdida"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Siguiente"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    // Se borra el worktree por fuera del arnes, que es como pasa de verdad.
+    let wt = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(&wt).unwrap();
+    // El backlog sigue diciendo que lo tiene: esa es la mentira que hay que ver.
+    assert_eq!(feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap(), wt);
+
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("esta abierta SIN worktree"));
+}
+
+#[test]
+fn start_should_refuse_a_second_feature_without_git() {
+    // AC-1: sin git no hay worktrees que repartir, asi que no hay paralelo.
+    // Esto REVOCA a proposito el AC-1 de la feature #47 para el caso sin git
+    // (decision del usuario, 2026-09-05): era la puerta por la que #98, #122 y
+    // #126 terminaron escribiendo las tres en el mismo arbol.
+    let (dir, bin) = sandbox_with_binary(); // sin git
+    cmd(&bin).args(["add", "--name", "Una"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Otra"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("El backlog no se toco"));
+    let despues = feature_en_backlog(dir.path(), "2");
+    assert_ne!(despues["status"], "in_progress");
 }
 
 #[test]
@@ -6954,7 +7255,7 @@ fn gate_review_should_ignore_a_stamp_quoted_inside_a_code_block() {
     let (dir, bin, _spec) = feature_lista_para_revisar();
     std::fs::write(
         dir.path().join("docs/review-1.md"),
-        &format!(
+        format!(
             "{CITAS_QUE_RESUELVEN}El formato del sello es:\n```\n\
              Revisado: approved · 2026-01-01T00:00:00Z · estampado por x\n```\n\
              Veredicto real: changes_requested, todavia sin estampar.\n"
@@ -7063,7 +7364,7 @@ fn gate_review_should_treat_tilde_fences_as_code_blocks() {
     let (dir, bin, _spec) = feature_lista_para_revisar();
     std::fs::write(
         dir.path().join("docs/review-1.md"),
-        &format!("{CITAS_QUE_RESUELVEN}~~~\nRevisado: approved · 2026 · x\n~~~\nVeredicto real: sin estampar.\n"),
+        format!("{CITAS_QUE_RESUELVEN}~~~\nRevisado: approved · 2026 · x\n~~~\nVeredicto real: sin estampar.\n"),
     )
     .unwrap();
     cmd(&bin)
@@ -7080,7 +7381,7 @@ fn estampar_should_never_claim_a_stamp_the_gate_cannot_read() {
     let (dir, bin, _spec) = feature_lista_para_revisar();
     std::fs::write(
         dir.path().join("docs/review-1.md"),
-        &format!("```\nnota suelta\n```\n{CITAS_QUE_RESUELVEN}"),
+        format!("```\nnota suelta\n```\n{CITAS_QUE_RESUELVEN}"),
     )
     .unwrap();
     cmd(&bin)
@@ -7102,7 +7403,7 @@ fn gate_review_should_not_desync_with_mixed_fences() {
     let (dir, bin, _spec) = feature_lista_para_revisar();
     std::fs::write(
         dir.path().join("docs/review-1.md"),
-        &format!(
+        format!(
             "{CITAS_QUE_RESUELVEN}```\n~~~\nRevisado: approved · 2026 · x\n```\n\
              Veredicto real: sin estampar.\n"
         ),
@@ -7122,7 +7423,7 @@ fn estampar_should_not_touch_prose_quoted_in_tilde_fences() {
     let (dir, bin, _spec) = feature_lista_para_revisar();
     std::fs::write(
         dir.path().join("docs/review-1.md"),
-        &format!("{CITAS_QUE_RESUELVEN}~~~\nRevisado: <veredicto> · <fecha>\n~~~\n"),
+        format!("{CITAS_QUE_RESUELVEN}~~~\nRevisado: <veredicto> · <fecha>\n~~~\n"),
     )
     .unwrap();
     cmd(&bin)
@@ -7488,7 +7789,7 @@ fn el_gate_no_lee_un_sello_indentado() {
     let (dir, bin, _spec) = feature_lista_para_revisar();
     std::fs::write(
         dir.path().join("docs/review-1.md"),
-        &format!(
+        format!(
             "{CITAS_QUE_RESUELVEN}\nAsi queda el sello:\n\n\
              \x20   Revisado: approved · 2026-01-01 00:00 · estampado por `harness revision --veredicto`\n"
         ),

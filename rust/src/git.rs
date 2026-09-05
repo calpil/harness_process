@@ -93,6 +93,37 @@ pub fn repo_principal(dir: &Path) -> Option<PathBuf> {
     None
 }
 
+/// El repo del `docs/` del proyecto, cuando docs es un repo git DISTINTO del
+/// principal (feature #72 / AC-2).
+///
+/// Este es el caso que rompio el aislamiento de la feature #98: en el worktree
+/// del repo principal, un `docs/` que pertenece a otro repo NO viaja — queda
+/// vacio o directamente ausente. El coordinador vio un `docs/` vacio, lo leyo
+/// como "aca no se puede trabajar" y arranco con `--sin-worktree`, que es como
+/// termino escribiendo en el checkout compartido.
+///
+/// Devuelve `None` cuando `docs/` no existe, no es repo, o es parte del MISMO
+/// repo principal (el caso comun: ahi viaja con el worktree y no hay nada que
+/// preparar).
+pub fn repo_de_docs(repo_root: &Path) -> Option<PathBuf> {
+    let docs = repo_root.join("docs");
+    if !docs.is_dir() {
+        return None;
+    }
+    // Tiene que ser la RAIZ de su propio repo: un `docs/` que es subdirectorio
+    // del principal devuelve el toplevel del principal, y ahi no hay nada que
+    // aislar aparte.
+    let propio = toplevel(&docs)?;
+    if mismo_dir(&propio, &docs) != Some(true) {
+        return None;
+    }
+    let principal = repo_principal(repo_root);
+    match principal {
+        Some(p) if mismo_dir(&p, &propio) == Some(true) => None,
+        _ => Some(propio),
+    }
+}
+
 /// True si `dir` esta dentro de un worktree SECUNDARIO (no el principal).
 pub fn es_worktree_secundario(dir: &Path) -> bool {
     match (toplevel(dir), repo_principal(dir)) {
@@ -329,6 +360,116 @@ pub fn colisiones(
     choques.sort();
     choques.dedup();
     choques
+}
+
+/// Un commit del rango que la integracion se llevaria.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commit {
+    pub sha: String,
+    pub titulo: String,
+    /// La rama de OTRA feature que tambien contiene este commit, si la hay.
+    /// `Some` significa: esto no es trabajo de la feature que se esta cerrando.
+    pub ajeno: Option<String>,
+}
+
+/// Todo lo que un merge de `rama` en `destino` se llevaria, commit por commit
+/// (feature #72 / AC-3).
+///
+/// El motivo es un incidente verificado: se publico `9750cc2` (el arreglo de
+/// #117) y con el se fue `2fd6c5f` (#106), que se habia acordado dejar local.
+/// Nadie mintio — el commit propio simplemente tenia por padre uno ajeno, y el
+/// cierre solo hablaba de "la rama". Un rango que no se muestra es un rango que
+/// no se revisa.
+///
+/// `otras_ramas` son las ramas de las demas features: un commit alcanzable
+/// desde alguna de ellas se marca `ajeno`. No se adivina por autor ni por
+/// fecha, que son atributos que cualquiera puede reescribir.
+pub fn rango_de_integracion(
+    principal: &Path,
+    destino: &str,
+    rama: &str,
+    otras_ramas: &[String],
+) -> Vec<Commit> {
+    let Some(salida) = git(
+        principal,
+        &[
+            "log",
+            "--reverse",
+            "--format=%H\x1f%s",
+            &format!("{destino}..{rama}"),
+        ],
+    ) else {
+        return Vec::new();
+    };
+    // Un set por rama ajena: lo que esa rama aporta sobre el mismo destino.
+    let ajenos: Vec<(String, Vec<String>)> = otras_ramas
+        .iter()
+        .filter(|o| o.as_str() != rama)
+        .map(|o| {
+            let shas = git(principal, &["rev-list", &format!("{destino}..{o}")])
+                .map(|s| s.lines().map(str::to_string).collect())
+                .unwrap_or_default();
+            (o.clone(), shas)
+        })
+        .collect();
+
+    salida
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|linea| {
+            let (sha, titulo) = linea.split_once('\x1f')?;
+            let ajeno = ajenos
+                .iter()
+                .find(|(_, shas)| shas.iter().any(|s| s == sha))
+                .map(|(rama, _)| rama.clone());
+            Some(Commit {
+                sha: sha.to_string(),
+                titulo: titulo.to_string(),
+                ajeno,
+            })
+        })
+        .collect()
+}
+
+/// Candado por rama destino: dos cierres del arnes sobre el MISMO destino no
+/// corren a la vez (AC-3).
+///
+/// Vive en el `.git` comun, asi que lo comparten todos los worktrees del repo
+/// —que es exactamente el conjunto de features que podrian pisarse—. Se libera
+/// al soltarlo; si un proceso muere sin soltarlo queda un archivo suelto, y el
+/// mensaje dice como borrarlo, porque un candado que nadie puede abrir es peor
+/// que no tenerlo.
+#[derive(Debug)]
+pub struct CandadoDeIntegracion {
+    ruta: PathBuf,
+}
+
+impl CandadoDeIntegracion {
+    pub fn tomar(principal: &Path, destino: &str) -> anyhow::Result<Self> {
+        let dir = common_dir(principal)
+            .ok_or_else(|| anyhow::anyhow!("no se pudo resolver el .git de {}", principal.display()))?;
+        let ruta = dir.join(format!("harness-integracion-{}.lock", destino.replace('/', "-")));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&ruta)
+        {
+            Ok(_) => Ok(Self { ruta }),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => anyhow::bail!(
+                "ya hay una integracion en curso hacia '{destino}'.\n    \
+                 Espera a que termine. Si estas seguro de que no queda ninguna corriendo,\n    \
+                 borra el candado: rm {}",
+                ruta.display()
+            ),
+            Err(e) => anyhow::bail!("no se pudo tomar el candado de integracion: {e}"),
+        }
+    }
+}
+
+impl Drop for CandadoDeIntegracion {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.ruta);
+    }
 }
 
 /// Mergea `rama` en `destino` sin reescribir historia y sin trailers de IA.
@@ -716,6 +857,77 @@ mod tests {
         let err = merge_en(p, "no-existe", &a.rama).unwrap_err();
         assert!(err.to_string().contains("no existe"));
         assert!(err.to_string().contains("main"), "lista las ramas: {err}");
+    }
+
+    /// AC-3, el incidente del 2026-09-03 reproducido: la rama de la feature que
+    /// se cierra lleva un commit PROPIO cuyo padre es un commit de OTRA feature
+    /// que se habia acordado dejar local. Integrar la primera se lleva las dos.
+    #[test]
+    fn el_rango_delata_el_commit_ajeno_que_viaja_de_padre() {
+        let dir = repo();
+        let p = dir.path();
+
+        // Feature A (la que se queda local): su commit sale de main.
+        Command::new("git").args(["checkout", "-q", "-b", "feature/106-a"]).current_dir(p).output().unwrap();
+        std::fs::write(p.join("a.txt"), "de la 106\n").unwrap();
+        Command::new("git").args(["add", "-A"]).current_dir(p).output().unwrap();
+        Command::new("git").args(["commit", "-q", "-m", "feat: lo de la 106"]).current_dir(p).output().unwrap();
+        let sha_ajeno = git(p, &["rev-parse", "HEAD"]).unwrap();
+
+        // Feature B se corta DESDE A: su commit tiene por padre el de A.
+        Command::new("git").args(["checkout", "-q", "-b", "feature/117-b"]).current_dir(p).output().unwrap();
+        std::fs::write(p.join("b.txt"), "de la 117\n").unwrap();
+        Command::new("git").args(["add", "-A"]).current_dir(p).output().unwrap();
+        Command::new("git").args(["commit", "-q", "-m", "fix: lo de la 117"]).current_dir(p).output().unwrap();
+        let sha_propio = git(p, &["rev-parse", "HEAD"]).unwrap();
+        Command::new("git").args(["checkout", "-q", "main"]).current_dir(p).output().unwrap();
+
+        let otras = vec!["feature/106-a".to_string()];
+        let rango = rango_de_integracion(p, "main", "feature/117-b", &otras);
+
+        // El rango tiene DOS commits, no uno: eso es lo que el cierre no decia.
+        assert_eq!(rango.len(), 2, "el rango completo: {rango:?}");
+        assert_eq!(rango[0].sha, sha_ajeno, "el padre va primero (--reverse)");
+        assert_eq!(
+            rango[0].ajeno.as_deref(),
+            Some("feature/106-a"),
+            "y esta marcado como ajeno"
+        );
+        assert_eq!(rango[1].sha, sha_propio);
+        assert_eq!(rango[1].ajeno, None, "el propio no es ajeno");
+        assert_eq!(rango[1].titulo, "fix: lo de la 117", "el titulo viaja entero");
+    }
+
+    /// Sin ramas ajenas alrededor, un rango limpio no inventa culpables.
+    #[test]
+    fn el_rango_limpio_no_marca_nada_como_ajeno() {
+        let dir = repo();
+        let p = dir.path();
+        let a = preparar(p, "47", "paralelo", None, None).unwrap();
+        std::fs::write(a.worktree.join("x.txt"), "hola\n").unwrap();
+        Command::new("git").args(["add", "-A"]).current_dir(&a.worktree).output().unwrap();
+        Command::new("git").args(["commit", "-q", "-m", "feat: x"]).current_dir(&a.worktree).output().unwrap();
+
+        let rango = rango_de_integracion(p, "main", &a.rama, &[]);
+        assert_eq!(rango.len(), 1);
+        assert_eq!(rango[0].ajeno, None);
+    }
+
+    /// AC-3: dos integraciones al MISMO destino no corren a la vez.
+    #[test]
+    fn el_candado_de_integracion_serializa_por_destino() {
+        let dir = repo();
+        let p = dir.path();
+        let primero = CandadoDeIntegracion::tomar(p, "main").unwrap();
+        let err = CandadoDeIntegracion::tomar(p, "main").unwrap_err();
+        assert!(err.to_string().contains("ya hay una integracion en curso"), "{err}");
+        // Otro destino no se estorba: el candado es POR destino.
+        let otro = CandadoDeIntegracion::tomar(p, "develop");
+        assert!(otro.is_ok(), "develop es otro candado");
+        drop(otro);
+        // Y al soltarlo, el destino vuelve a estar libre.
+        drop(primero);
+        assert!(CandadoDeIntegracion::tomar(p, "main").is_ok());
     }
 
     #[test]

@@ -448,6 +448,142 @@ pub fn veredicto_de_sello(linea: &str) -> Option<&str> {
 pub use crate::markdown::lineas_fuera_de_bloque;
 
 
+// ---------------------------------------------------------------------------
+// Feature #72 / AC-6: las tareas delegadas que NO terminaron bien.
+//
+// El workflow de revision de la #117 registro 74 arranques para 14 tareas, con
+// 12 fallidas, y su script hacia `filter(Boolean)` sobre los resultados. Los
+// nulos desaparecieron y la revision quedo "sin hallazgos". Nadie mintio: se
+// borro la evidencia de que faltaba evidencia.
+//
+// Dos decisiones sostienen que eso no se pueda repetir, y ninguna es disciplina:
+//
+// 1. **Los estados los escribe el binario**, como el sello de la #64. Una linea
+//    `Tarea:` tipeada a mano no la lee nadie... salvo que este bien formada, y
+//    entonces cuenta igual — pero cuenta EN CONTRA, porque solo `ok` cubre.
+// 2. **La cuenta esperada se declara antes.** Sin esto, borrar las lineas de
+//    las tareas fallidas dejaba el archivo "completo": cero fallos registrados.
+//    Con la cuenta declarada, borrarlas baja los `ok` y el gate sigue cerrado.
+//    Eliminar nulos no puede convertir cobertura parcial en completa.
+
+/// Prefijo de la linea de una tarea delegada.
+pub const SELLO_TAREA: &str = "Tarea:";
+/// Prefijo de la cuenta de tareas que la delegacion esperaba.
+pub const SELLO_ESPERADAS: &str = "Tareas esperadas:";
+
+/// Estados terminales de una tarea delegada. Solo `ok` cubre; el resto son
+/// formas distintas de "no hay resultado que revisar", y se conservan las cuatro
+/// porque el motivo importa para decidir que hacer.
+pub const ESTADOS_DE_TAREA: [&str; 5] = ["ok", "fallo", "cancelada", "sin-resultado", "sin-evidencia"];
+
+/// Una tarea delegada, tal como la registro el binario.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tarea {
+    pub id: String,
+    pub ac: String,
+    pub estado: String,
+}
+
+impl Tarea {
+    /// True si esta tarea cubre lo suyo. Todo lo demas deja el resultado
+    /// incompleto.
+    pub fn cubre(&self) -> bool {
+        self.estado == "ok"
+    }
+}
+
+/// La linea canonica de una tarea. La escribe SOLO el binario.
+pub fn linea_tarea(id: &str, ac: &str, estado: &str, stamp: &str) -> String {
+    format!("{SELLO_TAREA} {id} · {ac} · {estado} · {stamp} · registrada por `harness revision --tarea`")
+}
+
+/// La linea canonica de la cuenta esperada.
+pub fn linea_esperadas(n: usize, stamp: &str) -> String {
+    format!("{SELLO_ESPERADAS} {n} · {stamp} · registrada por `harness revision --esperar-tareas`")
+}
+
+/// Parsea una linea de tarea. `None` si no lo es o si el estado no existe: un
+/// estado inventado no se acepta en silencio como si fuera bueno.
+fn tarea_de_linea(linea: &str) -> Option<Tarea> {
+    let resto = linea.trim_start().strip_prefix(SELLO_TAREA)?;
+    let partes: Vec<&str> = resto.split('·').map(str::trim).collect();
+    let [id, ac, estado, ..] = partes.as_slice() else {
+        return None;
+    };
+    if id.is_empty() || ac.is_empty() || !ESTADOS_DE_TAREA.contains(estado) {
+        return None;
+    }
+    Some(Tarea {
+        id: (*id).to_string(),
+        ac: (*ac).to_string(),
+        estado: (*estado).to_string(),
+    })
+}
+
+/// Todas las tareas registradas en un review, en orden.
+pub fn tareas_registradas(texto: &str) -> Vec<Tarea> {
+    lineas_fuera_de_bloque(texto)
+        .into_iter()
+        .filter_map(tarea_de_linea)
+        .collect()
+}
+
+/// La cuenta de tareas que la delegacion declaro esperar, si se declaro.
+pub fn tareas_esperadas(texto: &str) -> Option<usize> {
+    lineas_fuera_de_bloque(texto).into_iter().find_map(|l| {
+        let resto = l.trim_start().strip_prefix(SELLO_ESPERADAS)?;
+        resto.split('·').next()?.trim().parse().ok()
+    })
+}
+
+/// Por que la cobertura de la delegacion esta incompleta, o `None` si esta
+/// completa (incluido el caso "no se delego nada", que no es un defecto).
+///
+/// PURA: recibe el texto del review y no toca disco.
+pub fn motivo_delegacion_incompleta(texto: &str) -> Option<String> {
+    let tareas = tareas_registradas(texto);
+    let esperadas = tareas_esperadas(texto);
+    if tareas.is_empty() && esperadas.is_none() {
+        return None;
+    }
+    // El ULTIMO estado de cada tarea es el que vale. El archivo conserva todas
+    // las lineas —el AC-6 pide conservar los identificadores y estados, y borrar
+    // la historia es justo el defecto que cierra—, pero una tarea que fallo y
+    // despues se cubrio no puede quedar bloqueando para siempre: el AC dice
+    // "hasta cubrir la verificacion requerida", no "para siempre".
+    let ultimo: Vec<&Tarea> = {
+        let mut vistos: Vec<&Tarea> = Vec::new();
+        for t in tareas.iter().rev() {
+            if !vistos.iter().any(|v| v.id == t.id) {
+                vistos.push(t);
+            }
+        }
+        vistos.reverse();
+        vistos
+    };
+    let sin_cubrir: Vec<&Tarea> = ultimo.iter().copied().filter(|t| !t.cubre()).collect();
+    let cubiertas = ultimo.len() - sin_cubrir.len();
+
+    if !sin_cubrir.is_empty() {
+        let detalle: Vec<String> = sin_cubrir
+            .iter()
+            .map(|t| format!("{} ({}, {})", t.id, t.ac, t.estado))
+            .collect();
+        return Some(format!(
+            "la delegacion tiene {} tarea(s) sin resultado utilizable: {}.\n                 Se conservan a proposito: una tarea que fallo no es una tarea que no existio.\n                 Cubri esa verificacion —vos o otra tarea— y registra el resultado:\n                   sh harness_cli revision --feature <id> --tarea <id> --tarea-ac <AC-n> --tarea-estado ok",
+            sin_cubrir.len(),
+            detalle.join(", ")
+        ));
+    }
+    match esperadas {
+        Some(n) if cubiertas < n => Some(format!(
+            "la delegacion esperaba {n} tarea(s) y solo {cubiertas} tienen resultado.\n                 Faltan {} sin registrar. Borrar las lineas de las que fallaron no completa la\n                 cobertura: por eso la cuenta esperada se declara antes de delegar.",
+            n - cubiertas
+        )),
+        _ => None,
+    }
+}
+
 /// La linea canonica del sello. La escribe SOLO el binario.
 pub fn linea_sello(veredicto: &str, stamp: &str) -> String {
     format!("{SELLO_REVIEW} {veredicto} · {stamp} · estampado por `harness revision --veredicto`")
@@ -846,6 +982,15 @@ pub fn gate(
                 faltan.join(", "),
                 porque_no_resolvieron(&raices, paths, &texto, &faltan)
             )),
+        });
+    }
+    // AC-6: una tarea delegada que fallo, se cancelo o no dejo evidencia deja el
+    // resultado INCOMPLETO, y eso no se cierra como done por mas que el sello
+    // diga approved.
+    if let Some(motivo) = motivo_delegacion_incompleta(&texto) {
+        return Err(Exit {
+            code: 2,
+            message: Some(format!("[GATE] {rel}: {motivo}")),
         });
     }
     if veredicto != "approved" {
@@ -1261,7 +1406,151 @@ mod tests {
 }
 
 #[cfg(test)]
+mod tests_72 {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+
+    const STAMP: &str = "2026-09-05T00:00:00Z";
+
+    fn review_con(lineas: &[String]) -> String {
+        let mut s = String::from("# Review\n\n");
+        for l in lineas {
+            s.push_str(l);
+            s.push('\n');
+        }
+        s
+    }
+
+    /// Sin delegacion declarada no hay nada que reclamar: la mayoria de las
+    /// features no delegan, y un gate que las molesta se termina apagando.
+    #[test]
+    fn sin_delegacion_no_hay_motivo() {
+        assert_eq!(motivo_delegacion_incompleta("# Review\n\nnada\n"), None);
+    }
+
+    #[test]
+    fn todas_ok_no_hay_motivo() {
+        let r = review_con(&[
+            linea_esperadas(2, STAMP),
+            linea_tarea("rev-a", "AC-1", "ok", STAMP),
+            linea_tarea("rev-b", "AC-2", "ok", STAMP),
+        ]);
+        assert_eq!(motivo_delegacion_incompleta(&r), None);
+    }
+
+    /// El caso del workflow de la #117: tareas que fallaron. Se conservan y
+    /// bloquean.
+    #[test]
+    fn una_tarea_fallida_deja_el_resultado_incompleto() {
+        let r = review_con(&[
+            linea_tarea("refutacion-3", "AC-2", "fallo", STAMP),
+            linea_tarea("rev-a", "AC-1", "ok", STAMP),
+        ]);
+        let m = motivo_delegacion_incompleta(&r).unwrap();
+        assert!(m.contains("refutacion-3"), "nombra la tarea: {m}");
+        assert!(m.contains("AC-2"), "y su AC: {m}");
+        assert!(m.contains("1 tarea(s) sin resultado"), "{m}");
+    }
+
+    /// Los cuatro estados que no son `ok` cuentan igual: lo que importa es que
+    /// no hay resultado que revisar, no el motivo.
+    #[test]
+    fn los_cuatro_estados_que_no_cubren_bloquean() {
+        for estado in ["fallo", "cancelada", "sin-resultado", "sin-evidencia"] {
+            let r = review_con(&[linea_tarea("t", "AC-1", estado, STAMP)]);
+            assert!(
+                motivo_delegacion_incompleta(&r).is_some(),
+                "{estado} tendria que bloquear"
+            );
+        }
+        let r = review_con(&[linea_tarea("t", "AC-1", "ok", STAMP)]);
+        assert_eq!(motivo_delegacion_incompleta(&r), None, "ok si cubre");
+    }
+
+    /// EL test de la feature: borrar las lineas de las tareas fallidas —el
+    /// `filter(Boolean)` del script— no completa la cobertura, porque la cuenta
+    /// esperada se declaro antes.
+    #[test]
+    fn borrar_las_fallidas_no_completa_la_cobertura() {
+        let con_fallos = review_con(&[
+            linea_esperadas(3, STAMP),
+            linea_tarea("a", "AC-1", "ok", STAMP),
+            linea_tarea("b", "AC-2", "fallo", STAMP),
+            linea_tarea("c", "AC-3", "sin-resultado", STAMP),
+        ]);
+        assert!(motivo_delegacion_incompleta(&con_fallos).is_some());
+
+        // Ahora alguien "limpia" los nulos, que es lo que paso de verdad.
+        let filtrado = review_con(&[
+            linea_esperadas(3, STAMP),
+            linea_tarea("a", "AC-1", "ok", STAMP),
+        ]);
+        let m = motivo_delegacion_incompleta(&filtrado)
+            .expect("borrar los fallos NO puede dejarlo completo");
+        assert!(m.contains("esperaba 3"), "{m}");
+        assert!(m.contains("solo 1"), "{m}");
+        assert!(m.contains("Borrar las lineas"), "lo dice explicito: {m}");
+    }
+
+    /// Una tarea que fallo y despues se cubrio DEJA de bloquear, pero su
+    /// historia sigue en el archivo: conservar el registro no es condenar.
+    #[test]
+    fn una_tarea_recuperada_deja_de_bloquear_sin_borrar_su_historia() {
+        let r = review_con(&[
+            linea_esperadas(1, STAMP),
+            linea_tarea("refutacion-3", "AC-2", "fallo", STAMP),
+            linea_tarea("refutacion-3", "AC-2", "ok", STAMP),
+        ]);
+        assert_eq!(
+            motivo_delegacion_incompleta(&r),
+            None,
+            "el ultimo estado manda"
+        );
+        // Y las dos lineas siguen ahi: la historia no se borro.
+        assert_eq!(tareas_registradas(&r).len(), 2);
+    }
+
+    /// Al reves: una tarea que estaba ok y despues se cayo vuelve a bloquear.
+    #[test]
+    fn una_tarea_que_se_cae_despues_vuelve_a_bloquear() {
+        let r = review_con(&[
+            linea_tarea("a", "AC-1", "ok", STAMP),
+            linea_tarea("a", "AC-1", "sin-evidencia", STAMP),
+        ]);
+        assert!(motivo_delegacion_incompleta(&r).is_some());
+    }
+
+    /// Un estado inventado no se acepta como bueno por descuido: la linea no
+    /// parsea, asi que no cuenta como tarea cubierta.
+    #[test]
+    fn un_estado_inventado_no_cuenta_como_cubierta() {
+        let r = review_con(&[
+            linea_esperadas(1, STAMP),
+            "Tarea: x · AC-1 · buenisimo · 2026 · a mano".to_string(),
+        ]);
+        let m = motivo_delegacion_incompleta(&r).unwrap();
+        assert!(m.contains("esperaba 1"), "{m}");
+    }
+
+    /// Como el sello de la #64: una linea dentro de un bloque de codigo es
+    /// documentacion, no un registro.
+    #[test]
+    fn una_tarea_citada_en_un_bloque_no_cuenta() {
+        let r = format!(
+            "# Review\n\nEl formato es:\n```\n{}\n```\n",
+            linea_tarea("ejemplo", "AC-1", "fallo", STAMP)
+        );
+        assert_eq!(
+            motivo_delegacion_incompleta(&r),
+            None,
+            "una cita no puede bloquear el cierre"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests_68 {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     // -----------------------------------------------------------------
