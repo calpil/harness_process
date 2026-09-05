@@ -1194,8 +1194,12 @@ mod tests {
                 // cumpliendose: la feature se prueba sobre si misma, y si el
                 // arreglo se revierte, este AC se vuelve a perder.
                 "68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man.md:AC-8",
+                // Y el noveno es el AC-8 (MANUAL) de la #71, escrito con la
+                // misma forma sin querer probar nada: es la evidencia de que el
+                // arreglo de la #68 sigue haciendo falta en el uso normal.
+                "71-el-close-archiva-el-sello-de-cierre-en-el-worktr.md:AC-8",
             ],
-            "el arreglo trae AC distintos de los siete medidos"
+            "el arreglo trae AC distintos de los medidos en el corpus real"
         );
     }
 

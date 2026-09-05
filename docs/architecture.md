@@ -200,7 +200,14 @@ ausente NUNCA impide cerrar; desde la feature #62 corre en cuatro FASES —lo qu
 puede negarse, los artefactos que viajan en la rama, integrar, y recien despues
 el estado— asi que una integracion fallida no deja el backlog, Jira,
 `progress/`, `history.md` ni las memorias afirmando un cierre que no ocurrio, y
-no hace falta rollback porque no hay nada escrito que revertir),
+no hace falta rollback porque no hay nada escrito que revertir. Desde la #71 el
+SELLO DE CIERRE —`docs/estado-feature-<id>-<slug>.md`, que lleva adentro el cuerpo
+de `progress/current-<id>.md` y es su unica copia porque `progress/` esta
+gitignorado— se escribe en el `docs/` de la RAIZ y en la fase del estado, no en
+el de la feature ni en la fase de los artefactos: escribirlo en la rama
+significaba escribirlo en un worktree que el propio cierre borra, y con un
+`docs/` que es repo aparte eso lo perdia. A cambio, el sello ya no viaja en el
+merge: queda sin commitear en la raiz, y el cierre lo dice),
 `autocheck`, `nudge`, `check_plan`, `check_spec`,
 `prd` (`add` / `tree` / `doctor`), `leccion` (`list` / `show` / `nueva` / `usar`),
 `perfil` (`show` / `add` / `replace` / `remove` / `sugerir` / `check`),

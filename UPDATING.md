@@ -45,6 +45,41 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## El sello de cierre deja de escribirse en el worktree que el cierre borra (feature #71)
+
+Al cerrar, el arnes escribe `docs/estado-feature-<id>-<slug>.md`: el sello del
+cierre, con el cuerpo de `progress/current-<id>.md` adentro. Ese cuerpo es lo
+unico que documenta la evidencia de la feature, y no tiene otra copia porque
+`progress/` esta gitignorado.
+
+Hasta ahora ese archivo se escribia en el `docs/` de la FEATURE —el del
+worktree— y el mismo `close` borraba el worktree a continuacion. Sobrevivia solo
+por una coincidencia: en un repo donde `docs/` es parte del repo principal, el
+merge se lo llevaba antes del borrado. **En un proyecto donde `docs/` es un repo
+git aparte, no viajaba y se perdia.** Paso de verdad al cerrar la #124 de
+realestate: hubo que reconstruir el sello a mano desde `feature_list.json` y
+`history.md`, y el cuerpo literal es irrecuperable.
+
+Ahora:
+
+- El sello se escribe en el `docs/` del repo **PRINCIPAL**, que es donde estan
+  todos los anteriores. Ningun cierre lo borra.
+- Se escribe **despues de integrar**, no antes: una integracion que falla ya no
+  deja un sello afirmando un cierre que no ocurrio.
+- El mensaje del cierre nombra **esa** ruta, y avisa que queda sin commitear:
+
+```
+Feature #12 cerrada como done. Estado archivado en docs/estado-feature-12-cobranza.md
+  (sin commitear: vive en la raiz, no en la rama).
+```
+
+**Lo que cambia para vos:** el sello ya no viaja en el merge. Queda como archivo
+sin commitear en la raiz, igual que la bitacora del PRD, y lo commiteas vos
+cuando corresponda. A cambio, existe siempre — que es lo que antes no pasaba.
+
+**Nada se migra.** Los sellos ya escritos no se mueven, no se reescriben y no se
+borran.
+
 ## El paralelo aisla, y el cierre no publica solo (feature #72)
 
 Un diagnostico del 2026-09-04 encontro tres features (`#98`, `#122`, `#126`)
