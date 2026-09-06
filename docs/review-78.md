@@ -16,7 +16,7 @@ paridad; y leer el ps1 linea a linea contra el sh porque aca no hay `pwsh`.
 | AC-5 | tests/backlog_backup_check.sh · tests/setup_smoke.sh:1702 | CUBIERTO. Los cuatro asertos caen contra HEAD, cada uno por su motivo, y el backlog plantado tiene features y reglas distintas de la plantilla. |
 | AC-6 | setup_harness.ps1:1811-1853, :2050-2058 · tests/parity_check.sh | CUBIERTO con asimetria declarada: el ps1 no se ejecuta en esta maquina (sin `pwsh`); se verifico paridad (10/10) y lectura funcion por funcion (`Get-RelativeBackupName`, `$script:BackupDir`, `$script:Counters.backed_up`, `$script:SurfaceDir` existen y se usan como en `Backup-HarnessPath`). |
 | AC-7 | setup_harness.sh:383 · UPDATING.md:48 | CUBIERTO. Las dos copias de UPDATING.md son identicas (`cmp`). |
-| AC-8 | docs/spec-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md:93 | MANUAL, CUMPLIDO: la politica quedo registrada como decision del usuario ("Decision del usuario (AC-8)"). |
+| AC-8 | docs/spec-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md:93 | MANUAL, CUMPLIDO: la politica quedo registrada como decision del usuario ("Decision del usuario (AC-8)"): mantener el espejo y automatizar su refresco (#79). |
 
 ## Lo que el review tiene que decir
 
@@ -39,11 +39,13 @@ episodios quedaron en `docs/lecciones/criterios-de-cierre-que-se-pueden-fallar.m
 
 ## Decision del usuario (AC-8)
 
-El backlog de `harness_process` esta gitignorado y no tiene espejo. Se le
-pregunto al usuario al cerrar (2026-09-06) si queria versionar uno en
-`docs/bkp-backlog/feature_list.json`, como realestate. Decidio: **dejar como
-esta, solo `bkp/`**. No se abre feature. Queda registrado aca y en el hito 20
-del PRD.
+Se le pregunto al usuario al cerrar (2026-09-06) con la premisa "el backlog de
+`harness_process` no tiene espejo", y la premisa estaba vieja: a las 19:47 la
+otra sesion ya habia commiteado `docs/bkp-backlog/feature_list.json` (78
+fichas; commit `eb6e8a9`, reescrito sin el trailer `Claude-Session:` que
+llevaba contra la regla de UPDATING.md, por decision del usuario). Con eso a la
+vista decidio: **mantener el espejo, y que `close` lo refresque solo** —
+feature #79 en el backlog. Hasta que cierre, el espejo se refresca a mano.
 
 ## Veredicto
 
