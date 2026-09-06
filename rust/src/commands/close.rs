@@ -554,9 +554,6 @@ enum PlanDeIntegracion {
         /// commitear el worktree: lo que se muestra tiene que ser lo que se
         /// integra, y antes del commit todavia falta un commit.
         otras_ramas: Vec<String>,
-        /// El worktree del repo `docs/`, si docs es un repo aparte (feature #72
-        /// / AC-2). El arnes NO lo integra solo: es otro repo del usuario.
-        docs_worktree: Option<std::path::PathBuf>,
     },
 }
 
@@ -585,7 +582,7 @@ fn planificar_integracion(
     to: Option<&str>,
     feature_id: &str,
 ) -> anyhow::Result<PlanDeIntegracion> {
-    let (rama, worktree, docs_worktree) = {
+    let (rama, worktree) = {
         let Some(feature) = feature_at(data, idx).as_object() else {
             return Ok(PlanDeIntegracion::Nada { conservacion: None });
         };
@@ -594,11 +591,6 @@ fn planificar_integracion(
             feature
                 .get("worktree")
                 .and_then(Value::as_str)
-                .map(std::path::PathBuf::from),
-            feature
-                .get("docs_worktree")
-                .and_then(Value::as_str)
-                .filter(|d| !d.trim().is_empty())
                 .map(std::path::PathBuf::from),
         )
     };
@@ -676,7 +668,6 @@ fn planificar_integracion(
         worktree,
         rango,
         otras_ramas: otras,
-        docs_worktree,
     })
 }
 
@@ -730,7 +721,6 @@ fn ejecutar_integracion(
         worktree,
         rango,
         otras_ramas,
-        docs_worktree,
     } = plan
     else {
         if let PlanDeIntegracion::Nada {
@@ -812,24 +802,9 @@ fn ejecutar_integracion(
         println!("  merge LOCAL. No se publico nada: revisa el rango de arriba y, si va,");
         println!("    git -C {} push origin {destino}", principal.display());
     }
-    // Feature #72 / AC-2: si `docs/` es un repo aparte, los artefactos de esta
-    // feature (spec, plan, impl, review) viven en SU worktree, sobre una rama de
-    // ESE repo. El arnes lo commitea para que nada quede sin guardar, pero NO lo
-    // integra ni lo borra: es otro repo del usuario y su destino es una decision
-    // suya, igual que `--to` en el principal. Callarse esto dejaria los
-    // artefactos varados en una rama que nadie nombra.
-    if let Some(dwt) = docs_worktree.as_ref().filter(|d| d.is_dir()) {
-        match crate::git::commit_todo(dwt, &format!("docs(harness): cierre de la feature #{feature_id}")) {
-            Ok(true) => println!("  artefactos de docs commiteados en {}", dwt.display()),
-            Ok(false) => {}
-            Err(err) => println!("  [i] no pude commitear el worktree de docs: {err:#}"),
-        }
-        let rama_docs = crate::git::rama_actual(dwt).unwrap_or_else(|| rama.clone());
-        println!("  [!] `docs/` es un repo APARTE: sus artefactos quedan en la rama {rama_docs}");
-        println!("      de ese repo, sin integrar. El arnes no elige su destino. Cuando lo sepas:");
-        println!("        git -C <repo docs> merge --no-ff {rama_docs}");
-        println!("      El worktree {} NO se borra: adentro esta el review.", dwt.display());
-    }
+    // Feature #77: aca se commiteaba el worktree del repo docs y se avisaba que
+    // sus artefactos quedaban en una rama sin integrar. Ya no hay tal worktree:
+    // con docs aparte, los documentos van a `<raiz>/docs/` desde que se escriben.
 
     // AC-19: se borra el worktree, se conserva la rama.
     if let Some(wt) = worktree {

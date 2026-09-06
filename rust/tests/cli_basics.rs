@@ -5534,45 +5534,86 @@ fn sandbox_git_con_docs_aparte() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
-fn start_should_give_a_separate_docs_repo_its_own_worktree() {
-    // AC-2: cada repo escribible tiene worktree propio de la feature. Sin esto,
-    // el spec se escribia en el `docs/` VACIO del worktree principal (el repo
-    // docs no viaja con el), y ese directorio vacio fue la excusa con la que la
-    // #98 arranco --sin-worktree.
+fn start_should_write_the_docs_of_a_separate_docs_repo_into_docs_itself() {
+    // Feature #77 (AC-1, AC-2). Este test se llamaba
+    // `start_should_give_a_separate_docs_repo_its_own_worktree` y afirmaba que
+    // el repo docs ganaba un worktree por feature (OBS-5 de la #72). El usuario
+    // lo revirtio al ver tres `docs-wt/` en realestate con specs que `docs/`
+    // nunca vio. Ahora: con docs aparte, el spec va DIRECTO a `<raiz>/docs/`,
+    // no hay `docs-wt/`, no hay rama en el repo docs y el backlog no lleva
+    // `docs_worktree`.
     let (dir, bin) = sandbox_git_con_docs_aparte();
     cmd(&bin).args(["add", "--name", "Con Docs"]).assert().success();
     cmd(&bin)
         .args(["start", "--feature", "1"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("docs/ es un repo aparte"));
+        .stdout(predicate::str::contains("docs/ es un repo aparte: spec, plan y evidencia van a"));
 
     let f = feature_en_backlog(dir.path(), "1");
-    let docs_wt = f["docs_worktree"].as_str().unwrap().to_string();
-    let docs_wt = PathBuf::from(&docs_wt);
-    assert!(docs_wt.is_dir(), "el worktree de docs existe: {docs_wt:?}");
+    assert!(f.get("docs_worktree").is_none(), "el backlog no lleva docs_worktree: {f}");
 
-    // El spec nacio EN el worktree de docs, y no en el docs/ compartido.
-    let specs: Vec<String> = std::fs::read_dir(&docs_wt)
+    // El spec esta en docs/, al lado del PRD.
+    let compartido = dir.path().join("docs");
+    let specs: Vec<String> = std::fs::read_dir(&compartido)
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.starts_with("spec-feature-1-"))
         .collect();
-    assert_eq!(specs.len(), 1, "el spec vive en el worktree de docs: {specs:?}");
+    assert_eq!(specs.len(), 1, "el spec vive en docs/: {specs:?}");
 
-    let compartido = dir.path().join("docs");
-    let en_compartido: Vec<String> = std::fs::read_dir(&compartido)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with("spec-feature-"))
-        .collect();
-    assert!(
-        en_compartido.is_empty(),
-        "el docs/ compartido no recibio nada: {en_compartido:?}"
-    );
-    let _ = std::fs::remove_dir_all(dir.path().join("docs-wt"));
+    // No hay docs-wt, y el repo docs no gano ninguna rama.
+    assert!(!dir.path().join("docs-wt").exists(), "no se creo docs-wt/");
+    let ramas = git_en(&compartido, &["branch", "--list"]);
+    assert!(!ramas.contains("feature/1-"), "el repo docs no gano rama: {ramas}");
+}
+
+#[test]
+fn two_parallel_features_with_a_separate_docs_repo_should_both_land_in_docs() {
+    // Feature #77 (AC-6): dos features en paralelo, un solo docs/. No se pisan
+    // porque cada artefacto lleva el id de su feature.
+    let (dir, bin) = sandbox_git_con_docs_aparte();
+    cmd(&bin).args(["add", "--name", "Alpha"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Beta"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
+
+    let docs = dir.path().join("docs");
+    assert!(docs.join("spec-feature-1-alpha.md").is_file());
+    assert!(docs.join("spec-feature-2-beta.md").is_file());
+    assert!(docs.join("plan-feature-1-alpha.md").is_file());
+    assert!(docs.join("plan-feature-2-beta.md").is_file());
+    // Y cada advance va a SU plan, aunque los dos vivan en el mismo directorio.
+    let wt1 = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
+    let wt2 = feature_en_backlog(dir.path(), "2")["worktree"].as_str().unwrap().to_string();
+    cmd(&bin).current_dir(&wt1).args(["advance", "--nota", "solo alpha"]).assert().success();
+    cmd(&bin).current_dir(&wt2).args(["advance", "--nota", "solo beta"]).assert().success();
+    let p1 = std::fs::read_to_string(docs.join("plan-feature-1-alpha.md")).unwrap();
+    let p2 = std::fs::read_to_string(docs.join("plan-feature-2-beta.md")).unwrap();
+    assert!(p1.contains("solo alpha") && !p1.contains("solo beta"), "{p1}");
+    assert!(p2.contains("solo beta") && !p2.contains("solo alpha"), "{p2}");
+}
+
+#[test]
+fn a_stale_docs_worktree_field_in_the_backlog_should_be_ignored() {
+    // Feature #77 (AC-3): una feature arrancada ANTES de esta correccion tiene
+    // `docs_worktree` en el backlog apuntando a un docs-wt que ya no existe (o
+    // que existe, da igual). Se ignora: la feature lee y escribe en docs/.
+    let (dir, bin) = sandbox_git_con_docs_aparte();
+    cmd(&bin).args(["add", "--name", "Vieja"]).assert().success();
+    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+    // Se le planta el campo viejo a mano, como quedo en realestate.
+    let path = dir.path().join("hp/feature_list.json");
+    let mut data: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    data["features"][0]["docs_worktree"] = serde_json::json!(dir.path().join("docs-wt/1-vieja").to_string_lossy());
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+
+    let wt = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
+    cmd(&bin).current_dir(&wt).args(["advance", "--nota", "sigue en docs"]).assert().success();
+    let plan = std::fs::read_to_string(dir.path().join("docs/plan-feature-1-vieja.md")).unwrap();
+    assert!(plan.contains("sigue en docs"), "el advance fue a docs/, no al docs_worktree fantasma: {plan}");
+    assert!(!dir.path().join("docs-wt").exists(), "y no se creo nada en docs-wt");
 }
 
 #[test]

@@ -178,11 +178,14 @@ nada y un rechazo deja el backlog intacto. En concreto:
 - Un `worktree` declarado en el backlog cuya carpeta ya no existe NO cuenta como
   aislamiento.
 
-**2. Un `docs/` que es otro repo git tiene su propio worktree** (`../docs-wt/<id>-<slug>`).
+**2. Un `docs/` que es otro repo git recibe los documentos DIRECTO en `docs/`.**
 Antes quedaba vacio dentro del worktree principal, y ese directorio vacio fue la
-excusa con la que una sesion arranco `--sin-worktree`. Al cerrar, sus artefactos
-se commitean y el arnes **no** los integra ni borra ese worktree: mergear en el
-repo de documentacion del usuario es decision suya, y el cierre te da el comando.
+excusa con la que una sesion arranco `--sin-worktree`. La version original de
+esta feature le daba al repo docs un worktree por feature (`../docs-wt/<id>-<slug>`);
+la #77 lo revirtio, porque cada feature dejaba su spec en una rama del repo docs
+que nadie mergeaba. Ahora spec, plan y evidencia van a `docs/`, junto al PRD y
+el SDD, desde que se escriben. Quedan sin commitear en el repo docs hasta que
+vos commitees, como la bitacora del PRD.
 
 **3. El cierre muestra el rango completo y ya no publica solo.**
 `close --status done --to <rama>` imprime origen, destino y todos los commits que

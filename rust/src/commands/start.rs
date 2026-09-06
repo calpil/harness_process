@@ -94,37 +94,18 @@ fn resolver_aislamiento(
                     },
                 )
             })?;
-            let docs = preparar_docs(paths, &fid, &slug, kind)?;
-            Ok(Resuelto::Aislada(a, docs))
+            Ok(Resuelto::Aislada(a))
         }
     }
 }
 
-/// El worktree del repo `docs/`, cuando docs es un repo aparte (AC-2).
-///
-/// Si docs es su propio repo y no se le puede dar worktree, el arranque se
-/// RECHAZA: caer al `docs/` compartido seria escribir el spec de esta feature
-/// en el arbol de todas, que es justo lo que el AC-2 prohibe. Un `docs/` que
-/// viaja con el repo principal devuelve `None` y no hay nada que preparar.
-fn preparar_docs(
-    paths: &HarnessPaths,
-    fid: &str,
-    slug: &str,
-    kind: Option<&str>,
-) -> anyhow::Result<Option<std::path::PathBuf>> {
-    let Some(repo_docs) = crate::git::repo_de_docs(&paths.repo_root) else {
-        return Ok(None);
-    };
-    match crate::git::preparar(&repo_docs, fid, slug, kind, None) {
-        Ok(a) => Ok(Some(a.worktree)),
-        Err(err) => Err(rechazo(
-            fid,
-            &Rechazo::FalloDeGit {
-                detalle: format!("docs/ es un repo aparte y no se le pudo dar worktree: {err:#}"),
-            },
-        )),
-    }
-}
+// Feature #77: aca vivia `preparar_docs`, que le daba al repo `docs/` su propio
+// worktree (`../docs-wt/<id>-<slug>`) cuando docs era un repo aparte (OBS-5 de
+// la #72). El precio era que cada feature dejaba su documentacion en una rama
+// del repo docs que nadie mergeaba: en realestate, tres features y ningun spec
+// en `docs/`. El usuario revirtio esa decision: con docs aparte, los documentos
+// van DIRECTO a `<raiz>/docs/`, como el PRD, el SDD y el sello de cierre.
+// `paths::para_feature` es quien lo resuelve; aca no hay nada que preparar.
 
 /// Un rechazo del AC-1, con la forma que ya usa el resto del arnes: exit 1 y
 /// un mensaje que dice que hacer.
@@ -138,8 +119,8 @@ fn rechazo(fid: &str, r: &Rechazo) -> anyhow::Error {
 
 /// Lo que quedo resuelto para esta feature.
 enum Resuelto {
-    /// Rama y worktree propios, y —si docs es un repo aparte— su worktree.
-    Aislada(crate::git::Aislamiento, Option<std::path::PathBuf>),
+    /// Rama y worktree propios.
+    Aislada(crate::git::Aislamiento),
     SinAislar(NoAislado),
 }
 
@@ -174,21 +155,13 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
         feature.insert("status".to_string(), json!("in_progress"));
         feature.insert("started_at".to_string(), json!(now_stamp()));
         match &resuelto {
-            Resuelto::Aislada(a, docs) => {
+            Resuelto::Aislada(a) => {
                 feature.insert("branch".to_string(), json!(a.rama));
                 feature.insert(
                     "worktree".to_string(),
                     json!(a.worktree.to_string_lossy().to_string()),
                 );
                 feature.insert("aislada".to_string(), json!(true));
-                // AC-2: donde vive el docs/ de ESTA feature. Sin este campo,
-                // `para_feature` apuntaria al docs vacio del worktree.
-                if let Some(d) = docs {
-                    feature.insert(
-                        "docs_worktree".to_string(),
-                        json!(d.to_string_lossy().to_string()),
-                    );
-                }
             }
             // Queda ESCRITO que no esta aislada: es lo que despues lee
             // `ocupaciones` para negarle el paralelo a la siguiente.
@@ -284,12 +257,13 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
     crate::progress::touch_autocheck_stamp_de(paths, &feature_id);
     println!("Feature #{feature_id} iniciada. Plan: {rel_plan}");
     match &resuelto {
-        Resuelto::Aislada(a, docs) => {
+        Resuelto::Aislada(a) => {
             let verbo = if a.reusado { "reusados" } else { "creados" };
             println!("  Rama y worktree {verbo}: {} en {}", a.rama, a.worktree.display());
             println!("  Trabaja ahi: cd {}", a.worktree.display());
-            if let Some(d) = docs {
-                println!("  docs/ es un repo aparte: su worktree es {}", d.display());
+            // Feature #77: con docs aparte, los documentos van a la raiz.
+            if crate::git::repo_de_docs(&paths.repo_root).is_some() {
+                println!("  docs/ es un repo aparte: spec, plan y evidencia van a {}", paths.plans.display());
             }
         }
         // AC-1: no aislada se DICE, no se insinua entre parentesis.

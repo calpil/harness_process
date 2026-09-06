@@ -46,24 +46,25 @@ impl HarnessPaths {
     /// siempre. El ESTADO (`feature_list.json`, `progress/`) no cambia nunca:
     /// es unico y del repo principal (AC-7).
     pub fn para_feature(&self, feature: &serde_json::Map<String, serde_json::Value>) -> HarnessPaths {
-        // Feature #72 / AC-2: si `docs/` es un repo aparte, la feature tiene su
-        // PROPIO worktree de docs y manda ese. Sin esta rama, el `docs/` del
-        // worktree principal esta vacio —el repo docs no viaja con el— y el
-        // spec terminaba escrito en un directorio muerto, o peor, de vuelta en
-        // el docs/ compartido de todas las features.
-        let docs_propio = feature
-            .get("docs_worktree")
-            .and_then(serde_json::Value::as_str)
-            .filter(|d| !d.trim().is_empty())
-            .map(PathBuf::from);
-        let plans = match docs_propio {
-            Some(d) => d,
-            None => feature
+        // Feature #77: con `docs/` como repo APARTE, los documentos de la feature
+        // van a `<raiz>/docs/`, como el PRD, el SDD y el sello de cierre. Es lo
+        // que el usuario espera ver junto al PRD, y es donde no chocan: los
+        // artefactos tienen nombre por feature. La #72 le daba al repo docs su
+        // propio worktree (`docs_worktree`) y cada feature dejaba su spec en una
+        // rama que nadie mergeaba; ese campo, si sigue en el backlog de una
+        // feature vieja, se IGNORA a proposito.
+        //
+        // Con `docs/` como parte del repo principal, nada cambia: el worktree de
+        // la feature tiene su `docs/`, y los documentos viajan en la rama.
+        let plans = if crate::git::repo_de_docs(&self.repo_root).is_some() {
+            self.repo_root.join("docs")
+        } else {
+            feature
                 .get("worktree")
                 .and_then(serde_json::Value::as_str)
                 .map(|wt| PathBuf::from(wt).join("docs"))
                 .filter(|docs| docs.parent().is_some_and(Path::exists))
-                .unwrap_or_else(|| self.plans.clone()),
+                .unwrap_or_else(|| self.plans.clone())
         };
         HarnessPaths {
             root: self.root.clone(),
