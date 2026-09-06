@@ -566,8 +566,13 @@ en el `docs/` de la RAIZ, sin carpetas `specs/NNN/`).
   mueven los docs que quedaron en `<harness>/docs/` de instalaciones previas,
   solo cuando faltan en la raiz; si ya existen, avisan y no pisan nada.
 - `--reset` borra los docs generados del arnes en ambas ubicaciones (nueva y
-  vieja) y conserva la constitution, los dotfiles Kimi y los artefactos de
-  feature.
+  vieja) y conserva la constitution, los dotfiles Kimi, los artefactos de
+  feature, y (feature #78) el backlog y `progress/`: `feature_list.json`,
+  `progress/current*.md` y `progress/history.md` no estan en los reset targets
+  y se respaldan en `bkp/` en TODA corrida (`backup_datos` sh /
+  `Backup-HarnessData` ps1) en un paso que `--force` no saltea; si faltan, la
+  siembra (`sembrar_dato_avisando` / `Install-HarnessDataIfMissing`) avisa en
+  `[WARN]` y nombra los respaldos de `bkp/` y `docs/bkp-backlog/`.
 
 ## Memory Hub
 

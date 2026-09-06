@@ -1805,7 +1805,52 @@ function Archive-LegacyHub {
     $script:Counters.backed_up++
 }
 
+# Feature #78: los DATOS del proyecto se respaldan en TODA corrida, antes de
+# tocar nada, y -Force no lo saltea: -Force significa "no respaldes lo que vas a
+# regenerar"; el backlog y progress/ no se regeneran. Paridad con backup_datos().
+function Backup-HarnessData {
+    $datos = @("feature_list.json", "progress/current.md", "progress/history.md")
+    $vivos = Get-ChildItem -LiteralPath (Join-Path $script:HarnessDir "progress") -Filter "current-*.md" -ErrorAction SilentlyContinue
+    if ($vivos) { $datos += ($vivos | ForEach-Object { "progress/" + $_.Name }) }
+    foreach ($dato in $datos) {
+        $origen = Join-Path $script:HarnessDir $dato
+        if (-not (Test-Path -LiteralPath $origen)) { continue }
+        if ($DryRun) { Write-HarnessLog INFO "[DRY-RUN] Backup de datos: $dato"; continue }
+        $relative = Get-RelativeBackupName -Target $origen
+        $destino = Join-Path $script:BackupDir ("{0}.bak.{1}" -f $relative, (Get-Date -Format "yyyyMMddHHmmssfff"))
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destino) -Force | Out-Null
+        Copy-Item -LiteralPath $origen -Destination $destino -Force
+        Write-HarnessLog INFO "Backup de datos (no lo saltea -Force): $destino"
+        $script:Counters.backed_up++
+    }
+}
+
+# Feature #78: si un dato del proyecto FALTA, se siembra la plantilla para que
+# la instalacion termine, pero NUNCA en silencio. Paridad con sembrar_dato_avisando().
+function Install-HarnessDataIfMissing {
+    param([string]$Asset)
+    $destination = Join-Path $script:HarnessDir $Asset
+    if (Test-Path -LiteralPath $destination) { $script:Counters.skipped++; return }
+    Write-HarnessLog WARN "FALTA ${Asset}: se siembra la plantilla VACIA. Si este proyecto ya tenia backlog, esto es una perdida, no una instalacion nueva."
+    $hubo = $false
+    $nombre = Split-Path -Leaf $Asset
+    $candidatos = @()
+    $candidatos += Get-ChildItem -LiteralPath $script:BackupDir -Filter ("{0}.bak.*" -f $nombre) -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+    $espejo = Join-Path $script:SurfaceDir ("docs/bkp-backlog/" + $nombre)
+    if (Test-Path -LiteralPath $espejo) { $candidatos += $espejo }
+    foreach ($c in $candidatos) {
+        $hubo = $true
+        $cuenta = "(no es un backlog JSON)"
+        try { $j = Get-Content -LiteralPath $c -Raw | ConvertFrom-Json; $cuenta = "{0} feature(s), {1} regla(s)" -f @($j.features).Count, @($j.rules.PSObject.Properties).Count } catch {}
+        Write-HarnessLog WARN "    respaldo: $c  [$cuenta]"
+    }
+    if ($hubo) { Write-HarnessLog WARN "    para volver: Copy-Item <respaldo> $destination   (y re-corre el instalador)" }
+    else { Write-HarnessLog WARN "    no se encontro ningun respaldo en $($script:BackupDir) ni en docs/bkp-backlog/" }
+    Install-HarnessAsset -Asset $Asset -Destination $destination
+}
+
 function Invoke-HarnessReset {
+    Backup-HarnessData   # feature #78: antes de borrar ninguna superficie
     Ensure-HarnessGitIgnore
     $targets = @(
         "CLAUDE.md",
@@ -1843,9 +1888,10 @@ function Invoke-HarnessReset {
     )
     $targets += @(
         (Join-Path $script:HarnessDir "roles"),
-        (Join-Path $script:HarnessDir "progress"),
-        (Join-Path $script:HarnessDir "CHECKPOINTS.md"),
-        (Join-Path $script:HarnessDir "feature_list.json")
+        (Join-Path $script:HarnessDir "CHECKPOINTS.md")
+        # Feature #78: feature_list.json y progress NO estan aca. No son superficie
+        # generada: son los unicos datos del proyecto que el instalador no puede
+        # regenerar. Paridad con reset_targets de setup_harness.sh.
     )
     # Solo los docs GENERADOS (desde templates/docs/), en el docs/ de la RAIZ. NO
     # barremos docs/ entero: ahi conviven la constitution del usuario ("un
@@ -2001,6 +2047,7 @@ try {
             "roles/reviewer.md"
         )
     }
+    Backup-HarnessData   # feature #78: los datos, antes de tocar nada
     foreach ($asset in $generatedAssets) {
         $destination = Join-Path $script:HarnessDir $asset
         Backup-HarnessPath -Target $destination
@@ -2008,7 +2055,7 @@ try {
     }
     if ($script:WithSubagents) {
         foreach ($asset in @("feature_list.json", "progress/current.md", "progress/history.md")) {
-            Install-HarnessAssetIfMissing -Asset $asset
+            Install-HarnessDataIfMissing -Asset $asset   # feature #78: nunca en silencio
         }
         # Feature #64: paridad con migrate_rules() de setup_harness.sh.
         Migrate-HarnessRules -Target (Join-Path $script:HarnessDir "feature_list.json")

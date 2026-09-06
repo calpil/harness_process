@@ -1694,3 +1694,11 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get
 # ...pero NO le pisan el valor que el usuario habia apagado, ni le tocan las features.
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("rules",{}).get("require_spec_approved") is False else 1)' "$MIGRATE_RULES/feature_list.json"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if len(d.get("features",[])) == 1 else 1)' "$MIGRATE_RULES/feature_list.json"
+
+# Feature #78: el instalador no puede dejar el backlog sin respaldo, ni borrarlo
+# con --reset, ni sembrarlo en silencio cuando falta. Cuatro modos, cada uno
+# probado en rojo contra el instalador previo. Es un check aparte para poder
+# correrlo solo (bash tests/backlog_backup_check.sh <modo>).
+HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/backlog_backup_check.sh" todos \
+    || { echo "[FALLO] backlog_backup_check: ver arriba"; exit 1; }
+echo "[Ok] Backlog #78: --reset no lo borra, toda corrida lo respalda (tambien con --force), y la siembra sobre un backlog ausente avisa."
