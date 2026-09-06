@@ -274,3 +274,4 @@ con su fecha.>
 - #75 el backlog no sabe de dependencias ni de features que se traban una y otra vez -> done 2026-09-05 · spec: docs/spec-feature-75-el-backlog-no-sabe-de-dependencias-ni-de-feature.md · impl: docs/impl-75.md
 - #76 una feature sin worktree veta a todas las demas y mata el paralelismo -> done 2026-09-06 · spec: docs/spec-feature-76-una-feature-sin-worktree-veta-a-todas-las-demas-.md · impl: docs/impl-76.md
 - #77 con docs/ como repo aparte, el arnes escribe directo en docs/ y no crea docs-wt -> done 2026-09-06 · spec: docs/spec-feature-77-con-docs-como-repo-aparte-el-arnes-escribe-direc.md · impl: docs/impl-77.md
+- #78 el instalador respalda sus scripts pero no el backlog, que es lo unico irrecuperable -> done 2026-09-06 · spec: docs/spec-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md · impl: docs/impl-78.md
