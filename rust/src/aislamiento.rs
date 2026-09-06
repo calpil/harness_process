@@ -71,8 +71,8 @@ impl NoAislado {
         };
         format!(
             "  [!] Feature NO AISLADA ({porque}): se escribe en el checkout compartido.\n      \
-             Mientras siga abierta, el arnes no va a permitir arrancar otra: sin worktree\n      \
-             no hay forma de atribuir un cambio a una feature."
+             Mientras siga abierta, ninguna OTRA puede escribir ahi: sin worktree no hay forma\n      \
+             de atribuir un cambio a una feature. Las que traigan su worktree arrancan igual."
         )
     }
 }
@@ -81,9 +81,14 @@ impl NoAislado {
 /// que el mensaje diga que hacer, y no solo que algo salio mal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rechazo {
-    /// `--sin-worktree` con otra feature abierta: el bypass inseguro del AC-1.
-    BypassEnParalelo { otras: Vec<String> },
-    /// Ya hay una feature escribiendo en el checkout compartido.
+    /// Ya hay una feature escribiendo en el checkout compartido, y esta
+    /// tambien lo haria: el checkout compartido tiene capacidad UNO.
+    ///
+    /// Feature #76: aca habia una segunda variante, `BypassEnParalelo`, para
+    /// `--sin-worktree` con CUALQUIER otra feature abierta. Era mas ancha de lo
+    /// que la evidencia aguantaba —el incidente fueron cuatro features sin
+    /// worktree en el MISMO arbol, no una aislada conviviendo con una que no—
+    /// y dejaba a una feature sin worktree vetando a las que si lo traian.
     OcupanteSinAislar { otra: String },
     /// Dos features apuntando al MISMO worktree.
     CheckoutCompartido { otra: String, ruta: PathBuf },
@@ -94,21 +99,13 @@ pub enum Rechazo {
 impl Rechazo {
     pub fn mensaje(&self) -> String {
         match self {
-            Self::BypassEnParalelo { otras } => format!(
-                "--sin-worktree con otra feature abierta ({}).\n\
-                 Dos features en el mismo checkout mezclan sus cambios: es como se publico\n\
-                 un commit que se habia acordado dejar local (diagnostico 2026-09-04, seccion 3).\n\
-                 Salidas:\n\
-                 \x20 1. Arranca con worktree (sin el flag): cada feature en el suyo.\n\
-                 \x20 2. Cerra o pausa la otra feature primero, si de verdad queres trabajar serial.",
-                otras.join(", ")
-            ),
             Self::OcupanteSinAislar { otra } => format!(
-                "la feature {otra} esta abierta SIN worktree, escribiendo en el checkout compartido.\n\
-                 Arrancar una segunda ahi deja sus cambios entremezclados y sin dueno atribuible.\n\
+                "la feature {otra} ya esta escribiendo en el checkout compartido, y esta tambien lo haria.\n\
+                 Dos features en el mismo arbol mezclan sus cambios sin dueno atribuible: es como se\n\
+                 publico un commit que se habia acordado dejar local (diagnostico 2026-09-04, seccion 3).\n\
                  Salidas:\n\
-                 \x20 1. Cerra {otra}, o\n\
-                 \x20 2. Volve a arrancarla con worktree para que libere el checkout compartido."
+                 \x20 1. Arranca ESTA con worktree (sin --sin-worktree): tendra su propio arbol.\n\
+                 \x20 2. O cerra {otra}, o volve a arrancarla con worktree, para liberar el checkout."
             ),
             Self::CheckoutCompartido { otra, ruta } => format!(
                 "ese worktree ya es de la feature {otra}: {}\n\
@@ -131,8 +128,10 @@ impl Rechazo {
 /// Lo que `start` tiene que hacer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
-    /// Crear (o reusar) rama y worktree.
-    Aislar,
+    /// Crear (o reusar) rama y worktree. `conviven_sin_aislar` son las
+    /// features abiertas que escriben en el checkout compartido: no impiden
+    /// este arranque —esta tiene su arbol— pero se INFORMAN (feature #76).
+    Aislar { conviven_sin_aislar: Vec<String> },
     /// Seguir sin aislamiento, declarandolo.
     Seguir(NoAislado),
     /// No arrancar. El backlog no se toca.
@@ -146,10 +145,21 @@ pub enum Decision {
 /// (una ocupante sin aislar), para que el mensaje hable de su comando y no de
 /// un estado que el no eligio en esta corrida.
 pub fn decidir(ctx: &Contexto) -> Decision {
-    // Sin git no hay worktrees que repartir. Sigue siendo un estado valido
-    // —el arnes corre en proyectos sin git—, pero uno solo a la vez.
+    // Feature #76: el checkout compartido es un recurso de capacidad UNO. Lo
+    // unico que se rechaza es que DOS features escriban ahi. Una feature con
+    // su propio worktree no comparte nada con una que no lo tiene —escriben en
+    // directorios distintos— asi que nunca se estorban.
+    //
+    // Antes de la #76 una feature sin aislar vetaba a TODAS las demas, y el
+    // usuario terminaba esperando a que "la #99 libere" para poder arrancar
+    // una feature que tenia su propio arbol. Era una regla mas ancha de lo que
+    // el incidente original sostenia.
+    let ocupante = ctx.otras.iter().find(|o| !o.aislada());
+
+    // Sin git no hay worktrees que repartir: esta feature va a escribir en el
+    // checkout compartido, y ahi TODAS las abiertas escriben. Una a la vez.
     let Some(_repo) = ctx.repo else {
-        return match primera_ocupante(ctx.otras) {
+        return match ctx.otras.first() {
             Some(o) => Decision::Rechazar(Rechazo::OcupanteSinAislar {
                 otra: o.etiqueta(),
             }),
@@ -157,20 +167,15 @@ pub fn decidir(ctx: &Contexto) -> Decision {
         };
     };
 
+    // `--sin-worktree`: esta va a ocupar el checkout compartido. Solo se
+    // rechaza si YA hay otra ahi; una feature aislada al lado no molesta.
     if ctx.sin_worktree {
-        let otras: Vec<String> = ctx.otras.iter().map(Ocupacion::etiqueta).collect();
-        if !otras.is_empty() {
-            return Decision::Rechazar(Rechazo::BypassEnParalelo { otras });
-        }
-        return Decision::Seguir(NoAislado::SerialSinWorktree);
-    }
-
-    // Una feature abierta sin aislar tiene tomado el checkout compartido: no
-    // hay paralelo de escritura contra ella, ni aunque esta si traiga worktree.
-    if let Some(o) = ctx.otras.iter().find(|o| !o.aislada()) {
-        return Decision::Rechazar(Rechazo::OcupanteSinAislar {
-            otra: o.etiqueta(),
-        });
+        return match ocupante {
+            Some(o) => Decision::Rechazar(Rechazo::OcupanteSinAislar {
+                otra: o.etiqueta(),
+            }),
+            None => Decision::Seguir(NoAislado::SerialSinWorktree),
+        };
     }
 
     if let Some(destino) = &ctx.destino
@@ -185,12 +190,16 @@ pub fn decidir(ctx: &Contexto) -> Decision {
         });
     }
 
-    Decision::Aislar
-}
-
-/// La primera feature abierta, aislada o no. Sin git, cualquiera ocupa.
-fn primera_ocupante(otras: &[Ocupacion]) -> Option<&Ocupacion> {
-    otras.first()
+    // Esta tiene su arbol. Si hay una sin aislar, se INFORMA: no la bloquea,
+    // pero quien arranca tiene derecho a saber que el checkout esta ocupado.
+    Decision::Aislar {
+        conviven_sin_aislar: ctx
+            .otras
+            .iter()
+            .filter(|o| !o.aislada())
+            .map(Ocupacion::etiqueta)
+            .collect(),
+    }
 }
 
 /// Compara rutas por identidad real, con fallback lexico: dos features pueden
@@ -230,11 +239,17 @@ mod tests {
 
     const REPO: &str = "/tmp/proyecto";
 
+    fn aislar_sola() -> Decision {
+        Decision::Aislar {
+            conviven_sin_aislar: Vec::new(),
+        }
+    }
+
     #[test]
     fn con_git_y_sola_se_aisla() {
         let sin_otras: [Ocupacion; 0] = [];
         let c = ctx(Some(Path::new(REPO)), Some("/tmp/p-wt/72-x"), &sin_otras, false);
-        assert_eq!(decidir(&c), Decision::Aislar);
+        assert_eq!(decidir(&c), aislar_sola());
     }
 
     #[test]
@@ -243,7 +258,26 @@ mod tests {
         // no se estorban. El spec pide acotar el paralelo, no apagarlo.
         let otras = [ocupacion("70", Some("/tmp/p-wt/70-y"))];
         let c = ctx(Some(Path::new(REPO)), Some("/tmp/p-wt/72-x"), &otras, false);
-        assert_eq!(decidir(&c), Decision::Aislar);
+        assert_eq!(decidir(&c), aislar_sola());
+    }
+
+    /// Feature #76, EL caso reportado: una feature abierta sin worktree y otra
+    /// que SI trae el suyo. Escriben en directorios distintos, asi que la
+    /// segunda arranca — y se le INFORMA que la primera esta sin aislar.
+    ///
+    /// Antes de la #76 esto se rechazaba, y el usuario terminaba escribiendo
+    /// "avisame cuando la #99 libere y arranca".
+    #[test]
+    fn con_worktree_propio_convive_con_una_sin_aislar() {
+        let otras = [ocupacion("99", None)];
+        let c = ctx(Some(Path::new(REPO)), Some("/tmp/p-wt/72-x"), &otras, false);
+        assert_eq!(
+            decidir(&c),
+            Decision::Aislar {
+                conviven_sin_aislar: vec!["#99 la 99".to_string()]
+            },
+            "arranca, y sabe con quien convive"
+        );
     }
 
     #[test]
@@ -253,37 +287,67 @@ mod tests {
         assert_eq!(decidir(&c), Decision::Seguir(NoAislado::SerialSinWorktree));
     }
 
+    /// Feature #76: `--sin-worktree` con otra feature que SI tiene worktree.
+    /// Esta ocuparia el checkout compartido SOLA: arranca, declarada no
+    /// aislada.
+    ///
+    /// Este test se llamaba `sin_worktree_con_otra_abierta_se_rechaza` y
+    /// afirmaba el rechazo. Codificaba la regla ancha de la #72.
     #[test]
-    fn sin_worktree_con_otra_abierta_se_rechaza() {
-        // El caso exacto del diagnostico: #121, #122, #126 y #98 arrancadas
-        // con --sin-worktree sobre el mismo checkout.
+    fn sin_worktree_junto_a_una_aislada_arranca_serial() {
         let otras = [ocupacion("122", Some("/tmp/p-wt/122-y"))];
+        let c = ctx(Some(Path::new(REPO)), None, &otras, true);
+        assert_eq!(decidir(&c), Decision::Seguir(NoAislado::SerialSinWorktree));
+    }
+
+    /// El caso exacto del diagnostico: #121, #122, #126 y #98 arrancadas con
+    /// --sin-worktree sobre el MISMO checkout. Dos sin aislar: se rechaza.
+    #[test]
+    fn dos_sin_aislar_en_el_mismo_checkout_se_rechazan() {
+        let otras = [ocupacion("122", None)];
         let c = ctx(Some(Path::new(REPO)), None, &otras, true);
         let Decision::Rechazar(r) = decidir(&c) else {
             panic!("tenia que rechazar");
         };
         assert_eq!(
             r,
-            Rechazo::BypassEnParalelo {
-                otras: vec!["#122 la 122".to_string()]
+            Rechazo::OcupanteSinAislar {
+                otra: "#122 la 122".to_string()
             }
         );
-        // El mensaje nombra a la otra feature y ofrece las dos salidas.
+        // El mensaje nombra a la otra y ofrece la salida que de verdad resuelve:
+        // arrancar ESTA con worktree.
         let m = r.mensaje();
         assert!(m.contains("#122"), "nombra la otra: {m}");
-        assert!(m.contains("Arranca con worktree"), "dice que hacer: {m}");
+        assert!(m.contains("Arranca ESTA con worktree"), "dice que hacer: {m}");
     }
 
+    /// La tabla completa del spec de la #76, en un solo lugar.
     #[test]
-    fn una_ocupante_sin_aislar_bloquea_a_la_siguiente() {
-        // AC-1: el uso serial sin worktree NO habilita paralelo de escritura.
-        let otras = [ocupacion("98", None)];
-        let c = ctx(Some(Path::new(REPO)), Some("/tmp/p-wt/72-x"), &otras, false);
+    fn la_tabla_del_checkout_de_capacidad_uno() {
+        let aislada = ocupacion("1", Some("/tmp/p-wt/1-a"));
+        let sin_aislar = ocupacion("2", None);
+        let repo = Some(Path::new(REPO));
+        let dest = Some("/tmp/p-wt/9-z");
+        // nueva CON worktree, ya hay otra sin aislar -> ARRANCA e informa
+        assert!(matches!(
+            decidir(&ctx(repo, dest, std::slice::from_ref(&sin_aislar), false)),
+            Decision::Aislar { conviven_sin_aislar } if conviven_sin_aislar.len() == 1
+        ));
+        // nueva CON worktree, no hay otra sin aislar -> ARRANCA
         assert_eq!(
-            decidir(&c),
-            Decision::Rechazar(Rechazo::OcupanteSinAislar {
-                otra: "#98 la 98".to_string()
-            })
+            decidir(&ctx(repo, dest, std::slice::from_ref(&aislada), false)),
+            aislar_sola()
+        );
+        // nueva SIN aislar, ya hay otra sin aislar -> RECHAZO
+        assert!(matches!(
+            decidir(&ctx(repo, None, std::slice::from_ref(&sin_aislar), true)),
+            Decision::Rechazar(Rechazo::OcupanteSinAislar { .. })
+        ));
+        // nueva SIN aislar, no hay otra sin aislar -> ARRANCA declarada
+        assert_eq!(
+            decidir(&ctx(repo, None, std::slice::from_ref(&aislada), true)),
+            Decision::Seguir(NoAislado::SerialSinWorktree)
         );
     }
 
@@ -329,6 +393,8 @@ mod tests {
             let a = n.aviso();
             assert!(a.contains("NO AISLADA"), "{a}");
             assert!(a.contains("checkout compartido"), "{a}");
+            // Feature #76: el aviso ya no puede prometer que bloquea a TODAS.
+            assert!(a.contains("traigan su worktree arrancan igual"), "{a}");
         }
     }
 

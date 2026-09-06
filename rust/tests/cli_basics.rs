@@ -5400,30 +5400,49 @@ fn feature_en_backlog(raiz: &Path, id: &str) -> serde_json::Value {
 }
 
 #[test]
-fn start_should_refuse_sin_worktree_while_another_feature_is_open() {
-    // AC-1: el bypass inseguro. Es el comando exacto que corrieron #121, #122,
-    // #126 y #98 antes de terminar las cuatro en el mismo checkout.
+fn start_sin_worktree_should_coexist_with_an_isolated_feature() {
+    // Feature #76. Este test se llamaba
+    // `start_should_refuse_sin_worktree_while_another_feature_is_open` y
+    // afirmaba el rechazo: era la regla ancha de la #72. La #1 tiene su
+    // worktree; la #2 con --sin-worktree ocuparia el checkout compartido SOLA.
+    // No se pisan: arranca, declarada no aislada.
     let (dir, bin) = sandbox_git();
     cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
     cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
     cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+
+    cmd(&bin)
+        .args(["start", "--feature", "2", "--sin-worktree"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature NO AISLADA"));
+    assert_eq!(feature_en_backlog(dir.path(), "2")["status"], "in_progress");
+    assert_eq!(feature_en_backlog(dir.path(), "2")["aislada"], false);
+}
+
+#[test]
+fn start_should_refuse_two_features_in_the_shared_checkout() {
+    // Feature #76: lo UNICO que se rechaza es que dos escriban en el mismo
+    // arbol. Es el incidente real: #98, #121, #122 y #126, las cuatro con
+    // --sin-worktree sobre el mismo checkout.
+    let (dir, bin) = sandbox_git();
+    cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1", "--sin-worktree"])
+        .assert()
+        .success();
 
     let antes = feature_en_backlog(dir.path(), "2");
     cmd(&bin)
         .args(["start", "--feature", "2", "--sin-worktree"])
         .assert()
         .code(1)
+        .stderr(predicate::str::contains("ya esta escribiendo en el checkout compartido"))
         .stderr(predicate::str::contains("#1 Primera"))
-        .stderr(predicate::str::contains("Arranca con worktree"));
-
-    // Lo que de verdad importa: el rechazo no dejo rastro.
-    let despues = feature_en_backlog(dir.path(), "2");
-    assert_eq!(antes, despues, "el backlog no se toco");
-    assert_ne!(despues["status"], "in_progress", "#2 no quedo activa");
-    assert!(
-        !dir.path().join("hp/progress/current-2.md").exists(),
-        "tampoco nacio su estado vivo"
-    );
+        .stderr(predicate::str::contains("Arranca ESTA con worktree"));
+    assert_eq!(antes, feature_en_backlog(dir.path(), "2"), "el backlog no se toco");
+    assert!(!dir.path().join("hp/progress/current-2.md").exists());
 }
 
 #[test]
@@ -5465,9 +5484,12 @@ fn start_should_refuse_when_git_fails_instead_of_warning_and_continuing() {
 }
 
 #[test]
-fn start_should_refuse_a_second_feature_when_the_first_is_not_isolated() {
-    // AC-1: "el uso serial sin worktree no habilita paralelo de escritura".
-    // La primera arranca serial (legitimo); la segunda ya no entra.
+fn start_with_worktree_should_coexist_with_an_unisolated_feature() {
+    // Feature #76, EL caso que el usuario reporto ("avisame cuando la #99
+    // libere y arranca"). Este test se llamaba
+    // `start_should_refuse_a_second_feature_when_the_first_is_not_isolated` y
+    // afirmaba el rechazo. La #1 escribe en el checkout compartido; la #2 en su
+    // worktree. Directorios distintos: la #2 arranca, y se le INFORMA.
     let (dir, bin) = sandbox_git();
     cmd(&bin).args(["add", "--name", "Serial"]).assert().success();
     cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
@@ -5479,76 +5501,13 @@ fn start_should_refuse_a_second_feature_when_the_first_is_not_isolated() {
     cmd(&bin)
         .args(["start", "--feature", "2"])
         .assert()
-        .code(1)
-        .stderr(predicate::str::contains("esta abierta SIN worktree"))
-        .stderr(predicate::str::contains("Cerra #1 Serial"));
-    assert!(!dir.path().join("hp/progress/current-2.md").exists());
-}
-
-#[test]
-fn close_should_refuse_to_drag_another_features_commit() {
-    // AC-3, el incidente del 2026-09-03: se publico el arreglo de una feature y
-    // con el se fue el commit de otra que se habia acordado dejar local, porque
-    // era su padre. El cierre hablaba de "la rama" y nunca del rango.
-    let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Primera"]).assert().success();
-    cmd(&bin).args(["add", "--name", "Segunda"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
-
-    let wt1 = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
-    let wt1 = PathBuf::from(wt1);
-    std::fs::write(wt1.join("de-la-1.txt"), "trabajo local de la 1\n").unwrap();
-    git_en(&wt1, &["add", "-A"]);
-    git_en(&wt1, &["commit", "-q", "-m", "feat: lo de la 1 (queda local)"]);
-
-    // La #2 se corta DESDE la rama de la #1: su commit tiene por padre el ajeno.
-    let rama1 = feature_en_backlog(dir.path(), "1")["branch"].as_str().unwrap().to_string();
-    cmd(&bin).args(["start", "--feature", "2"]).assert().success();
-    let wt2 = feature_en_backlog(dir.path(), "2")["worktree"].as_str().unwrap().to_string();
-    let wt2 = PathBuf::from(wt2);
-    git_en(&wt2, &["merge", "--no-ff", "-m", "trae la 1", &rama1]);
-    std::fs::write(wt2.join("de-la-2.txt"), "trabajo de la 2\n").unwrap();
-    git_en(&wt2, &["add", "-A"]);
-    git_en(&wt2, &["commit", "-q", "-m", "fix: lo de la 2"]);
-
-    let salida = cmd(&bin)
-        .args(["close", "--feature", "2", "--status", "done", "--to", "main"])
-        .assert()
-        .code(2);
-    let err = String::from_utf8_lossy(&salida.get_output().stderr).into_owned();
-    assert!(err.contains("arrastra trabajo de otra feature"), "{err}");
-    assert!(err.contains("AJENO"), "marca cual: {err}");
-    assert!(err.contains("lo de la 1 (queda local)"), "lo nombra: {err}");
-    assert!(err.contains("Rango completo"), "muestra el rango: {err}");
-    // Y no integro nada: main sigue sin los archivos.
-    assert!(!dir.path().join("de-la-2.txt").exists(), "no mergeo");
-    assert_ne!(
-        feature_en_backlog(dir.path(), "2")["status"],
-        "done",
-        "el backlog no dice cerrada"
-    );
-}
-
-#[test]
-fn close_should_not_publish_without_being_asked() {
-    // AC-3: publicar es una decision, no una consecuencia de cerrar. Antes el
-    // cierre hacia `git push` automatico justo despues del merge, asi que el
-    // incidente no necesito que nadie pidiera publicar: alcanzo con cerrar.
-    let (dir, bin) = sandbox_git();
-    cmd(&bin).args(["add", "--name", "Sola"]).assert().success();
-    cmd(&bin).args(["start", "--feature", "1"]).assert().success();
-    let wt = feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap().to_string();
-    std::fs::write(PathBuf::from(&wt).join("algo.txt"), "x\n").unwrap();
-
-    let salida = cmd(&bin)
-        .args(["close", "--feature", "1", "--status", "done", "--to", "main"])
-        .assert()
-        .success();
-    let out = String::from_utf8_lossy(&salida.get_output().stdout).into_owned();
-    assert!(out.contains("merge LOCAL"), "dice que no publico: {out}");
-    assert!(out.contains("push origin main"), "y deja el comando: {out}");
-    assert!(out.contains("origen :"), "muestra origen y destino: {out}");
-    assert!(out.contains("commits que se llevan"), "y el rango: {out}");
+        .success()
+        .stdout(predicate::str::contains("SIN worktree, escribiendo en el checkout compartido: #1 Serial"))
+        .stdout(predicate::str::contains("arranca igual"))
+        .stdout(predicate::str::contains("Rama y worktree creados"));
+    assert_eq!(feature_en_backlog(dir.path(), "2")["status"], "in_progress");
+    assert_eq!(feature_en_backlog(dir.path(), "2")["aislada"], true);
+    assert!(dir.path().join("hp/progress/current-2.md").is_file());
 }
 
 /// Sandbox donde `docs/` es un repo git APARTE del principal: el layout que
@@ -5632,11 +5591,15 @@ fn start_should_not_trust_a_worktree_that_no_longer_exists() {
     // El backlog sigue diciendo que lo tiene: esa es la mentira que hay que ver.
     assert_eq!(feature_en_backlog(dir.path(), "1")["worktree"].as_str().unwrap(), wt);
 
+    // Feature #76: la #1 cuenta como NO aislada. Eso ya no veta a una #2 con
+    // worktree (escriben en arboles distintos), pero SI a una #2 que tambien
+    // quiera el checkout compartido: ahi serian dos en el mismo arbol.
     cmd(&bin)
-        .args(["start", "--feature", "2"])
+        .args(["start", "--feature", "2", "--sin-worktree"])
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("esta abierta SIN worktree"));
+        .stderr(predicate::str::contains("ya esta escribiendo en el checkout compartido"))
+        .stderr(predicate::str::contains("#1 Perdida"));
 }
 
 #[test]

@@ -72,7 +72,18 @@ fn resolver_aislamiento(
     match crate::aislamiento::decidir(&ctx) {
         Decision::Rechazar(r) => Err(rechazo(&fid, &r)),
         Decision::Seguir(motivo) => Ok(Resuelto::SinAislar(motivo)),
-        Decision::Aislar => {
+        Decision::Aislar { conviven_sin_aislar } => {
+            // Feature #76: una feature sin aislar al lado no bloquea, pero se
+            // dice. Quien arranca tiene derecho a saber que el checkout
+            // compartido esta ocupado por otra.
+            if !conviven_sin_aislar.is_empty() {
+                println!(
+                    "[i] Hay {} feature(s) abierta(s) SIN worktree, escribiendo en el checkout compartido: {}.\n    \
+                     Esta feature tiene su propio arbol y no la estorba: arranca igual.",
+                    conviven_sin_aislar.len(),
+                    conviven_sin_aislar.join(", ")
+                );
+            }
             let principal = principal.unwrap_or_else(|| paths.repo_root.clone());
             let a = crate::git::preparar(&principal, &fid, &slug, kind, None).map_err(|err| {
                 // El fallback silencioso del AC-1: esto era un `println!`.
