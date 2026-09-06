@@ -270,3 +270,4 @@ con su fecha.>
 - #71 El close archiva el sello de cierre en el worktree que acaba de borrar, y lo pierde -> done 2026-09-05 · spec: docs/spec-feature-71-el-close-archiva-el-sello-de-cierre-en-el-worktr.md · impl: docs/impl-71.md
 - #73 verify corre UN comando por AC y no lo dice: un AC con varias verificaciones se cree verde con una -> done 2026-09-05 · spec: docs/spec-feature-73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a.md · impl: docs/impl-73.md
 - #75 el backlog no sabe de dependencias ni de features que se traban una y otra vez -> done 2026-09-05 · spec: docs/spec-feature-75-el-backlog-no-sabe-de-dependencias-ni-de-feature.md · impl: docs/impl-75.md
+- #76 una feature sin worktree veta a todas las demas y mata el paralelismo -> done 2026-09-06 · spec: docs/spec-feature-76-una-feature-sin-worktree-veta-a-todas-las-demas-.md · impl: docs/impl-76.md
