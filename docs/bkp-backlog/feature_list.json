@@ -1,0 +1,2097 @@
+{
+  "project": "ADR",
+  "rules": {
+    "require_spec_approved": true,
+    "require_review": true,
+    "require_leccion": true,
+    "require_verify_green": true,
+    "require_docs_al_dia": true,
+    "consolidar_backend": "auto",
+    "verify_timeout_segundos": 900
+  },
+  "features": [
+    {
+      "id": 1,
+      "name": "powershell_windows_installer",
+      "microservicios": [],
+      "acceptance": [
+        "Mantener setup_harness.sh; agregar setup_harness.ps1 para Windows; configurar/detectar Cargo desde PowerShell; compilar harness.exe; documentar y probar el flujo."
+      ],
+      "status": "done",
+      "started_at": "2026-06-11T03:40:11Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-1-powershell-windows-installer.md",
+        "mtime": 1781150674.7952197,
+        "size": 3752,
+        "hash": "6a7105b9b07075bd"
+      },
+      "closed_at": "2026-06-11T04:06:31Z",
+      "note": "Instalacion Windows PowerShell agregada; Bash conservado; Cargo y smoke tests verificados"
+    },
+    {
+      "id": 2,
+      "name": "remove_python_full_rust_migration",
+      "microservicios": [],
+      "acceptance": [
+        "Eliminar todos los scripts Python (harness.py, graph_memory.py y sus copias en templates/); simplificar harness_cli (sh+ps1) y setup_harness (sh+ps1) para despachar exclusivamente al binario Rust eliminando toda deteccion, fallback, imports y logica de Python/pip/psycopg2/graphifyy; actualizar init.sh, tests (parity y smoke), docs (README, UPDATING, verification, plan, etc) y requisitos; remover reglas de mantenimiento dual y tests de paridad Python; asegurar harness_check y cargo test/clippy limpios."
+      ],
+      "status": "done",
+      "started_at": "2026-06-11T04:12:47Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-2-remove-python-full-rust-migration.md",
+        "mtime": 1781151763.2053633,
+        "size": 7159,
+        "hash": "39fef84e0a0eabed"
+      },
+      "closed_at": "2026-06-11T04:24:11Z",
+      "note": "Python eliminado completamente (4 .py + parity + fallbacks en sh/ps1/setup/init/tests/docs); solo Rust. harness_check limpio, cargo verde, evidencia en progress/impl/review."
+    },
+    {
+      "id": 3,
+      "name": "spec_driven_development",
+      "microservicios": [],
+      "acceptance": [
+        "Integrar SDD al harness: (1) harness_cli start genera docs/spec-feature-<id>-<slug>.md (layout plano junto al plan) con plantilla Estado: draft, recorridos de usuario priorizados, criterios de aceptacion AC-n Given/When/Then, no funcionales (SLOs, seguridad, observabilidad), fuera de alcance y observaciones; (2) firma last_spec_sig reusando plan_signature y check-plan vigila spec+plan contra ediciones de otros LLMs; (3) gate duro: advance/close y harness_check.sh bloquean si el spec no tiene Estado: approved; regla require_spec_approved en feature_list.json; (4) docs/constitution.md sembrado por setup_harness.sh y setup_harness.ps1 sin pisar existente, referenciado por superficies y roles, verificado por harness_check.sh; (5) roles leader/implementer/reviewer (roles/, templates/roles/ y heredocs .claude/agents de ambos instaladores) exigen spec aprobado y trazabilidad AC-n en delegacion y veredicto; (6) cargo test/clippy limpios con tests de firma y gate del spec, tests/setup_smoke.sh verifica siembra de spec y constitution; (7) docs actualizadas (README, UPDATING, AGENTS.md, docs/architecture.md)."
+      ],
+      "status": "done",
+      "started_at": "2026-07-23T04:00:00Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-3-spec-driven-development.md",
+        "mtime": 1784861260.781892,
+        "size": 23394,
+        "hash": "7495f77cf5e22f42"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-3-spec-driven-development.md",
+        "mtime": 1784861249.8566098,
+        "size": 4773,
+        "hash": "e42ad1f1468ed816"
+      },
+      "closed_at": "2026-07-24T02:49:29Z"
+    },
+    {
+      "id": 4,
+      "name": "harness_docs_to_root_docs",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Los docs del arnes viven en el docs/ de la RAIZ del proyecto: (1) setup_harness.sh instala docs/architecture.md, docs/conventions.md y docs/verification.md en $SURFACE_DIR/docs (no en HARNESS_DIR/docs), igual que docs/constitution.md; (2) setup_harness.ps1 en paridad exacta; (3) migracion de instalaciones existentes: si el archivo esta en <harness>/docs y NO existe en el docs/ de la raiz se mueve y se avisa, si ya existe en la raiz NO se pisa; (4) superficies multi-LLM dejan de usar el prefijo __HREL__ para esos tres docs y apuntan a docs/ de la raiz; (5) roles y .claude|.codex|.gemini agents actualizados (roles/implementer.md cita docs/verification.md sin prefijo del arnes); (6) reset targets y required assets de ambos instaladores apuntan a las rutas nuevas; (7) tests/setup_smoke.sh y tests/setup_smoke.ps1 verifican destino raiz en layout subdir y root, migracion cuando falta y no-pisa cuando existe; (8) docs actualizadas (README, UPDATING, AGENTS.md, docs/architecture.md) y cargo test + clippy -D warnings verdes."
+      ],
+      "status": "done",
+      "started_at": "2026-07-24T19:51:47Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-4-harness-docs-to-root-docs.md",
+        "mtime": 1784926269.0372212,
+        "size": 8788,
+        "hash": "268f92b92ba9e31d"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-4-harness-docs-to-root-docs.md",
+        "mtime": 1784926253.5944571,
+        "size": 6819,
+        "hash": "eaa7e9a96f254cda"
+      },
+      "closed_at": "2026-07-24T20:53:14Z"
+    },
+    {
+      "id": 5,
+      "name": "prd_master_templates",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Plantillas maestras PRD y SDD sembradas por el instalador en docs/prd/ de la RAIZ del proyecto: (1) templates/docs/prd/PRD-master.md (problema, usuarios/JTBD, metricas de exito, alcance y no-objetivos, restricciones, recorridos P1/P2, tabla Hitos->features, riesgos, decisiones abiertas) y templates/docs/prd/SDD-master.md (arquitectura objetivo, stack, contratos, decisiones tecnicas tipo ADR, datos, no funcionales, verificacion, riesgos, decisiones abiertas); (2) setup_harness.sh crea docs/prd/ en SURFACE_DIR y siembra ambas plantillas SOLO si faltan, sin pisar nunca (mismo criterio que docs/constitution.md); (3) setup_harness.ps1 en paridad exacta; (4) NO entran en los reset targets: son documentos del usuario; (5) required assets de ambos instaladores incluyen las dos plantillas; (6) tests/setup_smoke.sh y tests/setup_smoke.ps1 verifican siembra en layout subdir y root, no-pisa con sentinel y supervivencia al --reset; (7) docs actualizadas (README, UPDATING, AGENTS.md, docs/architecture.md) describiendo el flujo PRD master -> feature_list.json -> spec por feature."
+      ],
+      "status": "done",
+      "started_at": "2026-07-24T23:03:40Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-5-prd-master-templates.md",
+        "mtime": 1784934337.7467723,
+        "size": 6764,
+        "hash": "dcc6afb2952190a9"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-5-prd-master-templates.md",
+        "mtime": 1784933895.9725757,
+        "size": 5775,
+        "hash": "6e61856337f1fdcd"
+      },
+      "closed_at": "2026-07-24T23:07:29Z",
+      "note": "Planillas maestras PRD/SDD en docs/prd/; AC-6 (pwsh) pendiente de corrida en Windows"
+    },
+    {
+      "id": 6,
+      "name": "interactive_spec_approval",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El agente muestra el spec y pregunta antes de aprobar",
+        "Nuevo comando approve-spec registra la aprobacion del usuario y re-firma la sig",
+        "Constitution Art. 2 enmendado, roles/installer/templates alineados"
+      ],
+      "status": "done",
+      "started_at": "2026-07-24T22:25:15Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-6-interactive-spec-approval.md",
+        "mtime": 1784933306.4607325,
+        "size": 7442,
+        "hash": "6616cc210dea9f9c"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-6-interactive-spec-approval.md",
+        "mtime": 1784932437.6172771,
+        "size": 6970,
+        "hash": "948b475f300a5837"
+      },
+      "closed_at": "2026-07-24T22:51:37Z",
+      "note": "Ritual de aprobacion interactiva del spec; AC-11 (Windows) verificado estaticamente"
+    },
+    {
+      "id": 7,
+      "name": "harness_check_robustness",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_check verifica que .claude/agents/ este sincronizado con roles/ y resuelve REPO_ROOT correctamente en el checkout fuente"
+      ],
+      "status": "done",
+      "started_at": "2026-07-28T17:48:43Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-7-harness-check-robustness.md",
+        "mtime": 1785264047.499296,
+        "size": 11914,
+        "hash": "5c5e43ec5a7e7e5c"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-7-harness-check-robustness.md",
+        "mtime": 1785262202.2833202,
+        "size": 13793,
+        "hash": "820adc18e3e1150b"
+      },
+      "closed_at": "2026-07-28T18:58:03Z",
+      "note": "Gate de espejo roles->agentes (bloquea, read-only) + resolucion robusta de REPO_ROOT en 4 scripts, sus espejos y paths.rs; marker des-versionado. AC-11 (pwsh) verificado estaticamente"
+    },
+    {
+      "id": 8,
+      "name": "kimi_cli_backend",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Kimi Code CLI es un backend de primera clase del arnes: subagentes leader/implementer/reviewer en .kimi-code/agents/ generados desde roles/, superficie AGENTS.md, hook global en ~/.kimi-code/config.toml con backup e idempotencia, y entrada en el gate de espejo"
+      ],
+      "status": "done",
+      "started_at": "2026-07-28T22:55:42Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-8-kimi-cli-backend.md",
+        "mtime": 1785282434.1334834,
+        "size": 13321,
+        "hash": "6d37332323ceefe6"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-8-kimi-cli-backend.md",
+        "mtime": 1785280760.434289,
+        "size": 17878,
+        "hash": "725eb5c0def764c0"
+      },
+      "closed_at": "2026-07-29T00:06:56Z",
+      "note": "Kimi Code CLI como backend de primera clase: subagentes en .kimi-code/agents/, superficie AGENTS.md nativa, hook global blindado (backup + marcadores + idempotencia + rollback por doctor), gate de espejo extendido. AC-10 (pwsh) verificado estaticamente"
+    },
+    {
+      "id": 9,
+      "name": "codex_roles_can_write_artifacts",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El leader y el reviewer de Codex pueden escribir sus artefactos (spec, plan, review) en docs/: sandbox_mode workspace-write para los tres roles, con la separacion de roles sostenida por el prompt igual que en Claude"
+      ],
+      "status": "done",
+      "started_at": "2026-07-29T01:10:40Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-9-codex-roles-can-write-artifacts.md",
+        "mtime": 1785287973.1317904,
+        "size": 5762,
+        "hash": "f216d488ac8c908b"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-9-codex-roles-can-write-artifacts.md",
+        "mtime": 1785287817.5680015,
+        "size": 8425,
+        "hash": "d58beee8af344b27"
+      },
+      "closed_at": "2026-07-29T01:38:32Z",
+      "note": "sandbox_mode workspace-write en los tres roles de Codex: leader y reviewer ya pueden escribir spec, plan y veredicto. AC-6 (pwsh) verificado estaticamente"
+    },
+    {
+      "id": 10,
+      "name": "layout_inferred_from_footprint",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Sin .harness_layout, si el padre tiene huella de instalacion el arnes infiere layout subdir y resuelve la raiz al proyecto, avisando con [i]; un marker explicito root se respeta"
+      ],
+      "status": "done",
+      "started_at": "2026-07-29T04:16:57Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-10-layout-inferred-from-footprint.md",
+        "mtime": 1785446345.7043428,
+        "size": 7593,
+        "hash": "37fe013e5bfc8edc"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-10-layout-inferred-from-footprint.md",
+        "mtime": 1785298781.2633965,
+        "size": 8979,
+        "hash": "6624c1da04adc212"
+      },
+      "closed_at": "2026-07-30T21:21:01Z",
+      "note": "Inferencia de layout subdir por huella del padre cuando falta .harness_layout (tres casos excluyentes: subdir/AUSENTE/root), misma regla en los 4 scripts + espejos + paths.rs; bug reproducido ANTES y fix comprobado DESPUES con fixtures; smoke/clippy/test verdes (50+27); AC-11 estatica (sin pwsh). docs/impl-10.md y docs/review-10.md (approved). Instalaciones sin marker se reparan solas al actualizar."
+    },
+    {
+      "id": 11,
+      "name": "link_kimi_guide_in_surfaces",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "La guia docs/kimi-cli-uso-eficiente.md queda enlazada desde las superficies raiz que genera el instalador (AGENTS.md y espejos CLAUDE/GEMINI/GROK/LLM), en paridad sh/ps1, con smoke verificando la linea y superficies de este repo regeneradas"
+      ],
+      "status": "done",
+      "started_at": "2026-08-01T13:52:07Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-11-link-kimi-guide-in-surfaces.md",
+        "mtime": 1785945982.5878437,
+        "size": 4615,
+        "hash": "bb6b95e37842497e"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-11-link-kimi-guide-in-surfaces.md",
+        "mtime": 1785600385.7979183,
+        "size": 6445,
+        "hash": "760aa30b0e42a0c8"
+      },
+      "closed_at": "2026-08-07T16:15:48Z",
+      "note": "Guia kimi-cli-uso-eficiente sembrada como HARNESS_DOCS (templates + arrays sh/ps1) y enlazada desde superficies sh/ps1 y AGENTS.md raiz (dogfooding). Companero: siembra de dotfiles .kimiignore/.kimirules como docs del usuario (loop ps1 completado). Smoke sh rc=0 con asserts nuevos, clippy limpio, cargo test 50+27 verdes, harness_check rc=0, diff guia repo/template identica. AC-7 estatico (sin pwsh). docs/impl-11.md y docs/review-11.md (approved). graph impacto no corrio: hub inalcanzable (impacto verificado manual contra git status/plan)"
+    },
+    {
+      "id": 12,
+      "name": "prd_story_method",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El metodo del PDF 'Escribe tu maldito PRD' queda instalado en el harness: PRD-master.md reescrito con la anatomia (historia antes/despues, resumen hoy/despues, O1/NO1, flujo dos veces, los datos, pseudo-codigo como acuerdo), una guia nueva docs/prd/COMO-ESCRIBIR-UN-PRD.md sembrada por ambos instaladores, y spec_template() genera cada spec de feature con Historia, Hoy -> Despues, Los datos y Pseudo-codigo"
+      ],
+      "status": "done",
+      "started_at": "2026-08-12T02:14:12Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-12-prd-story-method.md",
+        "mtime": 1786501681.6392782,
+        "size": 7140,
+        "hash": "da6b5c748958bf9f"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-12-prd-story-method.md",
+        "mtime": 1786501194.0249329,
+        "size": 11926,
+        "hash": "e29f2ae53efe724d"
+      },
+      "closed_at": "2026-08-12T02:34:02Z"
+    },
+    {
+      "id": 13,
+      "name": "nested_prds",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El arnes soporta PRDs anidados de verdad: el arbol vive en carpetas bajo docs/prd/, 'prd add --name <slug> --parent <padre>' crea el PRD hijo desde plantilla y lo enlaza en el padre, 'prd tree' dibuja el arbol con hitos y estado, 'add --prd <slug>' encadena PRD hoja -> feature -> spec (encabezado PRD: en el spec) y harness_check.sh valida la integridad del arbol; con paridad sh/ps1, guia y superficies actualizadas y tests (unit + smoke)"
+      ],
+      "status": "done",
+      "started_at": "2026-08-12T11:14:39Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-13-nested-prds.md",
+        "mtime": 1786534794.2226093,
+        "size": 5451,
+        "hash": "e380fa907213a8d5"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-13-nested-prds.md",
+        "mtime": 1786533722.767964,
+        "size": 18614,
+        "hash": "b006ec081d0b5b8f"
+      },
+      "closed_at": "2026-08-12T11:44:10Z",
+      "note": "PRDs anidados reales: arbol en carpetas, prd add/tree, cadena --prd -> spec, vuelta del cierre al PRD y gate de integridad"
+    },
+    {
+      "id": 14,
+      "name": "hub_batch_upserts_atomic_install",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El sync del hub deja de hacer un round-trip por fila: PgGraphStore::save() upsertea nodos y aristas en lotes con INSERT ... SELECT FROM UNNEST(...) (chunks acotados) preservando la semantica actual de merge de props (incluida la fusion de aristas repetidas con misma clave source/target/type), y ambos instaladores (setup_harness.sh y setup_harness.ps1) escriben el binario harness/harness.exe a un temporal en el mismo directorio y lo mueven con rename atomico (nunca cp/Copy-Item encima del binario vivo), para que macOS no vuelva a matar con SIGKILL el binario tras cada actualizacion; con cargo test/clippy, setup_smoke y harness_check.sh limpios"
+      ],
+      "status": "done",
+      "started_at": "2026-08-14T03:24:12Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-14-hub-batch-upserts-atomic-install.md",
+        "mtime": 1786680562.740871,
+        "size": 7212,
+        "hash": "c9620607060674c6"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-14-hub-batch-upserts-atomic-install.md",
+        "mtime": 1786679017.3346982,
+        "size": 17292,
+        "hash": "9a58f97dbf6b1113"
+      },
+      "closed_at": "2026-08-14T04:10:09Z",
+      "note": "Hub por lotes con UNNEST y escritura solo del delta (2688 sentencias -> 4; 456,31 s -> 2,74 s medidos), candado por proyecto, DB_STATEMENT_TIMEOUT, e instalacion atomica del binario en sh y ps1 (adios SIGKILL en cada actualizacion)"
+    },
+    {
+      "id": 15,
+      "name": "atlassian_binding_and_outbox",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El instalador aprende a que proyecto Jira y space de Confluence pertenece el repo (flags + .harness.env, sin adivinar y sin romper los repos que no lo configuren), el CLI gana 'atlassian bind|status|drain' y cada transicion del flujo (add/start/advance/approve-spec/close) deja un intent idempotente en la outbox; un agente con MCP drena esa outbox y crea/actualiza epics, historias y subtasks AC-n en Jira devolviendo las claves al estado local, con paridad sh/ps1, cargo test/clippy, setup_smoke y harness_check.sh limpios"
+      ],
+      "status": "done",
+      "started_at": "2026-08-16T03:04:20Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-15-atlassian-binding-and-outbox.md",
+        "mtime": 1786852288.3141856,
+        "size": 6693,
+        "hash": "2c1109b3458403bc"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-15-atlassian-binding-and-outbox.md",
+        "mtime": 1786850143.2656496,
+        "size": 20722,
+        "hash": "ea22e6f6ec5e5d8e"
+      },
+      "closed_at": "2026-08-16T04:16:21Z",
+      "note": "Integracion Atlassian completa: binding por repo desde el instalador, outbox de intents en cada transicion del flujo, dos ejecutores (agente con MCP y REST con token), sprints via Agile API y publicacion de PRD/SDD/specs en Confluence. Verificado de punta a punta en calpil.atlassian.net (ADR-1..ADR-8, sprint #14, 4 paginas en SD)"
+    },
+    {
+      "id": 16,
+      "name": "atlassian_auto_push",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Cada transicion del flujo (prd add, add, start, advance, approve-spec, close) empuja sola a Atlassian con un worker detached que jamas frena el comando ni cambia su exit code: aplica los intents pendientes y republica PRD, SDD y specs (idempotente por hash); 'add --kind bug|feature|task' mapea al tipo de issue correcto en Jira; el envio automatico viene encendido cuando hay binding y token, y se apaga con \"auto\": false o HARNESS_ATLASSIAN_AUTO=0; con cargo test, clippy, setup_smoke y harness_check.sh limpios"
+      ],
+      "status": "done",
+      "started_at": "2026-08-16T04:54:52Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-16-atlassian-auto-push.md",
+        "mtime": 1786857382.8142655,
+        "size": 5096,
+        "hash": "d2abb2f61a031472"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-16-atlassian-auto-push.md",
+        "mtime": 1786857362.0027075,
+        "size": 19486,
+        "hash": "3cb72c2138a48c68"
+      },
+      "closed_at": "2026-08-16T05:36:40Z",
+      "note": "Envio automatico completo: worker detached en las seis transiciones (apply + publish), backfill del repo existente con adopcion de epics, add --kind bug/feature/task, verificacion del binding con creacion opcional e interruptor de tres niveles. Verificado en real: un add creo epic, historia y paginas sin comandos manuales"
+    },
+    {
+      "id": 17,
+      "name": "lecciones_memoria_procedural",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "docs/lecciones/<clase>.md como memoria procedural del proyecto, organizada por CLASE de trabajo y no por feature: frontmatter (nombre, descripcion <=80 chars en una oracion, triggers, relacionadas, origen, usos, ultima_actualizacion, estado) y secciones Cuando aplica / Procedimiento / Pitfalls / Verificacion; comandos leccion list|show|nueva|usar (usar sella telemetria para el curador); nombres obligatoriamente a nivel de clase: leccion nueva RECHAZA nombres con id de feature, mensaje de error o patron fix-*/debug-*; orden de preferencia documentado en la plantilla y en los tres roles (patchear la leccion que estuvo en juego > patchear el paraguas existente > agregar docs/lecciones/<clase>/referencias/<tema>.md > recien entonces crear una nueva); la lista anti-veneno de que NO capturar (fallas de entorno, afirmaciones negativas sobre herramientas, errores transitorios, narrativas de tarea unica, fracasos no resueltos disfrazados de buena practica) portada literal; regla opcional require_leccion que hace que close --status done exija declarar leccion: <clase> o leccion: ninguna con motivo."
+      ],
+      "status": "done",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-16T13:43:34Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-17-lecciones-memoria-procedural.md",
+        "mtime": 1786918461.1177328,
+        "size": 11178,
+        "hash": "f09cc90f48bd17df"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-17-lecciones-memoria-procedural.md",
+        "mtime": 1786910457.9269493,
+        "size": 15572,
+        "hash": "5fee86f404167e91"
+      },
+      "closed_at": "2026-08-16T22:15:18Z",
+      "note": "Memoria procedural del arnes: docs/lecciones/<clase>.md ordenado por clase de trabajo, comando leccion list|show|nueva|usar, nombres de clase sin escape hatch, gate opcional require_leccion en el cierre, reglas de captura portadas a la guia y a los tres roles, y gate de integridad en harness_check.sh. 20 AC cubiertos (AC-20 parcial: smoke ps1 sin correr, sin PowerShell). Cero dependencias nuevas y funciona con el hub caido.",
+      "leccion": "docs-generados-por-el-instalador"
+    },
+    {
+      "id": 18,
+      "name": "nudge_de_aprendizaje",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness nudge suma dos disparadores, manteniendo su caracter best-effort (cualquier error se traga, exit 0 siempre): (1) por volumen de trabajo, contando las escrituras que ya reporta el hook PostToolUse (default cada 10, configurable) emite por stderr el CONTRATO de revision de lecciones para que lo ejecute el agente que este corriendo, sea cual sea el backend; (2) al cerrar (close --status done) emite el contrato completo de memoria + leccion, que es el momento de maxima senal. Ademas, backoff adaptativo del debounce hoy fijo en 600s: escala mientras nada cambia (10m -> 20m -> 40m hasta un techo) y vuelve al piso apenas cambia algo. El nudge NUNCA escribe artefactos por su cuenta: emite el contrato, el agente decide y escribe, el gate del cierre verifica."
+      ],
+      "status": "done",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-16T22:59:23Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-18-nudge-de-aprendizaje.md",
+        "mtime": 1786922687.3064845,
+        "size": 8906,
+        "hash": "6e749171a5d11eee"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-18-nudge-de-aprendizaje.md",
+        "mtime": 1786921601.456858,
+        "size": 14928,
+        "hash": "8d96d2d0314ac41c"
+      },
+      "closed_at": "2026-08-16T23:25:03Z",
+      "note": "El arnes empuja solo: recordatorio cada N acciones (default 25, apagable por rules) y CONTRATO completo al cerrar sin declarar, leido de la guia y no duplicado en el binario (con degradacion a puntero). Ademas el aviso de 'sin feature activa' pasa a backoff 600s->3600s con reset al piso. 21 AC cubiertos, sin parciales; todo a stderr y con exit 0 invariante; un proyecto sin docs/lecciones/ no ve nada nuevo.",
+      "leccion": "estado-local-en-progress"
+    },
+    {
+      "id": 19,
+      "name": "perfil_de_usuario",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "docs/perfil-usuario.md: modelo durable del usuario con limite duro (~1500 chars) que NO auto-compacta (al pasarse el comando falla con error accionable + lista de entradas actuales + instruccion de consolidar y reintentar); se inyecta como bloque delimitado e idempotente en las superficies generadas (CLAUDE.md, AGENTS.md, GEMINI.md, GROK.md, LLM.md) por setup_harness.sh y setup_harness.ps1, como snapshot congelado que recien cambia en la sesion siguiente; perfil sugerir lee progress/history.md y los bloques Decision usuario: de los planes y PROPONE entradas candidatas con su evidencia (que features, que fechas) sin escribir nada; perfil add exige --yes tras el si explicito del usuario, con el mismo ritual que approve-spec (mostrar, preguntar, registrar); duplicados exactos rechazados y matcheo por substring unico para replace/remove."
+      ],
+      "status": "done",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-16T23:29:01Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-19-perfil-de-usuario.md",
+        "mtime": 1786937152.285102,
+        "size": 11093,
+        "hash": "7bb5cb8fe06f7889"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-19-perfil-de-usuario.md",
+        "mtime": 1786923158.6099885,
+        "size": 14980,
+        "hash": "8af9809340564ac3"
+      },
+      "closed_at": "2026-08-17T03:26:09Z",
+      "note": "Perfil de usuario: docs/perfil-usuario.md con limite duro de 1500 chars que falla en vez de recortar, escritura solo con --yes, escaneo que bloquea secretos y unicode invisible antes de escribir, inyeccion idempotente en las 4 superficies reales como snapshot congelado, y perfil sugerir que junta la evidencia de history+planes+specs y emite el contrato sin escribir nada. 20 AC cubiertos, sin dependencias nuevas y sin tocar el hub.",
+      "leccion": "documentos-del-usuario-vs-plantillas"
+    },
+    {
+      "id": 20,
+      "name": "buscar_en_el_historial",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_cli buscar '<consulta>' sobre specs, planes, impl, review, lecciones, progress/history.md y los eventos del hub; salida rankeada con archivo:linea, feature y fecha, y --json; SIN llamadas a LLM y SIN dependencias nuevas de runtime (Articulo 6); el escaneo local siempre esta disponible y to_tsvector se usa solo cuando el hub PostgreSQL responde; sin hub degrada limpio sin cambiar exit codes; responde en el orden de milisegundos sobre el corpus tipico de un proyecto."
+      ],
+      "status": "done",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-17T03:36:38Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-20-buscar-en-el-historial.md",
+        "mtime": 1786938857.320649,
+        "size": 8650,
+        "hash": "fa28c4800d07c1e0"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-20-buscar-en-el-historial.md",
+        "mtime": 1786938287.905215,
+        "size": 11396,
+        "hash": "c75df7323c888482"
+      },
+      "closed_at": "2026-08-17T03:54:24Z",
+      "note": "buscar: hace preguntable la memoria del arnes. Recorre docs/**/*.md + history.md y ordena de lo mas curado (lecciones, perfil) a lo mas crudo (bitacora), con encabezados, frases contiguas y frescura como desempate. Sin indice (~10 ms medidos sobre 1,1 MB), sin LLM, sin hub, sin dependencias nuevas y de solo lectura. 19 AC cubiertos; el criterio de la consulta real fallo primero y corrigio dos bugs de ranking.",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 21,
+      "name": "curador_de_lecciones",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_cli lecciones status|pin|unpin|adoptar|archivar|restaurar con ciclo de vida DETERMINISTA sin LLM: sin uso 30 dias -> stale, sin uso 90 dias -> docs/lecciones/.archivo/, y NUNCA borra; piso de gracia para las nunca usadas (usos == 0 es ausencia de evidencia, no prueba de que sobra); pin bloquea toda transicion automatica; backup en bkp/ antes de cada pasada mutante y rollback reversible (toma snapshot pre-rollback antes de restaurar); reporte por corrida en progress/lecciones/<ts>/REPORT.md; la procedencia se DECLARA y nunca se infiere (adoptar es manual y explicito); la consolidacion asistida por LLM queda apagada por default, es opt-in y backend-agnostica (override -> API key -> CLI del backend -> skip)."
+      ],
+      "status": "done",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-17T04:04:57Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-21-curador-de-lecciones.md",
+        "mtime": 1786940554.0931914,
+        "size": 9852,
+        "hash": "2320340f987de6ad"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-21-curador-de-lecciones.md",
+        "mtime": 1786939716.3206396,
+        "size": 12490,
+        "hash": "db8b26c3ab0de755"
+      },
+      "closed_at": "2026-08-17T04:22:41Z",
+      "note": "Curador de lecciones: ciclo activa->stale->archivada determinista y sin modelo (30/90 dias configurables), pin que congela, y cuatro garantias probadas pudiendo fallar: nunca borra (archivar es mover), nada se mueve sin --aplicar, toda pasada mutante respalda y el rollback tambien es reversible, y archivar no la saca de buscar. La consolidacion con LLM salio a la #28 por no ser verificable aqui.",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 22,
+      "name": "mapa_de_aprendizaje",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_cli journey: linea de tiempo de lo que el arnes aprendio (lecciones, entradas del perfil y features cerradas) con sus enlaces, renderizada sobre datos que ya existen en el Memory Hub y graphify, sin almacenamiento nuevo; journey list|delete|edit para PODAR y corregir lo aprendido (el valor no es el dibujo, es poder borrar lo que quedo mal); --json; degrada limpio sin hub."
+      ],
+      "status": "done",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-17T04:35:14Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-22-mapa-de-aprendizaje.md",
+        "mtime": 1786942456.8911924,
+        "size": 8640,
+        "hash": "f728840b6bab5f15"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-22-mapa-de-aprendizaje.md",
+        "mtime": 1786941484.0625262,
+        "size": 11656,
+        "hash": "50b4775225ca4317"
+      },
+      "closed_at": "2026-08-17T04:54:23Z",
+      "note": "Mapa de aprendizaje: los tres almacenes juntos con sus enlaces (declarada / origen / cita / relacionada) y sus HUECOS, cada uno con el comando que lo corrige. Solo lectura por decision: sin delete ni edit, porque serian una segunda puerta al 'nunca borra' del curador y al gate del --yes del perfil. Sin hub, sin modelo, sin escrituras. Ultimo hito del PRD de aprendizaje.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 23,
+      "name": "ac_ejecutables_verify",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Los AC-n del spec dejan de ser solo prosa: cada AC puede declarar su comando de verificacion; harness_cli verify [--feature <id>] los ejecuta, registra exit codes y escribe docs/verify-<id>.md por AC-n; la regla opcional require_verify_green hace que close --status done bloquee cuando algun AC declarado no pasa, con mensaje accionable; los AC sin comando siguen siendo validos (compatibilidad total con los specs ya escritos) y quedan marcados como verificacion manual a cargo del reviewer."
+      ],
+      "status": "done",
+      "started_at": "2026-08-17T04:57:35Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-23-ac-ejecutables-verify.md",
+        "mtime": 1786945909.8185065,
+        "size": 8861,
+        "hash": "b3e285fc9554acea"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-23-ac-ejecutables-verify.md",
+        "mtime": 1786943531.57787,
+        "size": 13686,
+        "hash": "fb60a85ed02c0af7"
+      },
+      "closed_at": "2026-08-17T05:52:08Z",
+      "note": "AC ejecutables: el spec declara Comando: por criterio, verify los corre (20/20 verde sobre su propio spec) y close exige el reporte verde y fresco. Tres barreras: spec aprobado, invocacion manual, comando impreso; el cierre LEE, nunca ejecuta.",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 24,
+      "name": "conventions_escalera_y_tests",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "docs/conventions.md y su espejo templates/docs/conventions.md suman dos reglas tomadas de Hermes: (1) escalera de huella adaptada al arnes, eligiendo siempre el peldano de MENOR huella que resuelve el problema (extender un comando existente > agregar un flag > comando nuevo > superficie o artefacto nuevo > dependencia de runtime con ADR); (2) politica de tests: contratos de comportamiento y no snapshots de valores actuales, PROHIBIDO leer el codigo fuente dentro de un test (testea forma, no comportamiento) y PROHIBIDO el test detector-de-cambios que falla cada vez que un dato esperado se actualiza. El rol reviewer verifica ambas antes del cierre."
+      ],
+      "status": "done",
+      "started_at": "2026-08-17T18:03:44Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-24-conventions-escalera-y-tests.md",
+        "mtime": 1786991087.7855694,
+        "size": 11603,
+        "hash": "f0b4db106b73155e"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-24-conventions-escalera-y-tests.md",
+        "mtime": 1786990338.0713649,
+        "size": 12111,
+        "hash": "7f33a5983a22848f"
+      },
+      "closed_at": "2026-08-17T18:25:04Z",
+      "note": "conventions.md pasa de 7 lineas a la escalera de huella (5 peldanos con ejemplo real de este repo) y las tres reglas de test. La feature se aplico su propia escalera (peldano 1: cero comandos, flags y dependencias) y pago en el acto la deuda que su regla descubre.",
+      "leccion": "reglas-que-se-aplican-a-si-mismas"
+    },
+    {
+      "id": 25,
+      "name": "harness_doctor",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_cli doctor [--json] diagnostica la INSTALACION y el entorno (binario presente y fresco frente a rust/src, hooks por backend, espejos de roles, marker de layout, hub PostgreSQL, PATH, graphify, atlassian binding si existe) y por CADA falla imprime el comando exacto de remedio; exit 0 limpio / 2 con fallas, sin solaparse con harness_check.sh, que sigue cubriendo el estado del PROCESO (backlog, frescura de plan y spec, checkpoints)."
+      ],
+      "status": "done",
+      "started_at": "2026-08-17T18:39:33Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-25-harness-doctor.md",
+        "mtime": 1786994912.8158264,
+        "size": 11111,
+        "hash": "27c04123374d6eea"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-25-harness-doctor.md",
+        "mtime": 1786993407.6444438,
+        "size": 12007,
+        "hash": "921fec3b7adeb340"
+      },
+      "closed_at": "2026-08-17T19:28:53Z",
+      "note": "doctor diagnostica la instalacion (siete areas) con el comando exacto de remedio por problema; exit 2 solo si algo impide trabajar. La escalera de la #24 partio la feature: peldano 3 para el diagnostico, peldano 1 (el lanzador) para la mitad que un doctor dentro del binario no puede cubrir.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 26,
+      "name": "rutas_protegidas_deny",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness.deny versionable con globs de rutas que ningun agente puede escribir (por default docs/prd/**, docs/constitution.md y .env, ampliable por proyecto): el hook PostToolUse bloquea la escritura con mensaje accionable y harness_check.sh reporta las violaciones; se aplica ANTES que cualquier modo permisivo del backend; convierte en gate la regla que hoy solo esta escrita (el cuerpo del PRD y la constitution son del USUARIO y ningun agente los reescribe)."
+      ],
+      "status": "done",
+      "started_at": "2026-08-17T20:06:48Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-26-rutas-protegidas-deny.md",
+        "mtime": 1787015785.202291,
+        "size": 11133,
+        "hash": "bf78584f98b3d495"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-26-rutas-protegidas-deny.md",
+        "mtime": 1786997603.6865745,
+        "size": 11382,
+        "hash": "050b80f74bcf6223"
+      },
+      "closed_at": "2026-08-18T01:16:36Z",
+      "note": "Rutas protegidas con tres capas y su alcance declarado: PreToolUse previene (solo Claude, limite de prueba declarado), PostToolUse avisa con el comando de reversion, harness_check bloquea con exit 2. El arnes queda exento de su propia proteccion por registro con mtime, que caduca en cuanto alguien vuelve a tocar el archivo.",
+      "leccion": "remedios-que-la-herramienta-sugiere"
+    },
+    {
+      "id": 27,
+      "name": "leccion_list_alineacion_dinamica",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_cli leccion list calcula el ancho de la columna de nombre en vez de usar el 28 fijo: con una leccion de nombre mas largo que el ancho (por ejemplo docs-generados-por-el-instalador, 32 chars) la tabla sigue alineada. Solo formato de salida: no cambia el orden, ni los campos, ni --json, ni ningun exit code. Test que cubra el caso de nombre largo + nombre corto juntos."
+      ],
+      "status": "superseded",
+      "kind": "task",
+      "closed_at": "2026-08-18T22:58:45Z",
+      "note": "El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.",
+      "superseded_by": "36"
+    },
+    {
+      "id": 28,
+      "name": "consolidacion_de_lecciones_con_llm",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Consolidacion asistida por LLM de lecciones solapadas, sacada de la #21 por OBS-1: opt-in y apagada por default, backend-agnostica (override -> API key -> CLI del backend -> skip limpio), nunca borra (fusiona en un paraguas y archiva los originales), backup previo y rollback como toda pasada mutante del curador, y reporte que lista cada fusion con su motivo. Requisito de entrada: poder verificarse de punta a punta con al menos un backend configurado; no se cierra con el camino sin ejecutar."
+      ],
+      "status": "done",
+      "kind": "task",
+      "prd": "aprendizaje",
+      "started_at": "2026-08-18T13:29:47Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-28-consolidacion-de-lecciones-con-llm.md",
+        "mtime": 1787088526.344586,
+        "size": 9133,
+        "hash": "3c132aca7f1a7fb5"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-28-consolidacion-de-lecciones-con-llm.md",
+        "mtime": 1787062607.9286263,
+        "size": 14025,
+        "hash": "597be3621bed1ca3"
+      },
+      "closed_at": "2026-08-18T22:18:57Z",
+      "note": "Consolidacion de lecciones con LLM: el modelo ve solo nombre, descripcion y triggers (nunca el cuerpo), no puede escribir (detectar no recibe HarnessPaths) y el prompt va por argv, no por shell. La fusion la pide una persona con argv. Verificada de punta a punta con dos backends reales, y aplicada al corpus real: la biblioteca paso de 9 a 8 lecciones sin perder un solo pitfall.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 29,
+      "name": "prd_y_sdd_siempre_al_dia",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Al cerrar una feature, el arnes exige que los documentos de producto y diseno reflejen lo implementado: el agente escribe la propuesta de diff del PRD de origen, sus PRDs padres, docs/prd/SDD-master.md y docs/architecture.md en docs/prd-diff-<id>.md (fuera de las rutas protegidas de la #26), se la MUESTRA al usuario y solo con su SI 'prd apply --feature <id> --yes' la escribe en el documento; sin propuesta ni declaracion explicita de 'sin cambios' el cierre no pasa. Roles, CHECKPOINTS y superficies declaran el deber, y todo viaja en el instalador via templates/."
+      ],
+      "status": "done",
+      "prd": "master",
+      "started_at": "2026-08-18T03:36:14Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-29-prd-y-sdd-siempre-al-dia.md",
+        "mtime": 1787058899.713647,
+        "size": 9637,
+        "hash": "e025e9680e21407c"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-29-prd-y-sdd-siempre-al-dia.md",
+        "mtime": 1787025851.3014789,
+        "size": 13947,
+        "hash": "c30ac86fece1f6f0"
+      },
+      "closed_at": "2026-08-18T13:17:46Z",
+      "note": "El PRD, el SDD y architecture.md dejan de poder quedar mintiendo: el binario calcula el alcance desde el arbol real, siembra una pregunta por documento, verifica las citas contra el disco, y solo con el SI del usuario prd apply --yes escribe. Aplicada sobre este repo: corrigio el drift real de architecture.md y el SDD que se publicaba a Confluence con placeholders.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 30,
+      "name": "paridad_ps1_verificable",
+      "microservicios": [],
+      "acceptance": [
+        "Los dos instaladores y los dos smokes se pueden comparar sin PowerShell: un chequeo estructural verifica que setup_harness.ps1 declara las mismas opciones y escribe las mismas superficies que el .sh, y falla cuando uno se adelanta al otro"
+      ],
+      "status": "done",
+      "started_at": "2026-08-18T01:58:43Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-30-paridad-ps1-verificable.md",
+        "mtime": 1787019273.2887936,
+        "size": 7451,
+        "hash": "bc60d7b96a5463c0"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-30-paridad-ps1-verificable.md",
+        "mtime": 1787018872.1209023,
+        "size": 8008,
+        "hash": "dfb742b1e8995fac"
+      },
+      "closed_at": "2026-08-18T02:26:50Z",
+      "note": "Paridad de instaladores verificable sin PowerShell: tests/parity_check.sh compara lo que los dos DECLARAN y falla cuando uno se adelanta. Cierra por trabajo la deuda de once features. El limite (no ejecuta el instalador de Windows) esta escrito en README y verification.md.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 31,
+      "name": "close_exit_codes_unificados",
+      "microservicios": [],
+      "acceptance": [
+        "Los tres gates de close (spec, leccion, verify) salen con el mismo exit code; hoy son 1, 1 y 2 sin razon"
+      ],
+      "status": "superseded",
+      "closed_at": "2026-08-18T22:58:53Z",
+      "note": "El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.",
+      "superseded_by": "36"
+    },
+    {
+      "id": 32,
+      "name": "verify_solo_multiple",
+      "microservicios": [],
+      "acceptance": [
+        "verify --solo acepta varios AC (--solo AC-3,AC-7) para iterar sobre un subconjunto sin correr los 20"
+      ],
+      "status": "superseded",
+      "closed_at": "2026-08-18T22:58:59Z",
+      "note": "El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.",
+      "superseded_by": "36"
+    },
+    {
+      "id": 33,
+      "name": "conventions_check_src",
+      "microservicios": [],
+      "acceptance": [
+        "El chequeo de la regla 2 tambien mira los tests unitarios de rust/src/, no solo rust/tests/; la unica violacion historica estaba justamente en src/"
+      ],
+      "status": "superseded",
+      "closed_at": "2026-08-18T22:59:06Z",
+      "note": "El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.",
+      "superseded_by": "36"
+    },
+    {
+      "id": 34,
+      "name": "rutas_arnes_poda",
+      "microservicios": [],
+      "acceptance": [
+        "El registro progress/.rutas_arnes se poda cuando el archivo se commitea, en vez de crecer sin limite"
+      ],
+      "status": "superseded",
+      "closed_at": "2026-08-18T22:59:12Z",
+      "note": "El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.",
+      "superseded_by": "36"
+    },
+    {
+      "id": 35,
+      "name": "doctor_hooks_contenido",
+      "microservicios": [],
+      "acceptance": [
+        "El area de hooks de doctor verifica que cada hook apunte al runtime correcto, no solo que el runtime exista"
+      ],
+      "status": "superseded",
+      "closed_at": "2026-08-18T22:59:19Z",
+      "note": "El trabajo se hizo y se verifico en la feature #36 (deudas_anotadas_del_arnes), que agrupo las seis por decision de Alan.",
+      "superseded_by": "36"
+    },
+    {
+      "id": 36,
+      "name": "deudas_anotadas_del_arnes",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Las seis deudas que el propio arnes se anoto en sus impl quedan pagadas: exit code del gate de spec, --solo con varios AC, el chequeo de convenciones mira rust/src, poda del registro .rutas_arnes, doctor verifica el contenido de los hooks y leccion list alinea la columna por el nombre mas largo"
+      ],
+      "status": "done",
+      "started_at": "2026-08-18T02:27:09Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-36-deudas-anotadas-del-arnes.md",
+        "mtime": 1787022595.971997,
+        "size": 7323,
+        "hash": "55bcba1d3ba1e497"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-36-deudas-anotadas-del-arnes.md",
+        "mtime": 1787020592.446014,
+        "size": 8216,
+        "hash": "08e4f59dde480c47"
+      },
+      "closed_at": "2026-08-18T03:11:52Z",
+      "note": "Las seis deudas que el arnes se anoto en sus propios impl, pagadas con un AC y un test cada una. Tres hallazgos al medir: la nota del backlog sobre exit codes estaba mal, ampliar el alcance de conventions destapo un bug de pipefail que mataba el chequeo en silencio desde la #24, y el gate de spec rechazo cerrar las seis entradas como done porque nunca tuvieron spec propio.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 37,
+      "name": "estado_superseded",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "feature_list.json acepta el estado 'superseded' para una feature cuyo trabajo se hizo en otra: status/next/journey lo distinguen de 'blocked' (que sugiere un problema donde no lo hay) y el cierre exige citar la feature que la absorbio. Las seis actuales (#27, #31-#35) migran a ese estado"
+      ],
+      "status": "done",
+      "started_at": "2026-08-18T22:40:23Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-37-estado-superseded.md",
+        "mtime": 1787097544.6390305,
+        "size": 7752,
+        "hash": "ed29d25e969201e4"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-37-estado-superseded.md",
+        "mtime": 1787093704.7771864,
+        "size": 7953,
+        "hash": "9988fee2cf7dd0a1"
+      },
+      "closed_at": "2026-08-18T23:59:29Z",
+      "note": "Estado superseded para lo que se hizo en otra feature, con --absorbida-por validado y trato propio en status, next, prd tree y journey. Las seis migradas: el denominador del PRD maestro bajo de 36 a 30. Dos defectos encontrados por refutacion despues de los AC verdes: la transicion espuria de Jira y un AC cerrado de la #36 que la migracion puso en rojo.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 38,
+      "name": "prd_propose_texto_candidato",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "prd propose pre-arma un 'Despues:' candidato por bloque, derivado del diff de la feature, para que el agente edite en vez de escribir desde cero; el candidato es una sugerencia y el veredicto sigue siendo del agente"
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:44:35Z",
+      "branch": "feature/38-prd-propose-texto-candidato",
+      "worktree": "/Users/alan/harness_process-wt/38-prd-propose-texto-candidato",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/38-prd-propose-texto-candidato/docs/plan-feature-38-prd-propose-texto-candidato.md",
+        "mtime": 1787573659.430803,
+        "size": 2334,
+        "hash": "53976100afa63f8e"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/38-prd-propose-texto-candidato/docs/spec-feature-38-prd-propose-texto-candidato.md",
+        "mtime": 1787573512.43283,
+        "size": 5349,
+        "hash": "bc82a839118e8a5b"
+      },
+      "closed_at": "2026-08-26T00:56:47Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; el sello documental aprobado confirma que no requiere cambios en PRD, SDD ni arquitectura.",
+      "leccion": "documentos-del-usuario-vs-plantillas"
+    },
+    {
+      "id": 39,
+      "name": "prd_senales_mas_alla_del_nombre",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Las senales 'Presente en:' / 'Ausente en:' de prd propose dejan de depender solo del nombre de la feature: usan tambien los modulos nuevos y los terminos del spec, para no dar 'ausente' cuando el documento SI lo cuenta con otras palabras"
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:45:10Z",
+      "branch": "feature/39-prd-senales-mas-alla-del-nombre",
+      "worktree": "/Users/alan/harness_process-wt/39-prd-senales-mas-alla-del-nombre",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/39-prd-senales-mas-alla-del-nombre/docs/plan-feature-39-prd-senales-mas-alla-del-nombre.md",
+        "mtime": 1787574088.377428,
+        "size": 2058,
+        "hash": "51fbf79d8effb926"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/39-prd-senales-mas-alla-del-nombre/docs/spec-feature-39-prd-senales-mas-alla-del-nombre.md",
+        "mtime": 1787573517.4908843,
+        "size": 5297,
+        "hash": "3fed338233254a73"
+      },
+      "closed_at": "2026-08-26T00:58:56Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; el sello documental aprobado confirma que no requiere cambios en PRD, SDD ni arquitectura.",
+      "leccion": "documentos-del-usuario-vs-plantillas"
+    },
+    {
+      "id": 40,
+      "name": "prd_sello_se_invalida_al_editar",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El sello 'Aplicado:' de prd apply se invalida si el documento cambia despues de aplicar, sin usar una firma por feature (un PRD lo comparten N features): la propuesta deja de contar como aplicada si el texto que escribio ya no esta"
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:45:46Z",
+      "branch": "feature/40-prd-sello-se-invalida-al-editar",
+      "worktree": "/Users/alan/harness_process-wt/40-prd-sello-se-invalida-al-editar",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/40-prd-sello-se-invalida-al-editar/docs/plan-feature-40-prd-sello-se-invalida-al-editar.md",
+        "mtime": 1787574411.5786788,
+        "size": 2219,
+        "hash": "63f6db6bc46d98a7"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/40-prd-sello-se-invalida-al-editar/docs/spec-feature-40-prd-sello-se-invalida-al-editar.md",
+        "mtime": 1787573522.4043496,
+        "size": 5253,
+        "hash": "b8ce6eaaa470acf9"
+      },
+      "closed_at": "2026-08-26T01:00:54Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "documentos-del-usuario-vs-plantillas"
+    },
+    {
+      "id": 41,
+      "name": "consolidar_usa_relacionadas",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "La deteccion de solapamientos usa el campo 'relacionadas' del frontmatter como senal barata y escrita a mano, ademas de lo que devuelve el modelo; dos lecciones que se citan mutuamente son candidatas aunque sus triggers no se crucen"
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:46:21Z",
+      "branch": "feature/41-consolidar-usa-relacionadas",
+      "worktree": "/Users/alan/harness_process-wt/41-consolidar-usa-relacionadas",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/41-consolidar-usa-relacionadas/docs/plan-feature-41-consolidar-usa-relacionadas.md",
+        "mtime": 1787575118.2955909,
+        "size": 2253,
+        "hash": "8dd7aae80406a4fd"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/41-consolidar-usa-relacionadas/docs/spec-feature-41-consolidar-usa-relacionadas.md",
+        "mtime": 1787573527.5310912,
+        "size": 5020,
+        "hash": "778d55afef490ba0"
+      },
+      "closed_at": "2026-08-26T01:00:50Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 42,
+      "name": "consolidar_esqueleto_del_paraguas",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El binario pre-arma el esqueleto del paraguas con la union de triggers y los punteros [[miembro]] ya puestos, para que la persona escriba solo la prosa y no pueda olvidarse de lo que revisar_paraguas exige"
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:46:50Z",
+      "branch": "feature/42-consolidar-esqueleto-del-paraguas",
+      "worktree": "/Users/alan/harness_process-wt/42-consolidar-esqueleto-del-paraguas",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/42-consolidar-esqueleto-del-paraguas/docs/plan-feature-42-consolidar-esqueleto-del-paraguas.md",
+        "mtime": 1787625211.508257,
+        "size": 2344,
+        "hash": "ed0fd8764f8f6e50"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/42-consolidar-esqueleto-del-paraguas/docs/spec-feature-42-consolidar-esqueleto-del-paraguas.md",
+        "mtime": 1787573532.6250336,
+        "size": 4993,
+        "hash": "792c6b2fc0b6781e"
+      },
+      "closed_at": "2026-08-26T01:00:50Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 43,
+      "name": "consolidar_check_sin_cuota",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "tests/consolidar_check.sh deja de gastar cuota real en cada corrida: el modo con backend real queda detras de un flag explicito y los demas usan un backend falso, para que la suite completa no cueste llamadas"
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:46:55Z",
+      "branch": "feature/43-consolidar-check-sin-cuota",
+      "worktree": "/Users/alan/harness_process-wt/43-consolidar-check-sin-cuota",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/43-consolidar-check-sin-cuota/docs/plan-feature-43-consolidar-check-sin-cuota.md",
+        "mtime": 1787627207.0726984,
+        "size": 2287,
+        "hash": "2bc4995edabc892f"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/43-consolidar-check-sin-cuota/docs/spec-feature-43-consolidar-check-sin-cuota.md",
+        "mtime": 1787573538.0994415,
+        "size": 4973,
+        "hash": "ad5c368351f4cbc9"
+      },
+      "closed_at": "2026-08-26T01:01:47Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 44,
+      "name": "verify_detecta_filtro_vacio",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "verify marca en ROJO un AC cuyo comando es un cargo test que no matcheo ningun test: hoy sale 0 y queda verde sin correr nada. Es el mismo agujero de la #23 y ya produjo un falso verde real (AC-12 de la #28, 0 passed / 322 filtered out). El chequeo mira la salida, no solo el exit code."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-19T00:07:34Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-44-verify-detecta-filtro-vacio.md",
+        "mtime": 1787099570.9904256,
+        "size": 4647,
+        "hash": "96526bbac2d5a150"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-44-verify-detecta-filtro-vacio.md",
+        "mtime": 1787098360.4831843,
+        "size": 9890,
+        "hash": "bcdea96cbe705b08"
+      },
+      "closed_at": "2026-08-19T00:42:37Z",
+      "note": "verify mira la salida ademas del exit code y marca vacio al AC que salio 0 sin ejecutar ningun caso. Cerro el falso verde del AC-12 de la #28, medido de los dos lados: 175 ms en vacio con el test renombrado, 871 ms en verde con el test escrito, contra los 79 ms que tardaba en no correr nada. rojos_del_reporte dejo de comparar cadenas y deriva del enum.",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 45,
+      "name": "close_no_pisa_el_estado_de_la_activa",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "close de una feature que NO es la activa deja intacto el estado de la que si lo esta: no resetea progress/current.md, no archiva el current.md ajeno dentro de docs/estado-feature-<cerrada>.md y no borra progress/.last_autocheck. Ya causo perdida real: al migrar las seis a superseded, el archivo de la #27 quedo con el estado de la #37 encima del de la #36."
+      ],
+      "status": "superseded",
+      "kind": "bug",
+      "started_at": "2026-08-19T00:43:20Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-45-close-no-pisa-el-estado-de-la-activa.md",
+        "mtime": 1787100200.5669446,
+        "size": 654,
+        "hash": "6042582c2804f056"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-45-close-no-pisa-el-estado-de-la-activa.md",
+        "mtime": 1787100200.5670564,
+        "size": 2795,
+        "hash": "abbbad388e590bac"
+      },
+      "closed_at": "2026-08-21T21:08:51Z",
+      "note": "El estado vivo pasa a progress/current-<id>.md por feature, asi que close deja de tener un current.md ajeno que pisar. El spec y el plan de la #45 quedan en la rama fix/45-close-no-pisa-estado-activa como historial del diagnostico",
+      "superseded_by": "47"
+    },
+    {
+      "id": 46,
+      "name": "verify_no_se_cuelga_con_salida_grande",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "verify lee stdout/stderr MIENTRAS el comando corre, no despues de esperarlo: hoy ejecutar() llama wait_timeout antes de leer los pipes, asi que un comando que imprime mas que el buffer del pipe (~64 KB) se bloquea escribiendo y se reporta como timeout aunque haya terminado. Reproducido: 'seq 1 400000' con timeout de 10s sale 'timeout 10001 ms'. Importa mas desde la #44, que necesita la salida completa para decidir si un AC midio algo."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-22T17:38:40Z",
+      "branch": "bugfix/46-verify-no-se-cuelga-con-salida-grande",
+      "worktree": "/Users/alan/harness_process-wt/46-verify-no-se-cuelga-con-salida-grande",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/46-verify-no-se-cuelga-con-salida-grande/docs/plan-feature-46-verify-no-se-cuelga-con-salida-grande.md",
+        "mtime": 1787421494.8925328,
+        "size": 2970,
+        "hash": "7794e6d41e22fe10"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/46-verify-no-se-cuelga-con-salida-grande/docs/spec-feature-46-verify-no-se-cuelga-con-salida-grande.md",
+        "mtime": 1787420908.873443,
+        "size": 7257,
+        "hash": "0f0b40c48f861c36"
+      },
+      "closed_at": "2026-08-22T17:58:57Z",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 47,
+      "name": "features_en_paralelo_con_worktrees",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Varias features pueden implementarse a la vez sin pisarse: cada una arranca en su propia rama GitFlow (feature/<id>-<slug>, bugfix/ si es kind bug) y en su propio worktree hermano (../<repo>-wt/<id>-<slug>), el estado del arnes (feature_list.json y progress/) sigue siendo UNICO y compartido aunque se trabaje desde un worktree, el estado vivo pasa a progress/current-<id>.md con current.md como indice, la feature se infiere de la carpeta sin --feature, y close --to <rama> (obligatorio: sin el se niega y ordena preguntarle al USUARIO a que rama integrar) mergea, pushea sin trailers de IA, borra el worktree y conserva la rama; un conflicto de merge aborta y deja todo intacto. Con cargo test, clippy, setup_smoke y harness_check limpios"
+      ],
+      "status": "done",
+      "started_at": "2026-08-21T22:27:50Z",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/47-features-en-paralelo-con-worktrees/docs/plan-feature-47-features-en-paralelo-con-worktrees.md",
+        "mtime": 1787351743.2166555,
+        "size": 5043,
+        "hash": "5523f6a80c429fd0"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/47-features-en-paralelo-con-worktrees/docs/spec-feature-47-features-en-paralelo-con-worktrees.md",
+        "mtime": 1787351461.8224256,
+        "size": 14568,
+        "hash": "2e6055cda2d73bb6"
+      },
+      "branch": "feature/47-features-en-paralelo-con-worktrees",
+      "worktree": "/Users/alan/harness_process-wt/47-features-en-paralelo-con-worktrees",
+      "closed_at": "2026-08-22T00:02:01Z",
+      "note": "Features en paralelo: rama y worktree por feature, estado unico con vivo por feature, foco por carpeta y cierre GitFlow que integra, publica y limpia",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 48,
+      "name": "verificacion_paralelo_47",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Prueba de la feature #47: dos features a la vez sin pisarse"
+      ],
+      "status": "superseded",
+      "started_at": "2026-08-21T22:28:27Z",
+      "last_plan_sig": {
+        "path": "docs/plan-feature-48-verificacion-paralelo-47.md",
+        "mtime": 1787351307.3583355,
+        "size": 642,
+        "hash": "c12ff2e4eabca933"
+      },
+      "last_spec_sig": {
+        "path": "docs/spec-feature-48-verificacion-paralelo-47.md",
+        "mtime": 1787351307.358446,
+        "size": 2771,
+        "hash": "12277edf1b4a27f2"
+      },
+      "branch": "feature/48-verificacion-paralelo-47",
+      "worktree": "/Users/alan/harness_process-wt/48-verificacion-paralelo-47",
+      "closed_at": "2026-08-22T12:32:50Z",
+      "note": "Fue el segundo frente usado para verificar el paralelismo de la #47 (dos features activas a la vez, cada una en su worktree). Su rama y su worktree se borraron una vez cumplido ese rol",
+      "superseded_by": "47"
+    },
+    {
+      "id": 49,
+      "name": "architecture_en_el_worktree_de_la_feature",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "prd propose y prd apply resuelven docs/architecture.md contra el docs/ de la feature (su worktree) igual que ya hacen con el PRD y el SDD, asi que el cambio viaja con el merge de su rama en vez de quedar suelto en el checkout principal; con un test que falla si alguien vuelve a armar esa ruta contra repo_root, y cargo test, clippy, setup_smoke y harness_check limpios"
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-22T12:02:00Z",
+      "branch": "bugfix/49-architecture-en-el-worktree-de-la-feature",
+      "worktree": "/Users/alan/harness_process-wt/49-architecture-en-el-worktree-de-la-feature",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/49-architecture-en-el-worktree-de-la-feature/docs/plan-feature-49-architecture-en-el-worktree-de-la-feature.md",
+        "mtime": 1787400120.5495846,
+        "size": 659,
+        "hash": "7249d039e098c77f"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/49-architecture-en-el-worktree-de-la-feature/docs/spec-feature-49-architecture-en-el-worktree-de-la-feature.md",
+        "mtime": 1787400203.900576,
+        "size": 5388,
+        "hash": "c1888205507a1186"
+      },
+      "closed_at": "2026-08-22T12:11:57Z",
+      "note": "architecture.md se resuelve contra el docs/ de la feature igual que el PRD y el SDD: el cambio viaja con el merge en vez de quedar suelto en el principal",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 50,
+      "name": "mensaje_de_cierre_dice_la_verdad",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El cierre que no integra (blocked, pending, superseded) deja de afirmar que conserva la rama y el worktree sin mirar si siguen existiendo: informa el estado real de cada uno (los dos, solo la rama, solo el worktree, o ninguno) y no dice nada cuando no queda nada que informar; con test por cada combinacion y cargo test, clippy, setup_smoke y harness_check limpios"
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-22T12:34:01Z",
+      "branch": "bugfix/50-mensaje-de-cierre-dice-la-verdad",
+      "worktree": "/Users/alan/harness_process-wt/50-mensaje-de-cierre-dice-la-verdad",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/50-mensaje-de-cierre-dice-la-verdad/docs/plan-feature-50-mensaje-de-cierre-dice-la-verdad.md",
+        "mtime": 1787402041.6664877,
+        "size": 650,
+        "hash": "e7098e7200d9a738"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/50-mensaje-de-cierre-dice-la-verdad/docs/spec-feature-50-mensaje-de-cierre-dice-la-verdad.md",
+        "mtime": 1787402127.0278473,
+        "size": 5340,
+        "hash": "11b3a317ad558dfb"
+      },
+      "closed_at": "2026-08-22T12:41:32Z",
+      "note": "El cierre que no integra informa lo que realmente existe (rama y/o worktree) y calla cuando no queda nada",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 51,
+      "name": "revision_adversarial_y_modelos_por_rol",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Los tres roles de Claude quedan fijos en los dos instaladores: implementer con claude-opus-5, leader y reviewer con claude-fable-5, los tres con effort xhigh, y el espejo generado coincide con lo commiteado (deja de pisarse en cada instalacion); el rol reviewer pasa a revisar de forma adversarial (intenta REFUTAR cada AC en vez de confirmarlo, y verifica por su cuenta los hallazgos sin heredar la evidencia del implementer) con disciplina explicita de tokens (partir del diff, leer por rangos, citar archivo:linea en vez de pegar codigo); y el arnes gana 'revision --feature <id>', que arma el paquete minimo de revision (diff de la rama, AC del spec, tabla de evidencia, reporte de verify y rutas protegidas tocadas) acotado por un presupuesto de lineas, para que el reviewer no tenga que explorar el repo. Con cargo test, clippy, setup_smoke y harness_check limpios"
+      ],
+      "status": "done",
+      "started_at": "2026-08-22T12:48:51Z",
+      "branch": "feature/51-revision-adversarial-y-modelos-por-rol",
+      "worktree": "/Users/alan/harness_process-wt/51-revision-adversarial-y-modelos-por-rol",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/51-revision-adversarial-y-modelos-por-rol/docs/plan-feature-51-revision-adversarial-y-modelos-por-rol.md",
+        "mtime": 1787402931.4294417,
+        "size": 656,
+        "hash": "5aed2da3c142964e"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/51-revision-adversarial-y-modelos-por-rol/docs/spec-feature-51-revision-adversarial-y-modelos-por-rol.md",
+        "mtime": 1787403120.1039472,
+        "size": 12911,
+        "hash": "4dfcaba27b89a104"
+      },
+      "closed_at": "2026-08-22T13:07:28Z",
+      "note": "Modelos por rol (implementer opus-5, lider y reviewer fable-5, xhigh) en la tabla de los dos instaladores, reviewer adversarial con disciplina de tokens, y el comando revision que arma el paquete acotado: 478 lineas / ~6654 tokens contra los 10M que motivaron la feature",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 52,
+      "name": "mcp_atlassian_en_los_cuatro_backends",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El instalador deja el MCP de Atlassian configurado por PROYECTO en los cuatro backends (Claude, Codex, Kimi y Grok) cuando el repo tiene binding de Atlassian, sin tocar la configuracion global del usuario salvo donde el CLI no admita alcance de proyecto; cada backend con su formato real (Claude .mcp.json, Kimi .kimi-code/mcp.json, Grok .grok/config.toml, Codex su config con el plugin atlassian-rovo), el instalador NO intenta hacer el OAuth (imprime el comando exacto de autorizacion por CLI) y no pisa lo que el usuario ya tenga; con cargo test, clippy, setup_smoke y harness_check limpios"
+      ],
+      "status": "done",
+      "started_at": "2026-08-22T14:08:28Z",
+      "branch": "feature/52-mcp-atlassian-en-los-cuatro-backends",
+      "worktree": "/Users/alan/harness_process-wt/52-mcp-atlassian-en-los-cuatro-backends",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/52-mcp-atlassian-en-los-cuatro-backends/docs/plan-feature-52-mcp-atlassian-en-los-cuatro-backends.md",
+        "mtime": 1787409857.7176895,
+        "size": 3227,
+        "hash": "76a63df9c73f6ca2"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/52-mcp-atlassian-en-los-cuatro-backends/docs/spec-feature-52-mcp-atlassian-en-los-cuatro-backends.md",
+        "mtime": 1787408117.4986925,
+        "size": 10121,
+        "hash": "c0e3ffd9c260ba0a"
+      },
+      "closed_at": "2026-08-22T14:49:31Z",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 53,
+      "name": "check_no_se_cuelga_por_stdin",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness_check.sh invoca commit_guard.sh con stdin cerrado (o el guard deja de bloquearse en INPUT=$(cat) cuando no viene de un hook): una corrida no interactiva del check termina siempre en vez de colgarse. Medido: 18 minutos colgado en una corrida en segundo plano; con </dev/null corre limpio."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-24T02:47:00Z",
+      "branch": "bugfix/53-check-no-se-cuelga-por-stdin",
+      "worktree": "/Users/alan/harness_process-wt/53-check-no-se-cuelga-por-stdin",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/53-check-no-se-cuelga-por-stdin/docs/plan-feature-53-check-no-se-cuelga-por-stdin.md",
+        "mtime": 1787703229.7077508,
+        "size": 2099,
+        "hash": "6e7f7b0f187adf72"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/53-check-no-se-cuelga-por-stdin/docs/spec-feature-53-check-no-se-cuelga-por-stdin.md",
+        "mtime": 1787573543.0268836,
+        "size": 4795,
+        "hash": "17184923ebf7ee71"
+      },
+      "closed_at": "2026-08-26T01:01:48Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "remedios-que-la-herramienta-sugiere"
+    },
+    {
+      "id": 54,
+      "name": "prd_apply_escribe_en_el_docs_de_la_feature",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "prd propose/apply resuelven PRD, SDD, architecture y el prd-diff contra el docs/ de la FEATURE (para_feature), no contra el CWD: corridos desde el checkout principal con la feature en un worktree, los tres documentos y el diff quedan en el worktree y el merge del cierre los lleva sin copiarlos a mano. Misma familia que la #49."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-24T02:47:05Z",
+      "branch": "bugfix/54-prd-apply-escribe-en-el-docs-de-la-feature",
+      "worktree": "/Users/alan/harness_process-wt/54-prd-apply-escribe-en-el-docs-de-la-feature",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/54-prd-apply-escribe-en-el-docs-de-la-feature/docs/plan-feature-54-prd-apply-escribe-en-el-docs-de-la-feature.md",
+        "mtime": 1787703605.635295,
+        "size": 2744,
+        "hash": "374a4688b86808ae"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/54-prd-apply-escribe-en-el-docs-de-la-feature/docs/spec-feature-54-prd-apply-escribe-en-el-docs-de-la-feature.md",
+        "mtime": 1787573548.292354,
+        "size": 5317,
+        "hash": "a6a204fe21aa8194"
+      },
+      "closed_at": "2026-08-26T01:01:47Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "documentos-del-usuario-vs-plantillas"
+    },
+    {
+      "id": 55,
+      "name": "check_resuelve_el_spec_de_la_feature",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El resumen por feature de harness_check.sh usa la misma resolucion que check-spec: con la feature #N en un worktree deja de decir '[spec] #N ausente' cuando el spec existe y esta aprobado."
+      ],
+      "status": "done",
+      "started_at": "2026-08-24T02:47:10Z",
+      "branch": "feature/55-check-resuelve-el-spec-de-la-feature",
+      "worktree": "/Users/alan/harness_process-wt/55-check-resuelve-el-spec-de-la-feature",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/55-check-resuelve-el-spec-de-la-feature/docs/plan-feature-55-check-resuelve-el-spec-de-la-feature.md",
+        "mtime": 1787703920.8442228,
+        "size": 2595,
+        "hash": "5328c93b9b540eda"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/55-check-resuelve-el-spec-de-la-feature/docs/spec-feature-55-check-resuelve-el-spec-de-la-feature.md",
+        "mtime": 1787573553.1952057,
+        "size": 4990,
+        "hash": "8628738a18d0ae7c"
+      },
+      "closed_at": "2026-08-26T01:03:10Z",
+      "note": "Cierre tras integracion consolidada y validacion verde; sello documental aprobado sin cambios maestros.",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 56,
+      "name": "paquete_de_contexto_para_implementar",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Simetrico a 'revision' (#51) pero del lado de implementar: un comando que arma el paquete de contexto de una feature o tema (architecture.md, impacto del hub, grafo de graphify, hits de buscar, lecciones y specs relacionados) acotado por presupuesto, que declara lo que recorta y reporta su tamaño; y que AVISA cuando el mapa no cubre el tema o esta vencido/roto, en vez de devolver vacio en silencio. Disparador: un mapeo de 4 agentes y 693.6k tokens sobre el motor de reajuste, con architecture.md apuntando a una ruta inexistente y el mapa canonico sin una sola mencion del tema."
+      ],
+      "status": "done",
+      "started_at": "2026-08-22T16:27:09Z",
+      "branch": "feature/56-paquete-de-contexto-para-implementar",
+      "worktree": "/Users/alan/harness_process-wt/56-paquete-de-contexto-para-implementar",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/56-paquete-de-contexto-para-implementar/docs/plan-feature-56-paquete-de-contexto-para-implementar.md",
+        "mtime": 1787417234.8716254,
+        "size": 4540,
+        "hash": "bec095a14b44379b"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/56-paquete-de-contexto-para-implementar/docs/spec-feature-56-paquete-de-contexto-para-implementar.md",
+        "mtime": 1787416284.0547178,
+        "size": 11440,
+        "hash": "f5d10998d182a5a0"
+      },
+      "closed_at": "2026-08-22T16:50:32Z",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 57,
+      "name": "verify_corre_en_el_worktree_de_la_feature",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "harness verify ejecuta los comandos de los AC en el directorio de la FEATURE (su worktree), igual que resuelve los docs: hoy escribe el reporte en el worktree pero corre los comandos en el checkout principal, donde el codigo nuevo no existe. Efecto medido en la #56: 4 AC quedaron 'sin casos' (comando exit 0, cero tests ejecutados) y con HARNESS_REPO_ROOT apuntando al worktree los mismos 4 dieron verde. Misma familia que la #49 y la #54."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-24T02:47:16Z",
+      "branch": "bugfix/57-verify-corre-en-el-worktree-de-la-feature",
+      "worktree": "/Users/alan/harness_process-wt/57-verify-corre-en-el-worktree-de-la-feature",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/57-verify-corre-en-el-worktree-de-la-feature/docs/plan-feature-57-verify-corre-en-el-worktree-de-la-feature.md",
+        "mtime": 1787704171.9238017,
+        "size": 2648,
+        "hash": "4f3ec20a7a68a453"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/57-verify-corre-en-el-worktree-de-la-feature/docs/spec-feature-57-verify-corre-en-el-worktree-de-la-feature.md",
+        "mtime": 1787573559.3788905,
+        "size": 5248,
+        "hash": "437e2028550d85d8"
+      },
+      "closed_at": "2026-08-26T00:54:21Z",
+      "note": "Integracion consolidada de las correcciones #38-43 y #53-57; pruebas, clippy, checks de scripts y smoke de instalacion en verde.",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 58,
+      "name": "el_guard_no_bloquea_por_lo_que_escribe_el_arnes",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "commit_guard.sh deja de bloquear el turno por los documentos que escribio el PROPIO arnes. Hoy trata como microservicio a cualquier subdirectorio que sea repo git, y en un proyecto donde docs/ es su propio repo (137 artefactos del arnes en realestate) cada start/advance/prd apply deja el turno bloqueado pidiendo un commit por microservicio de archivos que el close va a commitear. Es la regla que ya declara docs/rutas-protegidas.md ('el arnes no se bloquea a si mismo') aplicada al guard, y viaja por el instalador a los proyectos ya instalados."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-22T16:54:25Z",
+      "branch": "bugfix/58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes",
+      "worktree": "/Users/alan/harness_process-wt/58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes/docs/plan-feature-58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes.md",
+        "mtime": 1787419974.4592886,
+        "size": 3119,
+        "hash": "bbd2c19778993c23"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes/docs/spec-feature-58-el-guard-no-bloquea-por-lo-que-escribe-el-arnes.md",
+        "mtime": 1787419962.9569068,
+        "size": 7752,
+        "hash": "5c78e237dcee74b5"
+      },
+      "closed_at": "2026-08-22T17:33:32Z",
+      "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 59,
+      "name": "cmd_smoke_real_en_windows",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Una ejecución Windows real valida setup_harness.cmd y evita que sus pruebas de runtime queden omitidas."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-08-27T19:23:03Z",
+      "branch": "bugfix/59-cmd-smoke-real-en-windows",
+      "worktree": "/Users/alan/harness_process-wt/59-cmd-smoke-real-en-windows",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/59-cmd-smoke-real-en-windows/docs/plan-feature-59-cmd-smoke-real-en-windows.md",
+        "mtime": 1787845890.834779,
+        "size": 3189,
+        "hash": "edac146130b99b07"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/59-cmd-smoke-real-en-windows/docs/spec-feature-59-cmd-smoke-real-en-windows.md",
+        "mtime": 1787706923.0472083,
+        "size": 4633,
+        "hash": "ef5f7a1ff5877659"
+      },
+      "closed_at": "2026-08-27T19:28:15Z",
+      "note": "CI Windows versionado (.github/workflows/windows-cmd-installer.yml en windows-latest), smoke CMD nativo en tests/cmd_installer_check.ps1 que se NIEGA a correr fuera de Windows en vez de informar skip verde, y el check Bash exige que ambos existan. LIMITACION EXPLICITA: se cierra con la evidencia estatica y local (cmd_installer_check.sh y parity_check.sh verdes, workflow versionado y bien formado); NO se observo el runner windows-latest en verde porque gh no esta autenticado en esta maquina. Decision del usuario 2026-08-27.",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 60,
+      "name": "la_vuelta_al_prd_no_se_pierde_ni_miente",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El close deja de perder el hito y la bitacora del PRD, y deja de escribir punteros que no resuelven. Medido en este mismo repo: 7 de 18 merges de cierre descartaron en silencio la linea que su rama habia escrito (#40,#41,#42,#43,#53,#54,#55 — las mismas siete que hubo que restaurar a mano en el commit cf62b24 'docs(prd): preserva cierres 40-55'), porque el cierre escribe el PRD dentro del worktree (close.rs:157/373) y dos features cerrando en paralelo apendean al final de la misma seccion: git merge-tree sobre 8175209+0db6a5a reproduce el conflicto. Rompe el AC-5 de la #54. Ademas la bitacora contiene hoy 18 punteros a ../<repo>-wt/<id>-<slug>/docs/spec-*.md, worktrees que borrar_worktree --force destruye en la misma corrida (close.rs:387), y un impl-<n>.md hardcodeado sin comprobar existencia (close.rs:390). Decision del usuario 2026-08-27: el hito y la bitacora se escriben en el docs/prd/ de la RAIZ DESPUES de integrar; la perdida nunca es muda y deja pendiente durable; los punteros se validan al escribir, hay check que los escanea y reparador para los 18 ya rotos."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-27T15:52:01Z",
+      "branch": "bugfix/60-la-vuelta-al-prd-no-se-pierde-ni-miente",
+      "worktree": "/Users/alan/harness_process-wt/60-la-vuelta-al-prd-no-se-pierde-ni-miente",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/60-la-vuelta-al-prd-no-se-pierde-ni-miente/docs/plan-feature-60-la-vuelta-al-prd-no-se-pierde-ni-miente.md",
+        "mtime": 1787848028.9587972,
+        "size": 1047,
+        "hash": "40d6d8130ec3da95"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/60-la-vuelta-al-prd-no-se-pierde-ni-miente/docs/spec-feature-60-la-vuelta-al-prd-no-se-pierde-ni-miente.md",
+        "mtime": 1787847713.1899884,
+        "size": 13679,
+        "hash": "16ec1e020bb6b1ea"
+      },
+      "closed_at": "2026-08-27T18:05:47Z",
+      "note": "La vuelta al PRD sale del branch: se escribe en el docs/prd/ de la RAIZ y DESPUES de integrar, y ningun puntero se escribe sin verificar que resuelve. Nuevo prd doctor [--reparar]. Reparados los 18 punteros rotos y 13 bitacoras faltantes. 12/12 AC verdes, 576 tests.",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 61,
+      "name": "el_merge_del_cierre_no_toca_tu_checkout",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El merge del cierre deja de correr en el checkout del USUARIO y deja de fallar tarde por el escritorio desordenado. git.rs promete que 'el merge corre en un worktree temporal (no toca tu checkout)... el cierre de una feature no puede exigirte tener el escritorio ordenado', pero merge_en solo usa el worktree temporal cuando el destino NO es la rama abierta en el principal: si estas parado en main y cerras --to main, mergea ahi mismo. Paso de verdad al cerrar la #60 el 2026-08-27: el merge aborto con 'Your local changes to the following files would be overwritten by merge: docs/prd/PRD-master.md, docs/lecciones/promesas-estructurales-vs-disciplina.md' DESPUES de haber commiteado el worktree, dejando el cierre a medias. Medido: 'git worktree add --detach <tmp> <rama-abierta>' SI funciona sobre la rama checkouteada, y 'git reset --keep' sincroniza el principal preservando los cambios locales (aborta atomicamente si colisionan). Decision del usuario 2026-08-27: el merge corre SIEMPRE en worktree detached, y la colision irreductible se detecta ANTES de tocar nada y se niega con la lista exacta de archivos y el remedio; el arnes no decide por el usuario que gana."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-27T18:14:20Z",
+      "branch": "bugfix/61-el-merge-del-cierre-no-toca-tu-checkout",
+      "worktree": "/Users/alan/harness_process-wt/61-el-merge-del-cierre-no-toca-tu-checkout",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/61-el-merge-del-cierre-no-toca-tu-checkout/docs/plan-feature-61-el-merge-del-cierre-no-toca-tu-checkout.md",
+        "mtime": 1787854460.6420405,
+        "size": 657,
+        "hash": "3962a9e08feb80f6"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/61-el-merge-del-cierre-no-toca-tu-checkout/docs/spec-feature-61-el-merge-del-cierre-no-toca-tu-checkout.md",
+        "mtime": 1787854799.4158382,
+        "size": 10275,
+        "hash": "9a3be3858b1da67c"
+      },
+      "closed_at": "2026-08-27T18:35:58Z",
+      "note": "El merge del cierre corre siempre en un worktree temporal --detach: el checkout del usuario nunca participa. La rama destino avanza con reset --keep, que conserva lo que tenga sin commitear. La colision irreductible se detecta ANTES de commitear o mergear y nombra los archivos. 7/7 AC ejecutables verdes.",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 62,
+      "name": "el_cierre_no_declara_hecho_lo_que_no_hizo",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "close deja de escribir el estado del cierre antes de haber integrado. Hoy el orden es: mutar feature_list.json a done -> emitir la transicion a Jira -> anotar el plan -> archivar el estado -> borrar current-<id> -> reescribir el indice -> history.md -> memorias del hub -> imprimir 'Feature #N cerrada' -> integrar. Si integrar falla (falta --to, colision con trabajo sin commitear, o conflicto real de merge) las nueve cosas ya pasaron y todas mienten: la feature figura done sin estar integrada. Paso de verdad al cerrar la #60 el 2026-08-27, y quedo anotado como deuda en el spec de la #61 (Fuera de alcance). Decision del usuario 2026-08-27: se REORDENA (no se agrega rollback): las validaciones que pueden negarse corren primero, despues se escriben los artefactos que viajan en la rama (anotacion del plan y estado archivado, hechos idempotentes porque el worktree se borra en el merge), despues se integra, y recien con la integracion hecha se escribe el estado. Si la integracion falla no hay nada que revertir porque no se escribio nada. Un rollback quedaria parcial: el intent ya emitido a Jira y la memoria ya escrita en el hub no se pueden deshacer."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-27T18:45:12Z",
+      "branch": "bugfix/62-el-cierre-no-declara-hecho-lo-que-no-hizo",
+      "worktree": "/Users/alan/harness_process-wt/62-el-cierre-no-declara-hecho-lo-que-no-hizo",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/62-el-cierre-no-declara-hecho-lo-que-no-hizo/docs/plan-feature-62-el-cierre-no-declara-hecho-lo-que-no-hizo.md",
+        "mtime": 1787856312.7947934,
+        "size": 659,
+        "hash": "9426832ff52c9873"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/62-el-cierre-no-declara-hecho-lo-que-no-hizo/docs/spec-feature-62-el-cierre-no-declara-hecho-lo-que-no-hizo.md",
+        "mtime": 1787856600.5301554,
+        "size": 9598,
+        "hash": "e1711120c1ea5b46"
+      },
+      "closed_at": "2026-08-27T19:08:12Z",
+      "note": "El cierre corre en cuatro fases: lo que puede negarse, los artefactos que viajan en la rama (idempotentes), integrar, y recien despues el estado. Una integracion fallida ya no deja el backlog, Jira, progress/, history.md ni las memorias afirmando un cierre que no ocurrio. Sin rollback: no hay nada escrito que revertir. 7/7 AC ejecutables verdes.",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 63,
+      "name": "el_arnes_no_afirma_lo_que_no_puede_comprobar",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Dos afirmaciones del arnes que no se sostienen. (1) tests/commit_guard_check.sh usa 'timeout 10' para decidir si un script se colgo, y timeout(1) NO existe en macOS: el subshell devuelve 127, y como el test solo considera colgado el 124, el modo 'no-cuelga' sale VERDE sin medir nada y el modo 'prueba-del-rojo' falla siempre. Medido en esta maquina: 'command -v timeout' no encuentra nada, 'command -v gtimeout' tampoco, y el subshell del test devuelve 127. Es exactamente la leccion criterios-de-cierre-que-se-pueden-fallar, y fue la propia prueba-del-rojo la que lo delato. (2) close imprime 'Estado archivado en ../<repo>-wt/<id>-<slug>/docs/estado-feature-<id>.md', una ruta al worktree que el propio cierre acaba de borrar con --force unos milisegundos antes; el archivo real queda en docs/estado-feature-<id>-<slug>.md de la raiz despues del merge. Es el mismo defecto que la #92 arreglo para los punteros del PRD, sobreviviendo en un mensaje de consola. Decision del usuario 2026-08-27: las dos en una sola feature, porque comparten el acuerdo (el arnes no afirma lo que no puede comprobar)."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-27T19:28:42Z",
+      "branch": "bugfix/63-el-arnes-no-afirma-lo-que-no-puede-comprobar",
+      "worktree": "/Users/alan/harness_process-wt/63-el-arnes-no-afirma-lo-que-no-puede-comprobar",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/63-el-arnes-no-afirma-lo-que-no-puede-comprobar/docs/plan-feature-63-el-arnes-no-afirma-lo-que-no-puede-comprobar.md",
+        "mtime": 1787858922.9003353,
+        "size": 662,
+        "hash": "2a42a4bc791d04a6"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/63-el-arnes-no-afirma-lo-que-no-puede-comprobar/docs/spec-feature-63-el-arnes-no-afirma-lo-que-no-puede-comprobar.md",
+        "mtime": 1787859012.974897,
+        "size": 8115,
+        "hash": "80e010caf0a7ecda"
+      },
+      "closed_at": "2026-08-27T19:41:21Z",
+      "note": "El test del commit_guard vuelve a medir en macOS (timeout(1) no existe ahi: ahora elige entre timeout/gtimeout/perl alarm, se auto-prueba, y falla si no hay ninguno en vez de saltear en verde) y la prueba-del-rojo revierte las DOS defensas contra el cuelgue, no una. Y la ruta del estado archivado que imprime el cierre apunta a donde el archivo queda despues del merge, no al worktree que el propio cierre borro. 7/7 AC verdes.",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 64,
+      "name": "el_arnes_no_promete_enforcement_que_no_hace",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Dos promesas de enforcement del arnes que no se sostienen, con el mismo acuerdo detras. (1) El flujo promete una etapa de review que ningun comando comprueba. AGENTS.md:20 la declara paso 4 del orden de trabajo, roles/reviewer.md le da mandato adversarial ('intentar ROMPER, no confirmar') y tres veredictos (approved/changes_requested/blocked), y CHECKPOINTS.md:22 la lista como casilla de cierre ('docs/review-<feature>.md contiene veredicto del reviewer'); pero close --status done corre exactamente cuatro gates -- spec_gate (close.rs:101), verificacion::gate (close.rs:110), documentos::gate (close.rs:117) y lecciones::gate (close.rs:121) -- y ninguno mira el review: grep -rn require_review rust/src no devuelve nada. Medido el 2026-08-28 sobre este backlog: 40 de 55 features done tienen docs/review-<id>.md (72,7%), y las 15 sin review son #38-43, #53-55, #57 y #59-63, o sea los cierres mas recientes; la etapa no se hace 'a veces', se dejo de hacer, y la reemplazo de facto el par verify + leccion, que si tienen gate. harness_cli revision (rust/src/cli.rs:195-204) arma el paquete de revision pero es solo lectura: no escribe el veredicto ni lo valida. (2) Dos reglas muertas en el mismo bloque rules: feature_list.json declara require_tests_to_close: true y require_impact_check: true, pero ningun codigo las lee. Medido el 2026-08-28: grep -rhoE 'require_[a-z_]+' rust/src/ devuelve require_spec_approved (14), require_leccion (11), require_docs_al_dia (8), require_binding (8), require_verify_green (5), require_client (5), require_issue (4) -- las dos primeras no aparecen NUNCA. Estan en true y no gatean nada: quien lee el backlog cree que el cierre exige tests e impacto, y no los exige. Decision del usuario 2026-08-28: las dos en una sola feature, porque comparten el acuerdo (el arnes no promete enforcement que no hace), igual que la #63. Para (1) se agrega la regla require_review con el mismo patron que los otros cuatro gates -- exige docs/review-<id>.md existente, mas nuevo que docs/impl-<id>.md, y con veredicto approved -- gateando close --status done, con Exit code 2 y mensaje [GATE]. Para (2) hay que decidir por cada regla al implementar: o se implementa como gate real o se borra de rules; no se deja declarada sin efecto."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-28T21:52:13Z",
+      "branch": "bugfix/64-el-arnes-no-promete-enforcement-que-no-hace",
+      "worktree": "/Users/alan/harness_process-wt/64-el-arnes-no-promete-enforcement-que-no-hace",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/64-el-arnes-no-promete-enforcement-que-no-hace/docs/plan-feature-64-el-arnes-no-promete-enforcement-que-no-hace.md",
+        "mtime": 1787964157.6985283,
+        "size": 1532,
+        "hash": "48aeb56f0fecca30"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/64-el-arnes-no-promete-enforcement-que-no-hace/docs/spec-feature-64-el-arnes-no-promete-enforcement-que-no-hace.md",
+        "mtime": 1787965316.8761294,
+        "size": 16546,
+        "hash": "093ba99a1660dec4"
+      },
+      "closed_at": "2026-08-30T18:08:19Z",
+      "leccion": "reglas-que-se-aplican-a-si-mismas"
+    },
+    {
+      "id": 65,
+      "name": "el_arnes_cierra_lo_resuelto_aguas_arriba",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "No hay forma honesta de cerrar un bug que se reporto en un repo y se arreglo en OTRO, y el unico camino que hoy funciona AFIRMA ALGO FALSO CON EXIT 0. Medido el 2026-08-31 sobre el backlog real de realestate (donde viven los bugs #91 y #92, arreglados aguas arriba en harness_process como la #60 y su cola en la #63): `close --feature 91 --status superseded --absorbida-por 200` se niega bien ('esa feature no existe. Una referencia rota es peor que ninguna', rc=2); `--absorbida-por 'harness_process#60'` se niega igual (no hay sintaxis para lo ajeno, rc=2); pero `--absorbida-por 60` sale rc=0 y `status` imprime '#91 [superseded por #60]' — y la #60 de ESE repo es `cerrar-reparaciones-del-acta-de-restitucion`, una feature de negocio sin ninguna relacion. close.rs:74-82 valida con `find_feature_index`, o sea 'existe un id igual en ESTE backlog', que no es identidad. CORRECCION del acceptance original (2026-08-31): decia que `--note` es 'un parche que no es trazable'. Es FALSO y esta medido: la nota queda en CUATRO lugares (feature_list.json, progress/history.md, el plan y docs/estado-feature-<id>.md). Ese AC nacia de una premisa no verificada, el mismo defecto que el AC-11 de la #66; se reescribe sobre lo que si se midio. Lo que si duele, ademas de la afirmacion falsa: `blocked` deja la feature en el DENOMINADOR de `prd tree` para siempre y `status` la muestra '[blocked]', que es falso — no esta trabada, esta resuelta. Y la cabecera de `status` ya no suma hoy ('4 feature(s) | active=0 pending=0 blocked=0 done=2'). Decision del usuario 2026-08-31: estado NUEVO con su propio campo, con la sintaxis que el repo YA usa para lo cross-proyecto (`<proyecto>/feature-<id>`, graph/ids.rs:8-14 `qualify`, con test en ids.rs:59), NO validada contra nada y DICIENDOLO en el mensaje y en `status` (leccion #63: el arnes no afirma lo que no puede comprobar). Al implementar hay que cubrir los cinco sitios que comparan el literal del estado (cli.rs:41, prd.rs:895, status.rs:47, emit.rs:276 y :293): el brazo `_` de emit.rs:277 manda a `statuses.pending` todo lo que no reconoce, que es exactamente el defecto #1 de la #37 (un cierre que reabria el ticket en Jira). PROHIBIDO en esta feature: que `close` haga I/O de red o resuelva rutas de otros repos para 'validar' la referencia. Si algun dia se valida, con timeout y con 'no se pudo comprobar' como resultado, nunca como error."
+      ],
+      "status": "done",
+      "prd": "master",
+      "started_at": "2026-08-31T00:31:33Z",
+      "branch": "feature/65-el-arnes-cierra-lo-resuelto-aguas-arriba",
+      "worktree": "/Users/alan/harness_process-wt/65-el-arnes-cierra-lo-resuelto-aguas-arriba",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/65-el-arnes-cierra-lo-resuelto-aguas-arriba/docs/plan-feature-65-el-arnes-cierra-lo-resuelto-aguas-arriba.md",
+        "mtime": 1788136293.5692513,
+        "size": 658,
+        "hash": "2c4a6537521c19fb"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/65-el-arnes-cierra-lo-resuelto-aguas-arriba/docs/spec-feature-65-el-arnes-cierra-lo-resuelto-aguas-arriba.md",
+        "mtime": 1788139640.152357,
+        "size": 11804,
+        "hash": "0f9f1793501a62a6"
+      },
+      "closed_at": "2026-09-01T22:21:25Z",
+      "note": "estado resuelto-aguas-arriba; dos AC que no podian fallar, encontrados por la prueba del rojo",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 66,
+      "name": "el_stop_hook_no_entra_en_bucle",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "El Stop hook del arnes entra en bucle y no hay accion que lo satisfaga. Reportado por el usuario el 2026-08-28 ('esto esta pasando seguido'): el hook falla con 'Cambios sin commitear en: docs / [Harness] Check fallo con 1 problema(s)' y Claude Code lo vuelve a invocar. La mitigacion YA EXISTE y nadie la conecta: commit_guard.sh:161 sale 0 cuando STOP_HOOK_ACTIVE=1, y commit_guard.sh:17-19 lo detecta por el env HARNESS_STOP_HOOK_ACTIVE o por el campo stop_hook_active del JSON del evento. Pero harness_check.sh:128 invoca el guard con </dev/null -- sin el JSON, a proposito: la feature #52 midio un cuelgue de 18 minutos por dejarle stdin abierto-- y su comentario (harness_check.sh:126-128) declara el contrato 'quien SI es un hook lo lee una vez y exporta HARNESS_STOP_HOOK_ACTIVE antes de llamar al check'. Ese contrato NO lo cumple nadie: el hook que escribe el propio instalador (setup_harness.sh:2459) es 'sh harness_cli autocheck >/dev/null 2>&1 || true; bash harness_check.sh', sin leer stdin ni exportar nada. Entonces el guard bloquea, harness_check sale 2, el hook falla y el ciclo se repite; y cuando los cambios sucios son de OTRA sesion o de otro repo del multi-repo, el agente no puede hacer nada para arreglarlo. Es el mismo defecto que la #64: una promesa de enforcement (aca, de mitigacion) que no esta conectada. Al implementar hay que decidir dos cosas: (1) si el hook exporta HARNESS_STOP_HOOK_ACTIVE leyendo el JSON de stdin (cumple el contrato tal como esta escrito) o si lo exporta siempre (mas simple, pero cambia la semantica: stop_hook_active significa 'ya se reinvoco', no 'esto es un Stop hook'); (2) si harness_check.sh debe distinguir un problema ACCIONABLE por el agente de uno que no lo es, porque un hook que bloquea por algo que el agente no puede tocar es un bucle garantizado. El fix toca los dos instaladores (sh y ps1) y las cuatro superficies de hooks (.claude/settings.json, .codex/hooks.json, .gemini/settings.json, .grok)."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-30T18:34:54Z",
+      "branch": "bugfix/66-el-stop-hook-no-entra-en-bucle",
+      "worktree": "/Users/alan/harness_process-wt/66-el-stop-hook-no-entra-en-bucle",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/66-el-stop-hook-no-entra-en-bucle/docs/plan-feature-66-el-stop-hook-no-entra-en-bucle.md",
+        "mtime": 1788120536.7292616,
+        "size": 1388,
+        "hash": "8f1ecff6c6948d9a"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/66-el-stop-hook-no-entra-en-bucle/docs/spec-feature-66-el-stop-hook-no-entra-en-bucle.md",
+        "mtime": 1788128113.3738189,
+        "size": 14434,
+        "hash": "dbf8d8a654fce6d4"
+      },
+      "closed_at": "2026-08-30T23:57:12Z",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 67,
+      "name": "los_dos_parsers_del_review_no_se_contradicen",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Observaciones que el reviewer dejo vivas al aprobar la #64 (2026-08-30), las dos en el mismo modulo. (1) El arnes tiene DOS parsers de fences sobre el mismo archivo y no coinciden: el del gate (rust/src/revision.rs:438, lineas_fuera_de_bloque) recuerda CUAL fence abrio y solo cierra con el mismo; el limpiador de estampar (rust/src/commands/revision.rs:121) togglea con cualquiera de los dos. Medido en sandbox: un review con un bloque de backticks que contiene UNA sola linea de tildes y despues una linea \"Revisado: approved ...\" citada -> revision --veredicto estampa bien PERO BORRA la linea citada; con DOS lineas de tildes adentro los toggles se alinean de casualidad y sobrevive. El gate NO se ve afectado (close da rc=2 con el sello dentro del bloque), asi que el costo es mutar prosa del reviewer en un rincon rebuscado. Es la SEGUNDA vez que la asimetria entre esos dos parsers produce un hallazgo: la primera fue en la tercera vuelta de revision de la #64. El fix es reusar el mismo tracking de abierto_con en los dos lados, o mejor, que haya UN solo parser. (2) El tope de 8MB de cita_resuelve (rust/src/revision.rs:534) niega citas VALIDAS cuya linea cae mas alla de los primeros 8MB -- medido: un blob de 200MB en una sola linea citado como blob:1 existe y se rechaza. Negar es el lado seguro y para archivos fuente reales nunca aplica, pero el comentario de revision.rs:526 dice \"se cuentan lineas sin cargar el archivo entero\" y no menciona el tope, o sea que el codigo promete mas de lo que hace -- el mismo defecto que la #64 vino a cerrar, una capa mas adentro. No hay test del tope en la suite (un fixture de 8MB+ pesaria; habria que hacerlo parametrizable para poder probarlo con un tope chico)."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "prd": "master",
+      "started_at": "2026-08-31T00:31:38Z",
+      "branch": "bugfix/67-los-dos-parsers-del-review-no-se-contradicen",
+      "worktree": "/Users/alan/harness_process-wt/67-los-dos-parsers-del-review-no-se-contradicen",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/67-los-dos-parsers-del-review-no-se-contradicen/docs/plan-feature-67-los-dos-parsers-del-review-no-se-contradicen.md",
+        "mtime": 1788300730.43423,
+        "size": 821,
+        "hash": "faeeac09c1de8035"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/67-los-dos-parsers-del-review-no-se-contradicen/docs/spec-feature-67-los-dos-parsers-del-review-no-se-contradicen.md",
+        "mtime": 1788300582.161859,
+        "size": 12940,
+        "hash": "1ee699735ec75981"
+      },
+      "closed_at": "2026-09-01T22:17:22Z",
+      "note": "un solo parser de bloques de codigo; dos bugs de ejecucion de shell desde documentacion cerrados",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 68,
+      "name": "el arnes no pierde los AC que pide revisar a mano",
+      "microservicios": [],
+      "acceptance": [
+        "Un AC escrito `- AC-11 (MANUAL): ...` lo ve `verify` (como [--] manual, que ya existe y no bloquea) y lo exige el gate del review. Hoy `ac_de` (rust/src/verificacion.rs:183) pide `:` pegado a los digitos, asi que la anotacion que marca 'esto lo tiene que mirar una persona' es justo lo que hace desaparecer el AC de los dos consumidores: verify reporta '10 AC (10 en total)' sobre un spec de 11, y acs_sin_fila no le pide fila al reviewer. Pasa en los specs #64, #65, #66 y #67. La maquinaria de manuales ya esta entera (Estado::Manual, [--], el conteo, bloquea()=false): lo unico que falta es que el parser no tire el AC. Ojo al cerrar: el arreglo vuelve visibles los cuatro AC manuales que hoy no se cuentan."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-01T22:28:27Z",
+      "branch": "bugfix/68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man",
+      "worktree": "/Users/alan/harness_process-wt/68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man/docs/plan-feature-68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man.md",
+        "mtime": 1788301708.051577,
+        "size": 675,
+        "hash": "dba6c6ddaf9b521d"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man/docs/spec-feature-68-el-arnes-no-pierde-los-ac-que-pide-revisar-a-man.md",
+        "mtime": 1788301923.5058818,
+        "size": 8908,
+        "hash": "c693c1cd236bbd17"
+      },
+      "closed_at": "2026-09-01T22:48:56Z",
+      "note": "el parser tiraba los AC marcados MANUAL; y el sufijo de letra reabrio el bug AC-1/AC-11 del gate",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 69,
+      "name": "una linea AC ilegible no desaparece en silencio",
+      "microservicios": [],
+      "acceptance": [
+        "Una linea que arranca con '- AC-' y no se puede leer (un typo en el encabezado) hoy se descarta sin una palabra: el criterio desaparece y nadie se entera. Desde la #68 al menos no se le adjudica su Comando al AC anterior, pero sigue siendo silencioso. verify tendria que nombrarla. Declarado en docs/impl-68.md."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-01T23:20:37Z",
+      "branch": "bugfix/69-una-linea-ac-ilegible-no-desaparece-en-silencio",
+      "worktree": "/Users/alan/harness_process-wt/69-una-linea-ac-ilegible-no-desaparece-en-silencio",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/69-una-linea-ac-ilegible-no-desaparece-en-silencio/docs/plan-feature-69-una-linea-ac-ilegible-no-desaparece-en-silencio.md",
+        "mtime": 1788304838.0833774,
+        "size": 673,
+        "hash": "48b538a6915e75b6"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/69-una-linea-ac-ilegible-no-desaparece-en-silencio/docs/spec-feature-69-una-linea-ac-ilegible-no-desaparece-en-silencio.md",
+        "mtime": 1788304939.2813208,
+        "size": 5762,
+        "hash": "f0118b0c982de680"
+      },
+      "closed_at": "2026-09-01T23:30:03Z",
+      "note": "el aviso de AC ilegible; y el gate y estampar hacian la misma pregunta con su propia copia",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 70,
+      "name": "El gate de citas del review no puede ver un repo hermano: una feature de backend no puede citar su codigo",
+      "microservicios": [
+        "harness_process (rust/src/revision.rs)"
+      ],
+      "acceptance": [
+        "Encontrado por la #117 al registrar su propio veredicto. 'revision.rs:545' rechaza toda cita ABSOLUTA o con '..', y 'raices_desde' solo ofrece tres raices, las tres del repo del front. Una feature que toca ms-media-service —o cualquiera de los diez repos Go— no tiene forma de citar 'handlers/portal_documents.go:353' de manera que el gate lo resuelva, aunque el archivo y la linea existan: la review-117 tuvo que citar 'docs/impl-117.md:<linea>' en la columna que el gate comprueba y dejar el codigo real en la de al lado. El comentario del propio archivo cuenta que la tercera raiz nacio cuando el gate rechazo su primer review real por el caso worktree-vs-raiz; este es el mismo defecto con repos hermanos en vez de worktrees. AC: 'raices_desde' suma las raices de los microservicios que el plan de la feature declara; una cita a un archivo de otro repo del plan RESUELVE; una a un repo que el plan NO declara sigue sin resolver; hay test de los dos lados."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "note": "el gate dice contra que resolvio; la premisa del ticket era falsa y se comprobo antes de construir",
+      "started_at": "2026-09-04T19:49:19Z",
+      "branch": "bugfix/70-el-gate-de-citas-del-review-no-puede-ver-un-repo",
+      "worktree": "/Users/alan/harness_process-wt/70-el-gate-de-citas-del-review-no-puede-ver-un-repo",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/70-el-gate-de-citas-del-review-no-puede-ver-un-repo/docs/plan-feature-70-el-gate-de-citas-del-review-no-puede-ver-un-repo.md",
+        "mtime": 1788551359.9612942,
+        "size": 754,
+        "hash": "0813d321151c8009"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/70-el-gate-de-citas-del-review-no-puede-ver-un-repo/docs/spec-feature-70-el-gate-de-citas-del-review-no-puede-ver-un-repo.md",
+        "mtime": 1788551633.2911692,
+        "size": 7294,
+        "hash": "ef5f911612a2a176"
+      },
+      "closed_at": "2026-09-04T20:01:32Z",
+      "leccion": "remedios-que-la-herramienta-sugiere"
+    },
+    {
+      "id": 71,
+      "name": "El close archiva el sello de cierre en el worktree que acaba de borrar, y lo pierde",
+      "microservicios": [
+        "harness_process (rust: close/archivado de estado)"
+      ],
+      "acceptance": [
+        "Encontrado al cerrar la #124 de realestate (bugfix con worktree). El 'close' imprime 'Estado archivado en docs/estado-feature-<id>-<slug>.md' y sale 0, pero en una feature con worktree ese docs/ es el del WORKTREE —no el submodulo docs del repo principal— y el mismo close borra el worktree, asi que el fichero que dice haber escrito no existe en ningun lado. Se pierden tambien las lineas de Evidencia porque progress/current-<id>.md se borra al cerrar y no queda copia. Medido: #121 y #125 tienen su estado-feature-*.md y la #124 no; hubo que reconstruirlo a mano desde feature_list.json y history.md, y el cuerpo literal de current-124.md es IRRECUPERABLE. Es de la misma familia que #54 (prd apply escribe en el docs de la feature) y #57 (verify corre en el worktree), pero ninguna lo cubre: aquellas escriben en el sitio equivocado, esta escribe en un sitio que destruye a continuacion. AC: con worktree, el sello se archiva en el docs del repo PRINCIPAL, o se copia ahi antes de borrar el worktree; el mensaje nombra la ruta que de verdad queda en disco; hay test que cierra una feature con worktree y afirma que el fichero EXISTE despues del close, no que el close salio 0 (el mensaje actual es exactamente el caso de 'el cierre no declara hecho lo que no hizo', ficha #62)."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-05T03:53:40Z",
+      "branch": "bugfix/71-el-close-archiva-el-sello-de-cierre-en-el-worktr",
+      "worktree": "/Users/alan/harness_process-wt/71-el-close-archiva-el-sello-de-cierre-en-el-worktr",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/71-el-close-archiva-el-sello-de-cierre-en-el-worktr/docs/plan-feature-71-el-close-archiva-el-sello-de-cierre-en-el-worktr.md",
+        "mtime": 1788580420.317454,
+        "size": 743,
+        "hash": "5bf810e58f18422d"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/71-el-close-archiva-el-sello-de-cierre-en-el-worktr/docs/spec-feature-71-el-close-archiva-el-sello-de-cierre-en-el-worktr.md",
+        "mtime": 1788580660.5801268,
+        "size": 8402,
+        "hash": "71f27ac33176c709"
+      },
+      "closed_at": "2026-09-05T04:20:22Z",
+      "note": "El sello de cierre va al docs de la raiz y despues de integrar; el caso especial de la #63 se elimina porque ya no hay dos rutas",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 72,
+      "name": "El paralelo aisla los cambios y acota los workflows",
+      "microservicios": [
+        "harness"
+      ],
+      "acceptance": [
+        "Aislar features y repos afectados, acotar Stop a la sesion, limitar intentos y conservar fallos de workflows, mantener roles e instaladores sincronizados y aplicar configuracion local de feedback silencioso."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-05T00:50:23Z",
+      "branch": "bugfix/72-el-paralelo-aisla-los-cambios-y-acota-los-workfl",
+      "worktree": "/Users/alan/harness_process-wt/72-el-paralelo-aisla-los-cambios-y-acota-los-workfl",
+      "last_plan_sig": {
+        "path": "../harness_process-wt/72-el-paralelo-aisla-los-cambios-y-acota-los-workfl/docs/plan-feature-72-el-paralelo-aisla-los-cambios-y-acota-los-workfl.md",
+        "mtime": 1788575822.1846356,
+        "size": 775,
+        "hash": "4b1c08e2558cc303"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/72-el-paralelo-aisla-los-cambios-y-acota-los-workfl/docs/spec-feature-72-el-paralelo-aisla-los-cambios-y-acota-los-workfl.md",
+        "mtime": 1788575777.4411852,
+        "size": 12054,
+        "hash": "bc3754b45bd202a1"
+      },
+      "closed_at": "2026-09-05T03:48:04Z",
+      "note": "Aislamiento verificable en start, rango completo en el cierre, Stop acotado a la sesion y cobertura de delegacion que no se puede fingir",
+      "leccion": "promesas-estructurales-vs-disciplina"
+    },
+    {
+      "id": 73,
+      "name": "verify corre UN comando por AC y no lo dice: un AC con varias verificaciones se cree verde con una",
+      "microservicios": [
+        "harness_process (rust: verificacion/verify)"
+      ],
+      "acceptance": [
+        "Encontrado el 2026-09-05 implementando la #72. Su AC-8 declaraba cuatro lineas Comando: (cargo test, cargo clippy, setup_smoke.sh, parity_check.sh) y 'harness verify --feature 72' corrio SOLO la primera, reporto '1 verde(s), 0 en rojo' y no menciono las otras tres. Causa: rust/src/verificacion.rs modela Verificacion { ac, comando: Option<String> } —UN comando por AC— y las lineas Comando: siguientes se descartan sin aviso. Es la misma familia que la #69 (una linea AC ilegible desaparecia en silencio) y la #64 (el gate no puede afirmar lo que no comprobo): docs/verify-<id>.md dice verde sobre un AC que declaraba cuatro verificaciones y del que se corrio una, y quien lo lee no tiene como saberlo. En la #71 se esquivo repartiendo los comandos en AC distintos, que funciona pero es disciplina, no estructura. AC: (1) 'parsear' acepta N comandos por AC y 'verify' los corre TODOS, o —si se decide no soportarlo— avisa explicitamente 'este AC declara N comandos y solo se corre el primero' y ese AC no puede quedar verde en silencio; (2) el reporte docs/verify-<id>.md refleja cada comando con su estado, no uno por AC; (3) un test toma un spec con dos Comando: en el mismo AC y falla contra el codigo actual (prueba del rojo); (4) los 310+ AC ya escritos con un solo comando siguen comportandose igual. Evidencia de partida: progress/hallazgo-verify-un-solo-comando.md"
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-05T11:58:41Z",
+      "branch": "bugfix/73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a",
+      "worktree": "/Users/alan/harness_process-wt/73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a/docs/plan-feature-73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a.md",
+        "mtime": 1788609521.601241,
+        "size": 752,
+        "hash": "4655194b4d66b977"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a/docs/spec-feature-73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a.md",
+        "mtime": 1788609675.7052784,
+        "size": 7074,
+        "hash": "b5a105b26e3b2e3a"
+      },
+      "closed_at": "2026-09-05T12:18:34Z",
+      "note": "Un AC verifica con todos los comandos que declara; el oraculo del test del corpus dejaba de imitar al parser",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 74,
+      "name": "add no protege contra la feature duplicada, y no esta medido que haga falta",
+      "microservicios": [
+        "harness_process (rust: commands/add)"
+      ],
+      "acceptance": [
+        "Idea 7 del catalogo de docs/analisis-hermes-agent.md (2026-08-16): Hermes usa un idempotency-key en 'kanban create' y el analisis proponia 'add --idempotency-key' o dedupe por nombre con aviso, porque 'dos add seguidos crean dos features duplicadas'. MEDIDO el 2026-09-05 sobre el backlog real: 73 features, CERO nombres repetidos. La premisa literal no ocurrio nunca. Ademas el escenario de Hermes —reintento tras timeout de red— no aplica: 'add' es un CLI local que escribe un JSON local, sin red ni timeout que reintentar. Lo que SI hay son 8 features superseded (seis absorbidas por la #36, dos por la #47), y eso es solapamiento de ALCANCE, no de nombre: los ocho nombres son distintos, asi que un dedupe por nombre no habria detectado ninguna. AC: (1) ANTES de implementar nada, decidir con el usuario si el problema amerita codigo, mostrandole esta medicion — si la respuesta es que no, cerrar como superseded o blocked con el motivo, que es un resultado valido; (2) si se implementa, 'add' avisa (no bloquea) cuando el nombre nuevo coincide con uno existente, y el aviso nombra la feature que ya existe con su id y su estado; (3) el aviso no puede impedir agregar una feature legitima con nombre parecido: se avisa y se sigue; (4) un test cubre el caso de nombre repetido y otro el de nombre distinto que no debe avisar. NO hacer: un idempotency-key explicito, que agrega un flag que nadie va a escribir a mano para un problema que no se midio."
+      ],
+      "status": "blocked",
+      "closed_at": "2026-09-06T00:15:40Z",
+      "bloqueos": 1,
+      "note": "No se implementa: la premisa no se sostiene. Medido el 2026-09-05 sobre el backlog real: 73 features, CERO nombres repetidos, asi que 'dos add seguidos crean features duplicadas' no ocurrio nunca. El escenario de Hermes (idempotency-key ante reintento por timeout de red) no aplica: add es un CLI local que escribe un JSON local. Las 8 features superseded que parecian evidencia son solapamiento de ALCANCE, no de nombre — los ocho nombres son distintos y un dedupe por nombre no habria detectado ninguna. Decision del usuario con la medicion a la vista. Se reabre si alguna vez se mide el problema; la ficha ya tiene la evidencia y el AC-2 (avisar sin bloquear) listo para retomar."
+    },
+    {
+      "id": 75,
+      "name": "el backlog no sabe de dependencias ni de features que se traban una y otra vez",
+      "microservicios": [
+        "harness_process (rust: features/commands next, close)"
+      ],
+      "acceptance": [
+        "Idea 8 del catalogo de docs/analisis-hermes-agent.md (2026-08-16). Hermes tiene estados ricos, links padre->hijo y un circuit breaker: tras N bloqueos por la misma causa la tarea va a triage para decision humana. El arnes tiene estados planos y sin relaciones. ALCANCE ACOTADO tras revisar que quedo cubierto por otro camino: el analisis proponia un ESTADO 'review', y eso YA ESTA RESUELTO como GATE —require_review y el sello que escribe 'revision --veredicto' (feature #64)—, que es mas fuerte que un estado porque lo escribe el binario y no se pone a mano. Esta feature NO agrega el estado review. Lo que falta de verdad es: (a) DEPENDENCIAS entre features y (b) el circuit breaker. AC: (1) una feature puede declarar 'depends_on: [<id>, ...]' en el backlog, y el campo se valida contra el backlog al escribirse (un id inexistente se rechaza con mensaje, no se guarda); (2) 'next' no ofrece una feature cuyas dependencias no esten en un estado terminal, y cuando no ofrece nada por ese motivo lo DICE nombrando que falta; (3) 'start' avisa —sin bloquear— si se arranca una feature con dependencias abiertas: la decision es del usuario, pero no puede ser silenciosa; (4) el arnes cuenta cuantas veces una feature se cerro como blocked y, al pasar de un umbral configurable (rules.bloqueos_antes_de_decidir, default 2), el proximo close --status blocked EXIGE una nota que explique si la causa es la misma, para que un bloqueo cronico no se repita en silencio; (5) los ciclos de dependencias se detectan y se rechazan antes de escribir; (6) las 74 features ya existentes, que no tienen el campo, se comportan exactamente igual que hoy — el campo es opcional y su ausencia no cambia nada; (7) 'status' muestra las dependencias abiertas de las features activas. Cuidado con la leccion promesas-estructurales-vs-disciplina: 'depends_on' ya existe como nombre en graph/derive.rs pero es una relacion del GRAFO del hub, no del backlog; son dos cosas distintas y no hay que confundirlas ni reusar una por la otra."
+      ],
+      "status": "done",
+      "started_at": "2026-09-05T13:44:25Z",
+      "branch": "feature/75-el-backlog-no-sabe-de-dependencias-ni-de-feature",
+      "worktree": "/Users/alan/harness_process-wt/75-el-backlog-no-sabe-de-dependencias-ni-de-feature",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/75-el-backlog-no-sabe-de-dependencias-ni-de-feature/docs/plan-feature-75-el-backlog-no-sabe-de-dependencias-ni-de-feature.md",
+        "mtime": 1788615865.65938,
+        "size": 742,
+        "hash": "36f1b3e7cefaebb6"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/75-el-backlog-no-sabe-de-dependencias-ni-de-feature/docs/spec-feature-75-el-backlog-no-sabe-de-dependencias-ni-de-feature.md",
+        "mtime": 1788616269.987049,
+        "size": 8000,
+        "hash": "0bcd5619919f1963"
+      },
+      "closed_at": "2026-09-05T14:07:33Z",
+      "note": "Dependencias entre features con validacion y ciclos, y el contador de bloqueos; harness depende porque add no cumplia el recorrido P1",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 76,
+      "name": "una feature sin worktree veta a todas las demas y mata el paralelismo",
+      "microservicios": [
+        "harness_process (rust: aislamiento/start)"
+      ],
+      "acceptance": [
+        "REGRESION introducida por la feature #72 el 2026-09-05. Sintoma reportado por Alan con captura: 'avisame cuando la #99 libere y arranca' — con una feature abierta sin worktree, NINGUNA otra puede arrancar, aunque la nueva traiga su propio worktree, asi que el paralelismo con worktrees dejo de funcionar. Reproducido en fixture: con la #1 abierta con --sin-worktree, 'start --feature 2' (que crea su worktree) sale [GATE] 'la feature #1 esta abierta SIN worktree'. LA REGLA ES DEMASIADO ANCHA: la #1 escribe en el checkout compartido y la #2 escribiria en ../repo-wt/2-slug; son directorios distintos y no se solapan. El incidente que motivo la #72 fueron CUATRO features corriendo --sin-worktree sobre el MISMO arbol (diagnostico 2026-09-04, seccion 3), no una aislada conviviendo con una que no lo esta. El modelo correcto: el checkout compartido es un recurso de CAPACIDAD UNO. AC: (1) arrancar una feature CON worktree se permite siempre, haya o no otra sin aislar, y si la hay se informa sin bloquear; (2) arrancar una feature SIN aislar (--sin-worktree, o proyecto sin git) se rechaza solo si YA hay otra sin aislar ocupando el checkout compartido; (3) sin repo git sigue valiendo una feature a la vez, porque ahi todas son no aisladas — el caso que Alan decidio explicitamente el 2026-09-05 no cambia; (4) dos features que resuelvan al MISMO worktree se siguen rechazando; (5) el fallo de git sigue cancelando el arranque sin dejar la feature in_progress; (6) tests de comportamiento para las dos direcciones: aislada+no-aislada CONVIVEN, y no-aislada+no-aislada se rechaza; (7) los tests de la #72 que codificaban la regla ancha se reescriben contra la regla nueva, ninguno se borra."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-06T02:16:23Z",
+      "branch": "bugfix/76-una-feature-sin-worktree-veta-a-todas-las-demas-",
+      "worktree": "/Users/alan/harness_process-wt/76-una-feature-sin-worktree-veta-a-todas-las-demas-",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/76-una-feature-sin-worktree-veta-a-todas-las-demas-/docs/plan-feature-76-una-feature-sin-worktree-veta-a-todas-las-demas-.md",
+        "mtime": 1788660983.9992957,
+        "size": 721,
+        "hash": "634b02f0b9fe7291"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/76-una-feature-sin-worktree-veta-a-todas-las-demas-/docs/spec-feature-76-una-feature-sin-worktree-veta-a-todas-las-demas-.md",
+        "mtime": 1788661065.758791,
+        "size": 6199,
+        "hash": "c9722e1f9c5bb68e"
+      },
+      "closed_at": "2026-09-06T02:33:18Z",
+      "note": "El checkout compartido tiene capacidad uno: una feature con worktree arranca siempre; se rechaza solo que dos escriban en el mismo arbol",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 77,
+      "name": "con docs/ como repo aparte, el arnes escribe directo en docs/ y no crea docs-wt",
+      "microservicios": [
+        "harness_process (rust: paths/start/close)"
+      ],
+      "acceptance": [
+        "Reportado por Alan con captura el 2026-09-06: en realestate, donde docs/ es un repo git aparte, cada feature dejaba su spec/plan/impl/review en docs-wt/<id>-<slug>/ sobre una rama del repo docs que nadie mergeaba; docs/ con el PRD y el SDD nunca los veia. Medido: tres worktrees (131, 132, 142) con ramas SIN MERGEAR, y los specs de 131 y 132 ausentes de docs/. Es consecuencia de la OBS-5 de la #72 (el arnes crea el worktree de docs) mas la #71 (el cierre no integra el repo docs). Alan REVIERTE la OBS-5: 'el worktree era para implementar las feat en paralelo, no para crear otro docs-wt'. AC: (1) con docs/ como repo aparte, los documentos de la feature (spec, plan, impl, review, verify, prd-diff) se escriben DIRECTO en <raiz>/docs/, sin worktree ni rama del repo docs; (2) start ya no crea docs-wt/ ni escribe docs_worktree en el backlog; (3) un docs_worktree que ya este en el backlog (features arrancadas antes de esta correccion) se IGNORA al resolver rutas: la feature pasa a leer y escribir en docs/; (4) close deja de commitear ni mencionar el worktree de docs; (5) con docs/ como parte del repo principal nada cambia: los documentos siguen viajando en el worktree y la rama de la feature; (6) dos features en paralelo con docs/ aparte no chocan: sus artefactos tienen nombre por feature, y un test lo comprueba escribiendo las dos en el mismo docs/; (7) el test de la #72 que afirmaba el worktree de docs se reescribe contra la regla nueva, sin borrarlo; (8) suite, clippy, smoke y paridad verdes. Fuera de alcance del codigo: mover lo que ya esta en docs-wt/ de realestate a docs/ se hace a mano con los comandos, no desde el binario."
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-06T21:54:22Z",
+      "branch": "bugfix/77-con-docs-como-repo-aparte-el-arnes-escribe-direc",
+      "worktree": "/Users/alan/harness_process-wt/77-con-docs-como-repo-aparte-el-arnes-escribe-direc",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/77-con-docs-como-repo-aparte-el-arnes-escribe-direc/docs/plan-feature-77-con-docs-como-repo-aparte-el-arnes-escribe-direc.md",
+        "mtime": 1788731662.7824388,
+        "size": 731,
+        "hash": "5ac3ce63fd66ef13"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/77-con-docs-como-repo-aparte-el-arnes-escribe-direc/docs/spec-feature-77-con-docs-como-repo-aparte-el-arnes-escribe-direc.md",
+        "mtime": 1788731839.5965292,
+        "size": 5796,
+        "hash": "4bfebfc765444cda"
+      },
+      "closed_at": "2026-09-06T22:05:16Z",
+      "note": "Con docs aparte los documentos van directo a docs/; se revierte la OBS-5 de la #72, que dejaba cada spec en una rama del repo docs que nadie mergeaba",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 78,
+      "name": "el instalador respalda sus scripts pero no el backlog, que es lo unico irrecuperable",
+      "microservicios": [
+        "harness_process (setup_harness.sh / setup_harness.ps1)"
+      ],
+      "acceptance": [
+        "Reportado por otra sesion de Claude (realestate-4f) el 2026-09-06: una corrida del instalador en realestate a las 19:12:14 dejo feature_list.json en 131 bytes (la plantilla, con project sin expandir), progress/current.md en 'Sin feature activa' y history.md en una linea. Se perdieron 138 features (ids hasta #142), los estados vivos (#130 done, #131/#132/#133 in_progress) y la bitacora. bkp/ tiene *.bak.20260906191214 de trece scripts: el instalador respaldo SUS archivos y NO respaldo el backlog. MEDIDO: una corrida anterior del instalador a las 19:06 (esta sesion) NO lo borro — su status posterior imprimio 138 features; la de las 19:12 fue otra. La siembra normal es solo-si-falta (setup_harness.sh:2854), asi que hay que averiguar POR QUE camino el archivo llego a faltar o a sobreescribirse (¿--reset? ¿un rename fallido? ¿la carpeta reescrita?). AC: (1) reproducir en fixture el camino exacto que deja el backlog vacio, sin adivinar; (2) el instalador respalda feature_list.json, progress/current*.md e history.md en bkp/ con timestamp ANTES de cualquier operacion que pueda escribirlos o borrarlos, en la misma corrida que respalda los scripts; (3) --reset NUNCA borra ni sobreescribe el backlog ni progress/ — si el usuario quiere eso, es un flag aparte y explicito, y aun asi respalda antes; (4) si el instalador encuentra el backlog con la plantilla sin expandir (project == '$PROJECT_NAME') y hay un bkp/ o un docs/bkp-backlog mas nuevo, lo DICE y no lo pisa; (5) test de comportamiento: instalar sobre un proyecto con backlog, correr la reinstalacion y el --reset, y afirmar que el backlog sigue identico y que bkp/ tiene su copia; (6) paridad con setup_harness.ps1. Fuera de alcance: recuperar realestate, que se hace a mano con docs/bkp-backlog/feature_list.json (137 features, 2026-09-05 08:56) mas los eventos del hub para los cambios de hoy.",
+        "CORRECCION al AC-4, de la sesion que reporto el incidente (realestate-4f), MEDIDA: el guard propuesto —'si project == \"$PROJECT_NAME\" no lo pises'— NO sirve como senal de que el archivo es la plantilla, y falla en las dos direcciones. Medido el 2026-09-06: docs/bkp-backlog/feature_list.json de realestate, que es un backlog LEGITIMO con 137 features, tambien tiene project == \"$PROJECT_NAME\" (el placeholder nunca se expande en este proyecto). Un guard con esa condicion trataria de plantilla a un backlog bueno, y no distinguiria nada en el caso real. Los discriminadores que SI funcionaron para reconocer la plantilla, y hay que usar los dos juntos: (a) features == [] y (b) rules reducido a 2 —la plantilla trae solo require_spec_approved y require_review, mientras el archivo vivo tenia 5: ademas one_feature_at_a_time, require_tests_to_close y require_impact_check—. Lo robusto de verdad no es olfatear la forma del archivo sino respaldar SIEMPRE antes de escribir (AC-2) y comparar contra lo que habia, no contra un string.",
+        "ESTADO del 'fuera de alcance': la recuperacion de realestate YA SE HIZO el 2026-09-06, no hace falta rehacerla. Quedo en 138 features y las 5 reglas, partiendo de docs/bkp-backlog/feature_list.json (137, del 2026-09-05 08:56) y re-aplicando los deltas del dia medidos contra DOS fuentes independientes: el sello literal 'Cerrada: <fecha> - status=done' de docs/estado-feature-<id>-*.md, y el commit 'merge: <rama> -> develop' del log. Resultado: #129 y #130 a done; #131 y #133 a in_progress; #142 dada de alta; #132 a in_progress y DECLARADA como dudosa (su trabajo esta mergeado pero no dejo estado-feature-132 ni el commit de puntero de docs que si dejan las que cierran bien). progress/history.md NO se reconstruyo: se dejo constancia del hueco. El espejo se actualizo y se commiteo. TRAMPA para quien escriba herramienta de restauracion: 'git merge-base --is-ancestor <rama> develop' da FALSO POSITIVO de 'cerrada' en toda rama recien creada por start, porque nace en develop con cero commits por delante; hay que buscar el commit de merge, no la ancestria."
+      ],
+      "status": "in_progress",
+      "kind": "bug",
+      "started_at": "2026-09-06T22:27:28Z",
+      "branch": "bugfix/78-el-instalador-respalda-sus-scripts-pero-no-el-ba",
+      "worktree": "/Users/alan/harness_process-wt/78-el-instalador-respalda-sus-scripts-pero-no-el-ba",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/78-el-instalador-respalda-sus-scripts-pero-no-el-ba/docs/plan-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md",
+        "mtime": 1788733648.9065917,
+        "size": 749,
+        "hash": "8c664556c8f0653a"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/78-el-instalador-respalda-sus-scripts-pero-no-el-ba/docs/spec-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md",
+        "mtime": 1788733648.9071283,
+        "size": 2855,
+        "hash": "28f64bd1fb750b96"
+      }
+    }
+  ]
+}
