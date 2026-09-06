@@ -199,6 +199,56 @@ pub struct Aislamiento {
     pub reusado: bool,
 }
 
+/// Adopta un arbol de trabajo que preparo el USUARIO (`start --worktree`).
+///
+/// No crea nada: comprueba que la ruta exista, que sea un repo git y que no
+/// sea el checkout principal de ese repo, y devuelve la rama que tiene puesta.
+///
+/// Las tres comprobaciones son el precio de dejar que el aislamiento venga de
+/// afuera. Sin la primera se declara aislada una feature cuyo arbol no existe;
+/// sin la tercera se declara aislada una que en realidad esta escribiendo en el
+/// checkout compartido, que es exactamente lo que el gate viene a impedir —y
+/// seria peor que no tener la puerta, porque quedaria ESCRITO que si esta
+/// aislada.
+pub fn adoptar(ruta: &Path) -> anyhow::Result<Aislamiento> {
+    if !ruta.is_dir() {
+        anyhow::bail!(
+            "el worktree declarado no existe: {}\n\
+             Preparalo primero: git -C <sub-repo> worktree add {} -b <rama> <base>",
+            ruta.display(),
+            ruta.display()
+        );
+    }
+    let Some(top) = toplevel(ruta) else {
+        anyhow::bail!(
+            "{} no es un arbol de trabajo de git.\n\
+             Un directorio cualquiera no aisla nada: hace falta `git worktree add`.",
+            ruta.display()
+        );
+    };
+    if !es_worktree_secundario(ruta) {
+        anyhow::bail!(
+            "{} es el checkout PRINCIPAL de su repo, no un worktree aparte.\n\
+             Declararlo aislaria de mentira: la feature escribiria donde escriben todas.",
+            top.display()
+        );
+    }
+    let rama = git(ruta, &["branch", "--show-current"]).unwrap_or_default();
+    if rama.is_empty() {
+        anyhow::bail!(
+            "{} esta en HEAD suelto (sin rama).\n\
+             Sin rama no hay nada que mergear al cerrar: `git -C {} switch -c <rama>`.",
+            ruta.display(),
+            ruta.display()
+        );
+    }
+    Ok(Aislamiento {
+        rama,
+        worktree: top,
+        reusado: true,
+    })
+}
+
 /// Crea (o reusa) la rama y el worktree de una feature. El checkout principal
 /// NUNCA cambia de rama (AC-2, AC-3, AC-4).
 pub fn preparar(

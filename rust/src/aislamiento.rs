@@ -51,6 +51,16 @@ pub struct Contexto<'a> {
     pub otras: &'a [Ocupacion],
     /// El usuario pidio `--sin-worktree`.
     pub sin_worktree: bool,
+    /// El usuario trae un arbol YA preparado a mano (`--worktree <ruta>`).
+    ///
+    /// Existe por los proyectos MULTI-REPO, donde `repo` es `None` y el arnes
+    /// no tiene de donde sacar un worktree: la raiz no es un repo git, los
+    /// repos de verdad cuelgan de ella. Ahi el aislamiento SI se puede
+    /// conseguir —`git worktree add` funciona en cada sub-repo— pero lo tiene
+    /// que armar quien conoce el layout, no el arnes. Sin esta puerta, una
+    /// feature abierta en un proyecto asi veta a TODAS las demas para siempre,
+    /// que es el bloqueo medido el 2026-09-06 con la #89 y la #99.
+    pub worktree_externo: Option<&'a Path>,
 }
 
 /// Por que una feature queda sin aislar cuando igual se la deja arrancar.
@@ -94,6 +104,13 @@ pub enum Rechazo {
     CheckoutCompartido { otra: String, ruta: PathBuf },
     /// `git worktree add` (o lo que sea) fallo. Antes esto era un `println!`.
     FalloDeGit { detalle: String },
+    /// No hay repo git en la raiz —proyecto multi-repo— y ya hay otra feature
+    /// abierta. Es el MISMO hecho que `OcupanteSinAislar`, con otro mensaje:
+    /// ahi la salida es "arranca con worktree" y aca esa salida NO EXISTE,
+    /// porque no hay de donde sacarlo. Ofrecerla igual fue el defecto medido
+    /// el 2026-09-06: el gate mandaba a correr el comando que se acababa de
+    /// rechazar.
+    SinGitConOcupante { otra: String },
 }
 
 impl Rechazo {
@@ -111,6 +128,19 @@ impl Rechazo {
                 "ese worktree ya es de la feature {otra}: {}\n\
                  Dos features no pueden compartir arbol de trabajo.",
                 ruta.display()
+            ),
+            Self::SinGitConOcupante { otra } => format!(
+                "la raiz del proyecto no es un repo git —es multi-repo— asi que el arnes no tiene\n\
+                 de donde sacar un worktree, y la feature {otra} ya esta escribiendo en el checkout\n\
+                 compartido. Dos features en el mismo arbol mezclan sus cambios sin dueno atribuible.\n\
+                 Salidas (NO esta la de \"arranca con worktree\": aca no hay uno que dar):\n\
+                 \x20 1. Prepara vos el arbol y declaralo:\n\
+                 \x20      git -C <sub-repo> worktree add <ruta> -b <rama> <base>\n\
+                 \x20      harness start --feature <id> --worktree <ruta>\n\
+                 \x20    En multi-repo hay que repetir el `worktree add` por cada repo que la\n\
+                 \x20    feature toque; la ruta que se declara es la del arbol que las suites\n\
+                 \x20    resuelven (tipicamente el hermano del repo principal de la feature).\n\
+                 \x20 2. O cerra {otra} para liberar el checkout compartido."
             ),
             Self::FalloDeGit { detalle } => format!(
                 "no se pudo preparar el aislamiento: {detalle}\n\
@@ -156,11 +186,37 @@ pub fn decidir(ctx: &Contexto) -> Decision {
     // el incidente original sostenia.
     let ocupante = ctx.otras.iter().find(|o| !o.aislada());
 
+    // Un arbol traido de afuera aisla igual que uno que el arnes hubiera
+    // creado: lo que el gate protege es que dos features no escriban en el
+    // MISMO sitio, y eso no depende de quien corrio `git worktree add`. Se
+    // mira antes que `ctx.repo` a proposito — el caso que esto viene a
+    // desbloquear es justamente el de la raiz que no es repo git.
+    if let Some(externo) = ctx.worktree_externo {
+        if let Some(o) = ctx
+            .otras
+            .iter()
+            .find(|o| o.worktree.as_deref().is_some_and(|w| mismo(w, externo)))
+        {
+            return Decision::Rechazar(Rechazo::CheckoutCompartido {
+                otra: o.etiqueta(),
+                ruta: externo.to_path_buf(),
+            });
+        }
+        return Decision::Aislar {
+            conviven_sin_aislar: ctx
+                .otras
+                .iter()
+                .filter(|o| !o.aislada())
+                .map(Ocupacion::etiqueta)
+                .collect(),
+        };
+    }
+
     // Sin git no hay worktrees que repartir: esta feature va a escribir en el
     // checkout compartido, y ahi TODAS las abiertas escriben. Una a la vez.
     let Some(_repo) = ctx.repo else {
         return match ctx.otras.first() {
-            Some(o) => Decision::Rechazar(Rechazo::OcupanteSinAislar {
+            Some(o) => Decision::Rechazar(Rechazo::SinGitConOcupante {
                 otra: o.etiqueta(),
             }),
             None => Decision::Seguir(NoAislado::SinGit),
@@ -234,6 +290,18 @@ mod tests {
             destino: destino.map(PathBuf::from),
             otras,
             sin_worktree,
+            worktree_externo: None,
+        }
+    }
+
+    /// El mismo contexto, pero con un arbol traido de afuera.
+    fn ctx_externo<'a>(otras: &'a [Ocupacion], externo: &'a Path) -> Contexto<'a> {
+        Contexto {
+            repo: None,
+            destino: None,
+            otras,
+            sin_worktree: false,
+            worktree_externo: Some(externo),
         }
     }
 
@@ -243,6 +311,60 @@ mod tests {
         Decision::Aislar {
             conviven_sin_aislar: Vec::new(),
         }
+    }
+
+    #[test]
+    fn sin_git_y_con_otra_abierta_el_mensaje_no_ofrece_lo_imposible() {
+        // El defecto medido el 2026-09-06: el rechazo decia "arranca ESTA con
+        // worktree (sin --sin-worktree)", que es EXACTAMENTE el comando que
+        // acababa de rechazar, porque sin repo git no hay worktree que dar.
+        let otras = [ocupacion("99", None)];
+        let d = decidir(&ctx(None, None, &otras, false));
+        assert_eq!(
+            d,
+            Decision::Rechazar(Rechazo::SinGitConOcupante {
+                otra: "#99 la 99".to_string()
+            })
+        );
+        let msg = match d {
+            Decision::Rechazar(r) => r.mensaje(),
+            _ => unreachable!(),
+        };
+        assert!(
+            !msg.contains("Arranca ESTA con worktree"),
+            "el rechazo vuelve a ofrecer el comando que rechaza: {msg}"
+        );
+        assert!(msg.contains("--worktree"), "no dice la salida que SI existe: {msg}");
+    }
+
+    #[test]
+    fn un_arbol_traido_de_afuera_aisla_aunque_no_haya_git_en_la_raiz() {
+        // El caso multi-repo: la raiz no es repo, pero el usuario preparo el
+        // arbol en un sub-repo. Que lo haya creado el no lo hace menos aislado.
+        let otras = [ocupacion("99", None)];
+        let externo = PathBuf::from("/tmp/proyecto-wt/89");
+        assert_eq!(
+            decidir(&ctx_externo(&otras, &externo)),
+            Decision::Aislar {
+                conviven_sin_aislar: vec!["#99 la 99".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn un_arbol_externo_ya_tomado_se_rechaza() {
+        // La puerta nueva no puede ser una forma barata de saltearse el gate:
+        // dos features declarando el MISMO arbol es el defecto que el gate
+        // existe para impedir.
+        let otras = [ocupacion("99", Some("/tmp/proyecto-wt/89"))];
+        let externo = PathBuf::from("/tmp/proyecto-wt/89");
+        assert_eq!(
+            decidir(&ctx_externo(&otras, &externo)),
+            Decision::Rechazar(Rechazo::CheckoutCompartido {
+                otra: "#99 la 99".to_string(),
+                ruta: externo
+            })
+        );
     }
 
     #[test]
@@ -373,13 +495,19 @@ mod tests {
 
     #[test]
     fn sin_git_no_hay_paralelo_de_escritura() {
-        // Sin git no hay como aislar a NADIE: la segunda feature se rechaza
-        // aunque no haya pedido --sin-worktree.
+        // Sin git el arnes no puede aislar a NADIE por su cuenta: la segunda
+        // feature se rechaza aunque no haya pedido --sin-worktree.
+        //
+        // El rechazo es `SinGitConOcupante` y no `OcupanteSinAislar`: el HECHO
+        // es el mismo, pero las salidas no. En el caso con git la salida es
+        // "arranca con worktree"; aca esa salida no existe y ofrecerla mandaba
+        // a correr el comando que se acababa de rechazar. La unica que queda
+        // es traer el arbol de afuera con --worktree.
         let otras = [ocupacion("5", None)];
         let c = ctx(None, None, &otras, false);
         assert_eq!(
             decidir(&c),
-            Decision::Rechazar(Rechazo::OcupanteSinAislar {
+            Decision::Rechazar(Rechazo::SinGitConOcupante {
                 otra: "#5 la 5".to_string()
             })
         );

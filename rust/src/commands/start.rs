@@ -51,6 +51,7 @@ fn resolver_aislamiento(
     data: &Value,
     idx: usize,
     sin_worktree: bool,
+    worktree_externo: Option<&std::path::Path>,
 ) -> anyhow::Result<Resuelto> {
     // El aislamiento es del repo del PROYECTO, no del dir del arnes.
     let principal = crate::git::repo_principal(&paths.repo_root);
@@ -68,11 +69,31 @@ fn resolver_aislamiento(
         destino,
         otras: &otras,
         sin_worktree,
+        worktree_externo,
     };
     match crate::aislamiento::decidir(&ctx) {
         Decision::Rechazar(r) => Err(rechazo(&fid, &r)),
         Decision::Seguir(motivo) => Ok(Resuelto::SinAislar(motivo)),
         Decision::Aislar { conviven_sin_aislar } => {
+            // El arbol traido de afuera no se crea: se ADOPTA, y las
+            // comprobaciones de `git::adoptar` son las que impiden que
+            // declarar un worktree sea una forma barata de saltearse el gate.
+            if let Some(externo) = worktree_externo {
+                let a = crate::git::adoptar(externo).map_err(|err| {
+                    rechazo(
+                        &fid,
+                        &Rechazo::FalloDeGit {
+                            detalle: format!("{err:#}"),
+                        },
+                    )
+                })?;
+                println!(
+                    "[i] Arbol declarado por el usuario: {} (rama {}).\n                         El arnes no lo creo y no lo va a borrar al cerrar.",
+                    a.worktree.display(),
+                    a.rama
+                );
+                return Ok(Resuelto::Aislada(a));
+            }
             // Feature #76: una feature sin aislar al lado no bloquea, pero se
             // dice. Quien arranca tiene derecho a saber que el checkout
             // compartido esta ocupado por otra.
@@ -124,7 +145,12 @@ enum Resuelto {
     SinAislar(NoAislado),
 }
 
-pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Result<()> {
+pub fn run(
+    paths: &HarnessPaths,
+    fid: &str,
+    sin_worktree: bool,
+    worktree_externo: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
     let mut data = load_features(paths)?;
     let idx = find_feature_index(&data, fid)?;
     // Feature #47 (AC-1): varias features pueden estar in_progress a la vez.
@@ -147,7 +173,7 @@ pub fn run(paths: &HarnessPaths, fid: &str, sin_worktree: bool) -> anyhow::Resul
     // arranque que no conseguia worktree dejaba igual la feature `in_progress`,
     // y asi es como el diagnostico encontro a #98, #122 y #126 compartiendo
     // checkout. Un `?` aca sale sin haber tocado `feature_list.json`.
-    let resuelto = resolver_aislamiento(paths, &data, idx, sin_worktree)?;
+    let resuelto = resolver_aislamiento(paths, &data, idx, sin_worktree, worktree_externo)?;
 
     // Recien ahora, con el aislamiento ya conseguido, la feature pasa a activa.
     {

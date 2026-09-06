@@ -33,6 +33,12 @@ pub enum Command {
         /// No crear rama ni worktree: trabajar en el checkout actual
         #[arg(long = "sin-worktree")]
         sin_worktree: bool,
+        /// Adoptar un arbol YA preparado a mano en vez de crear uno.
+        ///
+        /// Para proyectos multi-repo, donde la raiz no es un repo git y el
+        /// arnes no tiene de donde sacar un worktree.
+        #[arg(long = "worktree", value_name = "RUTA", conflicts_with = "sin_worktree")]
+        worktree: Option<std::path::PathBuf>,
     },
     /// Cierra una feature (archiva estado, refresca memorias)
     Close {
@@ -551,7 +557,13 @@ pub fn run() -> anyhow::Result<()> {
         Command::Start {
             feature,
             sin_worktree,
-        } => commands::start::run(&HarnessPaths::resolve()?, &feature, sin_worktree),
+            worktree,
+        } => commands::start::run(
+            &HarnessPaths::resolve()?,
+            &feature,
+            sin_worktree,
+            worktree.as_deref(),
+        ),
         Command::Close {
             feature,
             status,
