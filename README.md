@@ -1376,6 +1376,21 @@ sh harness_cli start --feature 47
 - El checkout principal **no cambia de rama** en ningun momento.
 - `start --sin-worktree` vuelve al modo clasico, y en un directorio sin git el
   arnes avisa y sigue trabajando como siempre.
+- `start --worktree <ruta>` **adopta** un arbol que preparaste vos, en vez de
+  crear uno. Existe por los proyectos MULTI-REPO, donde la raiz no es un repo
+  git —los repos de verdad cuelgan de ella— y el arnes no tiene de donde sacar
+  un worktree: sin esta puerta, una feature abierta ahi veta a todas las demas
+  para siempre. El arnes comprueba que la ruta exista, que sea un arbol de
+  git, que **no** sea el checkout principal de su repo y que tenga rama; si no,
+  se niega. No lo crea y no lo borra al cerrar.
+
+  ```bash
+  git -C ms-property-service worktree add ../../realestate-wt/89/ms-property-service -b feature/89-gcs develop
+  sh harness_process/harness_cli start --feature 89 --worktree ../../realestate-wt/89/ms-property-service
+  ```
+
+  En multi-repo hay que repetir el `worktree add` por cada repo que la feature
+  toque; la ruta que se declara es la del arbol que resuelven las suites.
 
 El **estado del arnes sigue siendo uno solo**: aunque invoques los comandos
 desde un worktree, `feature_list.json` y `progress/` se leen y escriben en el

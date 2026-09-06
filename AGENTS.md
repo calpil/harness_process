@@ -52,8 +52,11 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   worktree NO arranca — no queda `in_progress` a medias. `--sin-worktree` solo
   vale si no hay ninguna otra feature abierta, y deja la feature declarada NO
   AISLADA: ninguna OTRA sin worktree puede arrancar mientras siga abierta, pero
-  las que traen su worktree arrancan igual (feature #76). Sin repo git pasa lo
-  mismo: una feature a la vez. Si `docs/` es otro repo git, el spec, el plan y
+  las que traen su worktree arrancan igual (feature #76). Sin repo git —proyecto
+  multi-repo— el arnes no puede crear ninguno: ahi la salida es preparar el
+  arbol a mano y declararlo con `start --feature <id> --worktree <ruta>`, que
+  aisla igual (el gate comprueba que sea un worktree de verdad y que no lo
+  reclame otra feature). Sin eso, una feature a la vez. Si `docs/` es otro repo git, el spec, el plan y
   la evidencia van DIRECTO a `docs/`, junto al PRD y el SDD; no hay `docs-wt/`
   ni rama del repo docs (feature #77: la #72 le daba un worktree por feature y
   cada una dejaba su documentacion en una rama que nadie mergeaba).
