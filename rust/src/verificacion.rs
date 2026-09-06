@@ -1262,6 +1262,7 @@ mod tests {
                 "71-el-close-archiva-el-sello-de-cierre-en-el-worktr.md:AC-8",
                 "73-verify-corre-un-comando-por-ac-y-no-lo-dice-un-a.md:AC-9",
                 "76-una-feature-sin-worktree-veta-a-todas-las-demas-.md:AC-9",
+                "77-con-docs-como-repo-aparte-el-arnes-escribe-direc.md:AC-9",
             ],
             "el arreglo trae AC distintos de los medidos en el corpus real"
         );

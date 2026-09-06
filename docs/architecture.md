@@ -422,8 +422,11 @@ de cada instalador (`CLAUDE_MODEL_*` en `setup_harness.sh`, `$claudeModels` en
 que nazcan en esa rama. El checkout principal no cambia de rama nunca.
 
 - `rust/src/git.rs`: ramas, worktrees, merge, push y commit sin trailers de IA.
-  Desde la #72 tambien `repo_de_docs` (el `docs/` que es un repo aparte y por eso
-  necesita SU worktree: en el del repo principal queda vacio),
+  Desde la #72 tambien `repo_de_docs` (detecta el `docs/` que es un repo aparte;
+  la #72 le daba SU worktree y la #77 lo revirtio: ahora `paths::para_feature`
+  manda los documentos de la feature a `<raiz>/docs/`, porque en el worktree del
+  repo principal ese `docs/` queda vacio y en un worktree propio quedaba en una
+  rama que nadie mergeaba),
   `rango_de_integracion` (todos los commits que el merge se lleva, marcando los
   que tambien viven en la rama de otra feature) y `CandadoDeIntegracion` (dos
   cierres sobre el mismo destino no corren a la vez). `close --status done`
