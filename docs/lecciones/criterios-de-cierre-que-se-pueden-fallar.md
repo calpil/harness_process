@@ -1,10 +1,10 @@
 ---
 nombre: criterios-de-cierre-que-se-pueden-fallar
 descripcion: Un criterio que no se puede fallar no verifica nada: solo tranquiliza.
-triggers: [criterios de cierre, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test]
+triggers: [criterios de cierre, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test, regla ancha, gate de mas, paralelismo]
 relacionadas: [hitos-del-prd, probar-contra-datos-reales, promesas-estructurales-vs-disciplina]
-origen: [20, 23, 63, 73, 75]
-usos: 4
+origen: [20, 23, 63, 73, 75, 76]
+usos: 5
 ultimo_uso: 2026-09-05
 ultima_actualizacion: 2026-09-05
 estado: activa
@@ -320,6 +320,30 @@ Que la leccion ya estuviera escrita no alcanzo — igual que la advertencia de l
 #23 no alcanzo para la #44. Lo que si lo detecta es barato: **releer el nombre
 del test DESPUES de escribir el cuerpo**, y preguntarse si un desconocido que
 solo lee el nombre entenderia lo que ahi se comprueba.
+
+## La regla mas ancha que la evidencia (feature #76)
+
+Variante de la hipotesis no reproducida, mas dificil de ver porque la evidencia
+SI existia. El incidente de la #72 era real y medido: cuatro features
+`--sin-worktree` sobre el mismo arbol. La regla que se escribio fue "una feature
+sin aislar bloquea a todas las demas". Sus tests la codificaron con precision,
+pasaron, y la regla estaba mal: vetaba a features con su propio worktree, que
+no compartian nada con la que no lo tenia. El usuario termino escribiendo
+"avisame cuando la #99 libere y arranca".
+
+Lo que paso: de "N features en el mismo arbol se pisan" se salto a "una sin
+arbol veta a todas", que es mas facil de implementar y suena mas seguro. El
+gate era coherente consigo mismo y con sus tests. Lo detecto el uso real, no la
+suite.
+
+**La pregunta que lo detecta**, antes de escribir el gate: *¿que par de cosas se
+pisa de verdad?* Nombrar el conflicto concreto —dos escritores en el mismo
+directorio— y bloquear exactamente eso. Si la regla que se esta por escribir
+bloquea tambien pares que no se pisan, es mas ancha que la evidencia, y va a
+costar en paralelismo lo que no compra en seguridad.
+
+Regla corta: **un gate que bloquea de mas no es mas seguro; es una regresion que
+todavia nadie reporto.**
 
 ## El arnes que prueba el rojo tambien miente, y de dos formas
 

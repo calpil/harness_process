@@ -51,7 +51,8 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - Aislamiento OBLIGATORIO (feature #72): un arranque que no consigue rama y
   worktree NO arranca — no queda `in_progress` a medias. `--sin-worktree` solo
   vale si no hay ninguna otra feature abierta, y deja la feature declarada NO
-  AISLADA, lo que le niega el paralelo a la siguiente. Sin repo git pasa lo
+  AISLADA: ninguna OTRA sin worktree puede arrancar mientras siga abierta, pero
+  las que traen su worktree arrancan igual (feature #76). Sin repo git pasa lo
   mismo: una feature a la vez. Si `docs/` es otro repo git, tiene su propio
   worktree (`../docs-wt/<id>-<slug>`) y ahi viven el spec y el plan.
 - La integracion MUESTRA el rango completo de commits antes de mergear, y se

@@ -169,7 +169,9 @@ nada y un rechazo deja el backlog intacto. En concreto:
 - `--sin-worktree` solo vale si NO hay otra feature abierta. Con otra abierta,
   se rechaza y se dice cual.
 - Una feature abierta sin worktree ocupa el checkout compartido: mientras siga
-  abierta, no arranca ninguna otra.
+  abierta, no arranca ninguna otra **sin worktree**. Las que traen el suyo
+  arrancan igual (corregido en la feature #76: la version original de esta regla
+  vetaba a todas y dejo a un usuario esperando a que "la #99 libere").
 - Sin repo git pasa lo mismo: **una feature a la vez**. Esto REVOCA, para el caso
   sin git, la promesa de la feature #47 de tener varias en paralelo. Es
   deliberado: sin worktrees no hay forma de atribuir un cambio a una feature.

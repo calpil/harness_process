@@ -66,12 +66,18 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
 - `aislamiento.rs`: si una feature esta AISLADA o no (feature #72). `decidir()` es
   PURA —no toca git ni disco— y devuelve `Aislar` / `Seguir(NoAislado)` /
   `Rechazar(Rechazo)`. Esa separacion es lo que impide volver al "avisar y
-  seguir": lo que decide no tiene con que continuar. Cuatro motivos de rechazo,
-  cada uno con su mensaje accionable: `--sin-worktree` con otra feature abierta,
-  una ocupante que escribe en el checkout compartido, dos features al mismo
-  worktree, y el fallo de git —que antes era un `println!("[i] ...")` y dejaba la
+  seguir": lo que decide no tiene con que continuar. El modelo es **el checkout
+  compartido tiene capacidad UNO** (feature #76): tres motivos de rechazo, cada
+  uno con su mensaje accionable — dos features que escribirian en el checkout
+  compartido (`--sin-worktree` o sin git, con otra ya ahi), dos features al mismo
+  worktree, y el fallo de git, que antes era un `println!("[i] ...")` y dejaba la
   feature `in_progress` sin rama, que es como el diagnostico del 2026-09-04
-  encontro a #98, #122 y #126. Lo que NO promete: impedir que alguien escriba
+  encontro a #98, #122 y #126. Una feature CON worktree arranca siempre: no
+  comparte nada con una que no lo tiene, y solo se le INFORMA. La #72 habia
+  escrito la regla mas ancha —una sin aislar vetaba a todas— y con eso un usuario
+  termino esperando a que "la #99 libere" para arrancar una feature que tenia su
+  propio arbol; la #76 la acoto a lo que el incidente sostenia: cuatro features
+  sin worktree en el MISMO arbol. Lo que NO promete: impedir que alguien escriba
   fuera de su worktree con un `cd`; promete que el arnes no va a DECLARAR aislada
   una feature que no lo esta.
 - `plan.rs`: plantilla y firma del plan (`plan_signature` = dict
