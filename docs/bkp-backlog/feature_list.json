@@ -2074,7 +2074,7 @@
         "CORRECCION al AC-4, de la sesion que reporto el incidente (realestate-4f), MEDIDA: el guard propuesto —'si project == \"$PROJECT_NAME\" no lo pises'— NO sirve como senal de que el archivo es la plantilla, y falla en las dos direcciones. Medido el 2026-09-06: docs/bkp-backlog/feature_list.json de realestate, que es un backlog LEGITIMO con 137 features, tambien tiene project == \"$PROJECT_NAME\" (el placeholder nunca se expande en este proyecto). Un guard con esa condicion trataria de plantilla a un backlog bueno, y no distinguiria nada en el caso real. Los discriminadores que SI funcionaron para reconocer la plantilla, y hay que usar los dos juntos: (a) features == [] y (b) rules reducido a 2 —la plantilla trae solo require_spec_approved y require_review, mientras el archivo vivo tenia 5: ademas one_feature_at_a_time, require_tests_to_close y require_impact_check—. Lo robusto de verdad no es olfatear la forma del archivo sino respaldar SIEMPRE antes de escribir (AC-2) y comparar contra lo que habia, no contra un string.",
         "ESTADO del 'fuera de alcance': la recuperacion de realestate YA SE HIZO el 2026-09-06, no hace falta rehacerla. Quedo en 138 features y las 5 reglas, partiendo de docs/bkp-backlog/feature_list.json (137, del 2026-09-05 08:56) y re-aplicando los deltas del dia medidos contra DOS fuentes independientes: el sello literal 'Cerrada: <fecha> - status=done' de docs/estado-feature-<id>-*.md, y el commit 'merge: <rama> -> develop' del log. Resultado: #129 y #130 a done; #131 y #133 a in_progress; #142 dada de alta; #132 a in_progress y DECLARADA como dudosa (su trabajo esta mergeado pero no dejo estado-feature-132 ni el commit de puntero de docs que si dejan las que cierran bien). progress/history.md NO se reconstruyo: se dejo constancia del hueco. El espejo se actualizo y se commiteo. TRAMPA para quien escriba herramienta de restauracion: 'git merge-base --is-ancestor <rama> develop' da FALSO POSITIVO de 'cerrada' en toda rama recien creada por start, porque nace en develop con cero commits por delante; hay que buscar el commit de merge, no la ancestria."
       ],
-      "status": "in_progress",
+      "status": "done",
       "kind": "bug",
       "started_at": "2026-09-06T22:27:28Z",
       "branch": "bugfix/78-el-instalador-respalda-sus-scripts-pero-no-el-ba",
@@ -2088,10 +2088,23 @@
       },
       "last_spec_sig": {
         "path": "../harness_process-wt/78-el-instalador-respalda-sus-scripts-pero-no-el-ba/docs/spec-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md",
-        "mtime": 1788733648.9071283,
-        "size": 2855,
-        "hash": "28f64bd1fb750b96"
-      }
+        "mtime": 1788735009.8190205,
+        "size": 7241,
+        "hash": "898c287ae2f9b632"
+      },
+      "closed_at": "2026-09-06T22:53:40Z",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
+    },
+    {
+      "id": 79,
+      "name": "close refresca el espejo docs/bkp-backlog/feature_list.json al cerrar una feature",
+      "microservicios": [
+        ""
+      ],
+      "acceptance": [
+        "Given un repo cuyo backlog esta gitignorado y tiene espejo en docs/bkp-backlog/feature_list.json, When close termina de cerrar una feature, Then el espejo de la RAIZ queda byte-identico al backlog vivo (se crea si no existe), el mensaje de cierre lo nombra y avisa que queda sin commitear como la bitacora; sin espejo previo no se crea nada salvo que rules lo pida. Disparador: harness_process no tuvo espejo hasta el commit eb6e8a9 del 2026-09-06 y hoy se refresca a mano"
+      ],
+      "status": "pending"
     }
   ]
 }
