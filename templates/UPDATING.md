@@ -45,6 +45,40 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## `--reset` ya no borra el backlog, y el instalador lo respalda siempre (feature #78)
+
+El 2026-09-06 una corrida del instalador sobre un proyecto dejo `feature_list.json`
+en la plantilla —0 features— y `progress/` reseteado. `bkp/` tenia respaldo de
+trece scripts de esa misma corrida y NINGUNO del backlog. Se perdieron 138
+features y la bitacora; la recuperacion fue a mano desde un espejo del dia
+anterior.
+
+Medido en fixture: `--reset` **borraba** el backlog y `progress/` (estaban en la
+lista de "superficies a regenerar"); una reinstalacion normal nunca los
+respaldaba; y si el backlog faltaba, el instalador sembraba la plantilla vacia
+**sin decir nada**.
+
+Ahora:
+
+- **`--reset` no toca el backlog ni `progress/`.** No son superficie generada:
+  son los unicos datos que el instalador no puede regenerar.
+- **Toda corrida los respalda antes de tocar nada** —`bkp/feature_list.json.bak.<ts>`,
+  `bkp/progress/*.bak.<ts>`— y **`--force` no lo saltea**: `--force` significa
+  "sin backup de lo REGENERABLE", no "sin backup de los datos".
+- **Si el backlog falta, la siembra avisa.** Se sigue sembrando la plantilla para
+  que la instalacion termine, pero con un `[WARN]` propio que nombra los
+  respaldos que encuentra (`bkp/` y `docs/bkp-backlog/`), cuantas features tiene
+  cada uno, y el `cp` para volver.
+
+```
+[WARN] FALTA feature_list.json: se siembra la plantilla VACIA. Si este proyecto ya
+       tenia backlog, esto es una perdida, no una instalacion nueva.
+[WARN]     respaldo: bkp/feature_list.json.bak.20260906191200  [138 feature(s), 5 regla(s)]
+[WARN]     para volver: cp <respaldo> harness_process/feature_list.json
+```
+
+Lo mismo en `setup_harness.ps1`.
+
 ## El backlog sabe de dependencias entre features (feature #75)
 
 Una feature puede declarar de que otras depende:
@@ -358,7 +392,8 @@ Desde la carpeta del `harness_process` (la fuente):
 # Actualización normal (recomendada)
 ./setup_harness.sh
 
-# O reinstalación limpia (borra superficies anteriores y las regenera)
+# O reinstalación limpia (borra superficies anteriores y las regenera;
+# NO toca el backlog ni progress/ — feature #78)
 ./setup_harness.sh --reset
 ```
 

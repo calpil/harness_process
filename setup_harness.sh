@@ -380,11 +380,13 @@ Opciones:
                        Correlo desde dentro de la subcarpeta del arnes.
   --root               El arnes vive EN la raiz multi-repo (hermano de los
                        microservicios). Layout clasico; desactiva el default.
-  --force              Sobrescribe archivos sin crear backup.
+  --force              Sobrescribe los archivos GENERADOS sin crear backup. El
+                       backlog y progress/ se respaldan igual (feature #78).
   --dry-run            Modo preview: no escribe nada, no instala, solo muestra acciones.
   --reset              Limpia artefactos generados por Harness (superficies, hooks,
                        binarios, roles, etc.). Usa backups en bkp/ para recuperar si
-                       hace falta. No toca tu codigo fuente.
+                       hace falta. No toca tu codigo fuente, ni el backlog, ni
+                       progress/ (feature #78).
   --version            Muestra version y sale.
   --json               Salida final en JSON (reporte de acciones + estado).
   --log-file <path>    Escribe log (sin colores) a archivo ademas de stdout.
@@ -687,6 +689,65 @@ backup_file() {
     fi
 }
 
+# Feature #78: los DATOS del proyecto se respaldan en TODA corrida, antes de
+# tocar nada, y --force no lo saltea. `--force` significa "no respaldes lo que
+# vas a regenerar"; el backlog y progress/ no se regeneran: si se pierden, se
+# pierden. El 2026-09-06 una corrida sobre realestate dejo el backlog en la
+# plantilla y bkp/ tenia respaldo de trece scripts y ninguno del backlog.
+# Los datos van como palabras literales del `for`, no en una variable: este
+# script corre con IFS sin espacio, y "$DATOS" con espacios no se parte (asi se
+# saltaba los tres archivos y respaldaba nada, en silencio).
+backup_datos() {
+    for dato in feature_list.json progress/current.md progress/history.md; do
+        [ -f "$HARNESS_DIR/$dato" ] || continue
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Backup de datos: $dato"
+            continue
+        fi
+        respaldo="$(backup_path "$HARNESS_DIR/$dato")"
+        cp -p "$HARNESS_DIR/$dato" "$respaldo"
+        log_info "Backup de datos (no lo saltea --force): $respaldo"
+        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+    done
+    # Los current-<id>.md de las features abiertas (feature #47) tambien.
+    for vivo in "$HARNESS_DIR"/progress/current-*.md; do
+        [ -f "$vivo" ] || continue
+        [ "$DRY_RUN" -eq 1 ] && continue
+        cp -p "$vivo" "$(backup_path "$vivo")"
+        COUNT_BACKED_UP=$((COUNT_BACKED_UP + 1))
+    done
+}
+
+# Feature #78: si un dato del proyecto FALTA, se siembra la plantilla para que
+# la instalacion termine, pero NUNCA en silencio: se dice en [WARN] y se nombran
+# los respaldos que hay y cuantas features tienen, con el comando para volver.
+sembrar_dato_avisando() {
+    dato="$1"
+    if [ -f "$HARNESS_DIR/$dato" ]; then
+        return 0
+    fi
+    log_warn "FALTA $dato: se siembra la plantilla VACIA. Si este proyecto ya tenia backlog, esto es una perdida, no una instalacion nueva."
+    hubo_respaldo=0
+    for candidato in "$BKP_DIR/$dato".bak.* "$SURFACE_DIR/docs/bkp-backlog/$(basename "$dato")"; do
+        [ -f "$candidato" ] || continue
+        hubo_respaldo=1
+        cuenta="$(python3 - "$candidato" 2>/dev/null <<'PYC'
+import json,io,sys
+try:
+    d=json.load(io.open(sys.argv[1],encoding='utf-8')); print(f"{len(d.get('features',[]))} feature(s), {len(d.get('rules',{}))} regla(s)")
+except Exception: print("(no es un backlog JSON)")
+PYC
+)"
+        log_warn "    respaldo: $candidato  [$cuenta]"
+    done
+    if [ "$hubo_respaldo" -eq 1 ]; then
+        log_warn "    para volver: cp <respaldo> $HARNESS_DIR/$dato   (y re-corre el instalador)"
+    else
+        log_warn "    no se encontro ningun respaldo en $BKP_DIR ni en docs/bkp-backlog/"
+    fi
+    install_asset "$dato"
+}
+
 # Si es --reset, manejar temprano (antes de resolver paths completos)
 # (timestamp/backup_path/backup_file ya estan definidos: el reset los usa)
 if [ "$RESET" -eq 1 ]; then
@@ -702,6 +763,7 @@ if [ "$RESET" -eq 1 ]; then
     fi
     SURFACE_DIR="$REPO_ROOT"
     BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
+    backup_datos   # feature #78: con BKP_DIR ya resuelto, y antes de borrar ninguna superficie
 
     # Asegurar .gitignore también en reset (por si alguien lo borró)
     ensure_harness_not_committed
@@ -741,9 +803,11 @@ if [ "$RESET" -eq 1 ]; then
         "$HARNESS_DIR/.harness_layout"
         "$HARNESS_DIR/.harness_backend"
         "$HARNESS_DIR/roles"
-        "$HARNESS_DIR/progress"
         "$HARNESS_DIR/CHECKPOINTS.md"
-        "$HARNESS_DIR/feature_list.json"
+        # Feature #78: feature_list.json y progress/ NO estan aca. No son
+        # superficie generada: son los unicos datos del proyecto que el
+        # instalador no puede regenerar. Estuvieron en esta lista hasta el
+        # 2026-09-06, y --reset los borraba (con respaldo, pero los borraba).
         # (post-migracion Rust: ya no hay graph_memory.py / harness.py que preservar)
     )
     # Solo los docs GENERADOS por el instalador (desde templates/docs/), en el
@@ -2653,6 +2717,7 @@ install_asset "debug_ui.js"
 install_asset "commit_guard.sh"
 install_asset "harness_status.sh"
 install_asset "harness_check.sh"
+backup_datos   # feature #78: los datos, antes de tocar nada
 install_asset "harness_cli"
 install_asset "harness_cli.ps1"
 install_asset "harness_cli.cmd"
@@ -2852,20 +2917,15 @@ if [ "$WITH_SUBAGENTS" -eq 1 ]; then
     # Backlog vivo: solo se siembra si falta. Un reinstall NO debe vaciar las
     # features ya cargadas.
     if [ ! -f feature_list.json ]; then
-        install_asset "feature_list.json"
+        sembrar_dato_avisando "feature_list.json"   # feature #78: nunca en silencio
     else
         migrate_rules feature_list.json
     fi
 
     # Estado vivo: solo se siembra si falta. Un reinstall NO debe pisar la tarea
     # en curso ni la bitacora ya escrita.
-    if [ ! -f progress/current.md ]; then
-        install_asset "progress/current.md"
-    fi
-
-    if [ ! -f progress/history.md ]; then
-        install_asset "progress/history.md"
-    fi
+    sembrar_dato_avisando "progress/current.md"    # feature #78
+    sembrar_dato_avisando "progress/history.md"    # feature #78
 
     # Constitution del proyecto: documento del USUARIO. Se siembra en el docs/ de
     # la RAIZ (SURFACE_DIR) SOLO si falta; un reinstall NUNCA lo pisa. Por eso NO
