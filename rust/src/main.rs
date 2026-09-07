@@ -11,6 +11,7 @@ mod consolidacion;
 mod contexto;
 mod dependencias;
 mod duplicados;
+mod espejo;
 mod curador;
 mod documentos;
 mod exit;

@@ -342,6 +342,44 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         paths,
         &format!("close feature #{feature_id} status={status}{leccion_log} note={note_text}"),
     )?;
+    // Feature #79: los espejos del backlog y de la bitacora, en la RAIZ, despues
+    // de guardar el estado y de la linea de bitacora de ESTE cierre (asi la
+    // bitacora espejada lo incluye). Best-effort, no mudo: un respaldo que
+    // impide cerrar es peor que ninguno, pero un respaldo que falla en silencio
+    // es un respaldo que no existe.
+    let raiz_prd = raiz_del_prd(paths);
+    let espejo_msg = match crate::espejo::refrescar(
+        &raiz_prd,
+        &paths.features,
+        &paths.history,
+        crate::espejo::Politica::from_rules(&data),
+    ) {
+        Ok(refresco) => {
+            // Un `[!]` por archivo que fallo, nombrandolo: el que si se
+            // escribio se dice igual en stdout (fallo parcial, revision #79).
+            for (ruta, err) in &refresco.fallos {
+                eprintln!(
+                    "[!] No se pudo refrescar el espejo {}: {err:#}. El cierre sigue.",
+                    crate::espejo::ruta_para_mensaje(ruta, &raiz_prd)
+                );
+            }
+            (!refresco.escritos.is_empty()).then(|| {
+                refresco
+                    .escritos
+                    .iter()
+                    .map(|r| crate::espejo::ruta_para_mensaje(r, &raiz_prd))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+        }
+        Err(err) => {
+            eprintln!(
+                "[!] No se pudo refrescar el espejo del backlog ({}/): {err:#}. El cierre sigue.",
+                crate::espejo::ESPEJO_DIR
+            );
+            None
+        }
+    };
     update_memories(
         "close",
         status,
@@ -362,6 +400,11 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
         // `git clean`.
         msg.push_str(&format!(
             " Estado archivado en {rel} (sin commitear: vive en la raiz, no en la rama)."
+        ));
+    }
+    if let Some(rel) = &espejo_msg {
+        msg.push_str(&format!(
+            " Espejo del backlog refrescado: {rel} (sin commitear: vive en la raiz, no en la rama)."
         ));
     }
     println!("{msg}");

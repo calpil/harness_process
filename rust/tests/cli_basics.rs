@@ -8881,3 +8881,146 @@ fn add_sin_clave_no_cambia_el_backlog_should_write_exactly_the_fields_of_before(
     claves.sort_unstable();
     assert_eq!(claves, ["acceptance", "id", "microservicios", "name", "status"]);
 }
+
+// ---------------------------------------------------------------------------
+// Feature #79: close refresca el espejo del backlog y de la bitacora
+// ---------------------------------------------------------------------------
+
+/// Backlog + feature #1 arrancada, lista para cerrar. Devuelve (dir, bin).
+fn sandbox_con_feature_abierta() -> (tempfile::TempDir, PathBuf) {
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    (dir, bin)
+}
+
+fn espejo_dir(root: &Path) -> PathBuf {
+    root.join("docs/bkp-backlog")
+}
+
+fn bytes(path: &Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_default()
+}
+
+#[test]
+fn espejo_refrescado_al_cerrar_should_leave_the_backlog_mirror_identical_after_a_done_close() {
+    // AC-1: con docs/bkp-backlog/ presente (Auto), el cierre deja el espejo
+    // byte-identico al backlog YA cerrado y lo dice.
+    let (dir, bin) = sandbox_con_feature_abierta();
+    std::fs::create_dir_all(espejo_dir(dir.path())).unwrap();
+    std::fs::write(espejo_dir(dir.path()).join("feature_list.json"), "{\"viejo\": true}\n").unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Espejo del backlog refrescado: docs/bkp-backlog/feature_list.json",
+        ))
+        .stdout(predicate::str::contains("sin commitear"));
+    let vivo = bytes(&dir.path().join("hp/feature_list.json"));
+    let espejo = bytes(&espejo_dir(dir.path()).join("feature_list.json"));
+    assert!(String::from_utf8_lossy(&espejo).contains("\"status\": \"done\""), "el espejo no tiene el cierre");
+    assert_eq!(vivo, espejo, "el espejo no es byte-identico al backlog");
+}
+
+#[test]
+fn espejo_refrescado_al_bloquear_should_refresh_on_a_blocked_close_too() {
+    // AC-2: cualquier --status refresca.
+    let (dir, bin) = sandbox_con_feature_abierta();
+    std::fs::create_dir_all(espejo_dir(dir.path())).unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "sin tiempo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Espejo del backlog refrescado"));
+    let espejo = String::from_utf8_lossy(&bytes(&espejo_dir(dir.path()).join("feature_list.json"))).to_string();
+    assert!(espejo.contains("\"status\": \"blocked\""), "el espejo no tiene el bloqueo: {espejo}");
+}
+
+#[test]
+fn espejo_auto_sin_archivo_no_crea_should_not_create_the_directory_without_a_rule() {
+    // AC-3: sin directorio y sin regla, no paso nada: ni espejo, ni aviso de
+    // fallo (un mutante que decide "si" en Auto sin directorio no crea el
+    // directorio, falla al escribir y lo AVISA; este aserto lo atrapa).
+    let (dir, bin) = sandbox_con_feature_abierta();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Espejo").not())
+        .stderr(predicate::str::contains("No se pudo refrescar").not());
+    assert!(!espejo_dir(dir.path()).exists(), "se creo docs/bkp-backlog/ sin pedirlo");
+}
+
+#[test]
+fn espejo_siempre_lo_crea_should_create_the_directory_and_both_mirrors_when_the_rule_is_true() {
+    // AC-4: rules.espejo_backlog = true crea el directorio con los dos archivos.
+    let (dir, bin) = sandbox_con_feature_abierta();
+    set_rule(&dir.path().join("hp"), "espejo_backlog", serde_json::json!(true));
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/bkp-backlog/feature_list.json"))
+        .stdout(predicate::str::contains("docs/bkp-backlog/history.md"));
+    assert_eq!(
+        bytes(&dir.path().join("hp/feature_list.json")),
+        bytes(&espejo_dir(dir.path()).join("feature_list.json"))
+    );
+    assert_eq!(
+        bytes(&dir.path().join("hp/progress/history.md")),
+        bytes(&espejo_dir(dir.path()).join("history.md"))
+    );
+}
+
+#[test]
+fn espejo_nunca_no_toca_should_leave_a_stale_mirror_untouched_when_the_rule_is_false() {
+    // AC-5: rules.espejo_backlog = false no toca lo que hay.
+    let (dir, bin) = sandbox_con_feature_abierta();
+    set_rule(&dir.path().join("hp"), "espejo_backlog", serde_json::json!(false));
+    std::fs::create_dir_all(espejo_dir(dir.path())).unwrap();
+    std::fs::write(espejo_dir(dir.path()).join("feature_list.json"), "viejo\n").unwrap();
+    std::fs::write(espejo_dir(dir.path()).join("history.md"), "vieja\n").unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Espejo").not());
+    assert_eq!(bytes(&espejo_dir(dir.path()).join("feature_list.json")), b"viejo\n");
+    assert_eq!(bytes(&espejo_dir(dir.path()).join("history.md")), b"vieja\n");
+}
+
+#[test]
+fn espejo_falla_sin_impedir_el_cierre_should_close_and_warn_when_the_mirror_cannot_be_written() {
+    // AC-7: el destino es un DIRECTORIO con el nombre del espejo: la copia
+    // atomica no puede renombrar encima. El cierre sigue; el aviso sale.
+    let (dir, bin) = sandbox_con_feature_abierta();
+    std::fs::create_dir_all(espejo_dir(dir.path()).join("feature_list.json")).unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"))
+        .stderr(predicate::str::contains("[!] No se pudo refrescar el espejo"))
+        .stderr(predicate::str::contains("docs/bkp-backlog/feature_list.json"));
+    let vivo = leer(&dir.path().join("hp/feature_list.json"));
+    assert!(vivo.contains("\"status\": \"done\""), "la feature no quedo cerrada");
+}
+
+#[test]
+fn espejo_bitacora_should_mirror_history_including_the_close_line_of_this_same_close() {
+    // AC-10: la bitacora espejada incluye la linea del cierre que la refresco.
+    let (dir, bin) = sandbox_con_feature_abierta();
+    std::fs::create_dir_all(espejo_dir(dir.path())).unwrap();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "x"])
+        .assert()
+        .success();
+    let vivo = bytes(&dir.path().join("hp/progress/history.md"));
+    let espejo = bytes(&espejo_dir(dir.path()).join("history.md"));
+    assert!(String::from_utf8_lossy(&espejo).contains("close feature #1 status=done"), "el espejo no tiene la linea del cierre");
+    assert_eq!(vivo, espejo, "la bitacora espejada no es byte-identica");
+}

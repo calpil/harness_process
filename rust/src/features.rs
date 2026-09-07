@@ -37,12 +37,14 @@ pub fn save_features(paths: &HarnessPaths, data: &Value) -> anyhow::Result<()> {
 
 /// Escritura atomica (tmp en el mismo directorio + rename). En Windows el
 /// persist puede fallar transitorio por locks de AV/indexer: reintenta 3x.
-pub fn write_text_atomic(path: &Path, text: &str) -> anyhow::Result<()> {
+/// Escritura atomica de BYTES (feature #79): la copia del espejo tiene que ser
+/// byte-identica, sin condicion de codificacion; `write_text_atomic` delega aca.
+pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
     let dir = dir.unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)
         .with_context(|| format!("no se pudo crear tmp en {}", dir.display()))?;
-    tmp.write_all(text.as_bytes())?;
+    tmp.write_all(bytes)?;
     let mut tmp = tmp;
     let mut last_err = None;
     for _ in 0..3 {
@@ -68,6 +70,10 @@ pub fn write_text_atomic(path: &Path, text: &str) -> anyhow::Result<()> {
         path.display(),
         last_err.map(|e| e.to_string()).unwrap_or_default()
     ))
+}
+
+pub fn write_text_atomic(path: &Path, text: &str) -> anyhow::Result<()> {
+    write_bytes_atomic(path, text.as_bytes())
 }
 
 /// `data.get("features", [])` de solo lectura.
