@@ -7,8 +7,7 @@
     "require_verify_green": true,
     "require_docs_al_dia": true,
     "consolidar_backend": "auto",
-    "verify_timeout_segundos": 900,
-    "perfil_pendientes_max": 300
+    "verify_timeout_segundos": 900
   },
   "features": [
     {
@@ -2178,7 +2177,7 @@
       "acceptance": [
         "Given dos lecciones que se declaran mutuamente en relacionadas pero cuyo nombre, descripcion y triggers no se solapan segun el LLM (o sin backend), When lecciones consolidar informa, Then el par sale con una confianza menor a 1.00 que refleja solo la senal local y el informe dice que la declaracion mutua es la unica evidencia; con senal del LLM ademas, la confianza sube como hoy. Disparador: 2026-09-07, cuatro clases distintas (criterios-de-cierre, probar-contra-datos-reales, promesas-estructurales, reglas-que-se-aplican-a-si-mismas) propuestas para fusion con 1.00 por citarse entre si (#41)"
       ],
-      "status": "in_progress",
+      "status": "done",
       "kind": "bug",
       "started_at": "2026-09-07T12:49:37Z",
       "branch": "bugfix/81-consolidar-la-declaracion-mutua-en-relacionadas-",
@@ -2195,7 +2194,9 @@
         "mtime": 1788785601.6125782,
         "size": 6774,
         "hash": "030309150f6ad5b0"
-      }
+      },
+      "closed_at": "2026-09-07T23:41:09Z",
+      "leccion": "probar-contra-datos-reales"
     },
     {
       "id": 82,

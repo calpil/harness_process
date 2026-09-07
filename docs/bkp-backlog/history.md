@@ -20,3 +20,6 @@
 - 2026-09-07T23:32:17Z prd apply feature #82 documentos=3 escritos=2
 - 2026-09-07T23:33:10Z close feature #82 status=done leccion=criterios-de-cierre-que-se-pueden-fallar note=
 - 2026-09-07T23:33:50Z perfil add Un aviso mide crecimiento desde la ultima accion del usuario, no el acumulado historico; un umbral que hay que subir para callarlo no mide nada. (#80, #82)
+- 2026-09-07T23:40:53Z prd apply feature #81 documentos=3 escritos=3
+- 2026-09-07T23:41:02Z revision feature #81 veredicto=approved
+- 2026-09-07T23:41:11Z close feature #81 status=done leccion=probar-contra-datos-reales note=
