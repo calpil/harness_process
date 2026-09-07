@@ -45,6 +45,40 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## Lo aprendido tiene ciclo de vida: tope, racha y dos avisos (feature #80)
+
+Medido el 2026-09-06 en este repo: 10 de los ultimos 15 cierres declararon la
+misma leccion, que tenia 442 lineas y nueve secciones "(feature #N)"; el paso 3
+de la guia (`<clase>/referencias/`) tenia cero usos; 340 decisiones sin
+incorporar al perfil; ultima consolidacion 19 dias atras y sin registro. El
+gate `require_leccion` mide que se DECLARE una leccion, no que se aprenda.
+
+Cuatro umbrales nuevos en `rules` (todos opcionales; `0` apaga cada uno):
+
+- `leccion_max_lineas` (250): tope de la leccion de CLASE. Sobre el tope,
+  `close --leccion` y `leccion usar` se niegan (exit 2) con el contrato de
+  particion —que secciones cuentan una sola feature y a donde van—. Es duro:
+  no hay `--leccion-motivo` para esto. Se parte moviendo el detalle a
+  `docs/lecciones/<clase>/referencias/<tema>.md` con un puntero de una linea.
+- `leccion_repeticiones` (3): la misma clase K cierres `done` seguidos exige
+  `--leccion-motivo "<por que no es otra clase>"`. El motivo queda en
+  `history.md` y en la feature. `ninguna` no cuenta ni corta la racha.
+- `perfil_pendientes_max` (25): el cierre `done` avisa por stderr cuando hay
+  mas decisiones registradas sin incorporar al perfil (`perfil sugerir`).
+- `consolidar_cada_dias` (30): el cierre avisa por stderr cuando `lecciones
+  consolidar` o `lecciones curar` no corrieron en ese plazo, o nunca. Los dos
+  registran su corrida en `history.md` (`lecciones consolidar informe: N
+  candidato(s)`, `lecciones curar informe: N transicion(es) pendiente(s)`).
+
+Los avisos van por stderr al final del cierre, como el contrato de la #18:
+stdout y exit code no cambian. `lecciones status` muestra lineas/tope por
+leccion, las decisiones sin incorporar y la ultima consolidacion (`--json` los
+lleva en `politica`, `perfil_pendientes`, `ultima_consolidacion`).
+`harness_check.sh` avisa `[i]` por cada leccion activa sobre el tope.
+
+Que cambia para vos: si tu leccion mas usada supera 250 lineas, el proximo
+cierre que la declare se va a negar hasta que la partas. Es a proposito.
+
 ## `--reset` ya no borra el backlog, y el instalador lo respalda siempre (feature #78)
 
 El 2026-09-06 una corrida del instalador sobre un proyecto dejo `feature_list.json`
@@ -880,6 +914,9 @@ done`:
   `docs/review-<id>.md` (feature #64).
 - `require_leccion` — la de esta sección: exige `--leccion <clase>` o
   `--leccion ninguna` con motivo.
+- `leccion_max_lineas`, `leccion_repeticiones`, `perfil_pendientes_max`,
+  `consolidar_cada_dias` — no son gates: son los umbrales del ciclo de vida de
+  lo aprendido (feature #80, su sección mas arriba). Tienen default; `0` apaga.
 
 Las tres que no vienen en el molde (`require_verify_green`, `require_docs_al_dia`
 y `require_leccion`) nacen apagadas y se prenden agregándolas a mano, como acá

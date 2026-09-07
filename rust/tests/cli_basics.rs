@@ -4537,7 +4537,15 @@ fn consolidar_should_report_mutual_relacionadas_without_a_backend() {
         .stdout(predicate::str::contains("relacionadas mutuas"));
     assert_eq!(antes_a, std::fs::read(&leccion_a).unwrap());
     assert_eq!(antes_b, std::fs::read(&leccion_b).unwrap());
-    assert!(!history.exists(), "la deteccion local registro historia");
+    // Feature #80: la deteccion sigue sin tocar una sola leccion ni crear
+    // backup, pero SI deja su corrida en la bitacora: es lo que el cierre lee
+    // para saber que la biblioteca se reviso. Hasta la #80 este test afirmaba
+    // que history.md no existia; esa promesa cambio a proposito (AC-5).
+    let hist = std::fs::read_to_string(&history).unwrap_or_default();
+    assert!(
+        hist.contains("lecciones consolidar informe: 1 candidato(s)"),
+        "la deteccion no registro su corrida: {hist}"
+    );
     assert!(
         !dir.path().join("hp/bkp/lecciones").exists(),
         "la deteccion local creo un backup"
@@ -8428,4 +8436,323 @@ fn features_without_depends_on_should_behave_exactly_as_before() {
     );
     cmd(&bin).arg("next").assert().success().stdout(predicate::str::contains("Sola"));
     cmd(&bin).args(["start", "--feature", "1"]).assert().success();
+}
+
+// ---------------------------------------------------------------------------
+// Feature #80: el ciclo de vida de lo aprendido (tope, racha, avisos)
+// ---------------------------------------------------------------------------
+
+/// Escribe una regla cualquiera en `rules` del backlog del sandbox.
+fn set_rule(harness_dir: &Path, key: &str, value: serde_json::Value) {
+    let path = harness_dir.join("feature_list.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let obj = data.as_object_mut().unwrap();
+    let rules = obj
+        .entry("rules".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    rules.as_object_mut().unwrap().insert(key.to_string(), value);
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+}
+
+/// Una leccion de clase con `n_extra` lineas de cuerpo y dos secciones que
+/// llevan `(feature #N)` en el titulo: la forma "una-leccion-por-feature"
+/// adentro de un archivo, que es lo que el tope viene a cortar.
+fn seed_leccion_larga(root: &Path, nombre: &str, n_extra: usize) {
+    let dir = root.join("docs/lecciones");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut cuerpo = String::from("\n## Cuando aplica\n\nsiempre\n\n## El pipe que se traga el exit code (feature #64)\n\ndetalle\n\n## El oraculo copiado (feature #73)\n\ndetalle\n");
+    for i in 0..n_extra {
+        cuerpo.push_str(&format!("linea de relleno {i}\n"));
+    }
+    std::fs::write(
+        dir.join(format!("{nombre}.md")),
+        format!(
+            "---\nnombre: {nombre}\ndescripcion: Leccion de prueba.\ntriggers: [marcador-{nombre}]\n\
+             usos: 1\nultimo_uso: 2026-09-01\nultima_actualizacion: 2026-09-01\nestado: activa\n---\n{cuerpo}"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn close_gate_tope_de_lineas_should_refuse_a_lesson_over_the_limit_and_name_its_feature_sections() {
+    // AC-1: con la leccion sobre `rules.leccion_max_lineas`, el cierre rechaza
+    // con exit 2, deja el backlog intacto y dice QUE partir y a donde. Con el
+    // tope apagado (0) cierra como hoy.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    enable_leccion_rule(&harness_dir);
+    set_rule(&harness_dir, "leccion_max_lineas", serde_json::json!(12));
+    seed_leccion_larga(dir.path(), "cierre-largo", 30);
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "cierre-largo",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("supera el tope"))
+        .stderr(predicate::str::contains("(feature #64)"))
+        .stderr(predicate::str::contains("(feature #73)"))
+        .stderr(predicate::str::contains("cierre-largo/referencias/"));
+    let text = std::fs::read_to_string(harness_dir.join("feature_list.json")).unwrap();
+    assert!(text.contains("\"status\": \"in_progress\""), "el backlog cambio");
+    // Tope apagado: la misma leccion cierra.
+    set_rule(&harness_dir, "leccion_max_lineas", serde_json::json!(0));
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "cierre-largo",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"));
+}
+
+#[test]
+fn leccion_usar_rechaza_sobre_el_tope_and_status_shows_lines_against_it() {
+    // AC-2: `leccion usar` sobre el tope se niega sin tocar `usos`; `lecciones
+    // status` muestra lineas/tope y marca la que lo supera. El tope (20) deja
+    // adentro a la leccion corta del fixture (13 lineas) y afuera a la larga.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    set_rule(&harness_dir, "leccion_max_lineas", serde_json::json!(20));
+    seed_leccion_larga(dir.path(), "cierre-largo", 30);
+    seed_leccion(dir.path(), "corta", "2026-09-01", "activa", false);
+    cmd(&bin)
+        .args(["leccion", "usar", "cierre-largo"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("supera el tope"))
+        .stderr(predicate::str::contains("cierre-largo/referencias/"));
+    let text =
+        std::fs::read_to_string(dir.path().join("docs/lecciones/cierre-largo.md")).unwrap();
+    assert!(text.contains("usos: 1"), "usar toco los usos: {text}");
+    cmd(&bin)
+        .args(["lecciones", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("/20 lineas"))
+        .stdout(predicate::str::contains("SOBRE EL TOPE"));
+    cmd(&bin)
+        .args(["leccion", "usar", "corta"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 usos"));
+}
+
+#[test]
+fn close_gate_repeticiones_should_demand_a_motivo_after_k_closes_with_the_same_class() {
+    // AC-3: K cierres `done` seguidos con la misma clase (los `ninguna` no
+    // cuentan ni cortan la racha) -> el siguiente exige --leccion-motivo y el
+    // mensaje nombra esos cierres; con motivo cierra y queda registrado.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Otra"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    enable_leccion_rule(&harness_dir);
+    set_rule(&harness_dir, "leccion_repeticiones", serde_json::json!(2));
+    seed_leccion(dir.path(), "espejo-de-roles", "2026-09-01", "activa", false);
+    let history = harness_dir.join("progress/history.md");
+    let mut previo = std::fs::read_to_string(&history).unwrap_or_default();
+    previo.push_str(
+        "- 2026-09-01T00:00:00Z close feature #5 status=done leccion=espejo-de-roles note=a\n\
+         - 2026-09-02T00:00:00Z close feature #6 status=done leccion=ninguna (nada nuevo) note=b\n\
+         - 2026-09-03T00:00:00Z close feature #7 status=done leccion=espejo-de-roles note=c\n",
+    );
+    std::fs::write(&history, previo).unwrap();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("#5"))
+        .stderr(predicate::str::contains("#7"))
+        .stderr(predicate::str::contains("--leccion-motivo"));
+    let text = std::fs::read_to_string(harness_dir.join("feature_list.json")).unwrap();
+    assert!(text.contains("\"status\": \"in_progress\""), "el backlog cambio");
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+            "--leccion-motivo",
+            "es la misma clase: otra vez un espejo desalineado",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Leccion declarada: espejo-de-roles"));
+    let text = std::fs::read_to_string(harness_dir.join("feature_list.json")).unwrap();
+    assert!(text.contains("\"leccion_motivo\""), "el motivo no quedo en la feature");
+    let hist = std::fs::read_to_string(&history).unwrap();
+    assert!(
+        hist.contains("leccion=espejo-de-roles (es la misma clase"),
+        "el motivo no quedo en history: {hist}"
+    );
+    // Con K por encima de la racha real, ninguna clase pide motivo.
+    set_rule(&harness_dir, "leccion_repeticiones", serde_json::json!(9));
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn close_should_print_the_aviso_de_perfil_on_stderr_when_decisions_pile_up_unincorporated() {
+    // AC-4: mas de `rules.perfil_pendientes_max` decisiones sin incorporar ->
+    // aviso por stderr; stdout y exit code iguales. Con 0, ningun aviso.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Otra"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    enable_leccion_rule(&harness_dir);
+    set_rule(&harness_dir, "perfil_pendientes_max", serde_json::json!(2));
+    seed_leccion(dir.path(), "espejo-de-roles", "2026-09-01", "activa", false);
+    let history = harness_dir.join("progress/history.md");
+    let mut previo = std::fs::read_to_string(&history).unwrap_or_default();
+    for i in 0..4 {
+        previo.push_str(&format!(
+            "- 2026-09-0{}T00:00:00Z advance feature #1 Decision usuario: regla {i} elegida\n",
+            i + 1
+        ));
+    }
+    std::fs::write(&history, previo).unwrap();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"))
+        .stderr(predicate::str::contains("sin incorporar al perfil"))
+        .stderr(predicate::str::contains("perfil sugerir"));
+    set_rule(&harness_dir, "perfil_pendientes_max", serde_json::json!(0));
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("sin incorporar al perfil").not());
+}
+
+#[test]
+fn close_should_print_the_aviso_de_consolidacion_until_the_curator_records_a_run() {
+    // AC-5: sin corrida registrada de `lecciones consolidar|curar`, el cierre
+    // avisa "nunca registrada"; `lecciones curar` (aunque no cambie nada) la
+    // registra en history.md y el aviso deja de salir. `status` lo muestra.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(&bin).args(["add", "--name", "Otra"]).assert().success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    enable_leccion_rule(&harness_dir);
+    seed_leccion(dir.path(), "espejo-de-roles", "2026-09-01", "activa", false);
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("nunca registrada"))
+        .stderr(predicate::str::contains("lecciones consolidar"));
+    cmd(&bin)
+        .args(["lecciones", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Ultima consolidacion"))
+        .stdout(predicate::str::contains("nunca registrada"));
+    cmd(&bin).args(["lecciones", "curar"]).assert().success();
+    let hist = std::fs::read_to_string(harness_dir.join("progress/history.md")).unwrap();
+    assert!(hist.contains("lecciones curar informe"), "la corrida no quedo registrada: {hist}");
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("nunca registrada").not());
 }

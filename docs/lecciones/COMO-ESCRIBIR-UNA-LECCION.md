@@ -88,6 +88,34 @@ mismo durante meses.
    repetir. O no escribis nada, o escribis unicamente la alternativa que sabes
    que funciona.
 
+## La leccion de clase tiene tope: el detalle va a referencias/
+
+Una leccion que crece sin tope termina siendo una-leccion-por-feature adentro
+de un archivo: cada cierre le agrega una seccion "(feature #N)" y nadie la lee
+entera. Desde la feature #80 la leccion de CLASE tiene tope de lineas
+(`rules.leccion_max_lineas`, 250 por default; el archivo de la clase, sin
+contar `referencias/`). Sobre el tope, `close --leccion <clase>` y `leccion
+usar <clase>` se niegan con el contrato de particion. El tope es duro: no hay
+flag que lo saltee, igual que el limite del perfil.
+
+Como se parte (es el paso 3 de arriba, aplicado):
+
+1. Las secciones que cuentan UNA feature o UN incidente —las que llevan
+   "(feature #N)" en el titulo, o narran un caso— van a
+   `docs/lecciones/<clase>/referencias/<tema>.md`. Se MUEVEN, no se
+   reescriben.
+2. En la leccion queda un puntero de una linea por archivo movido (una
+   seccion "Referencias" al final alcanza).
+3. Lo que queda es la clase: cuando aplica, procedimiento, pitfalls,
+   verificacion, y el indice de referencias.
+
+`lecciones status` muestra lineas/tope por leccion y marca las que lo superan.
+
+Y la misma clase no es la respuesta a todo: declararla
+`rules.leccion_repeticiones` (3) cierres seguidos exige `--leccion-motivo
+"<por que no es otra clase>"`. Diez cierres seguidos con la misma leccion son un
+archivo que crece, no un proyecto que aprende.
+
 ## "Ninguna" es una salida valida — pero no el default
 
 Con la regla `require_leccion` activa, cerrar una feature exige declarar que se

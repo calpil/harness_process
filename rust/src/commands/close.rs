@@ -381,7 +381,14 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     }
     if let Some(decl) = &declaracion {
         match &decl.motivo {
-            Some(motivo) => println!("  Leccion declarada: ninguna ({motivo})."),
+            Some(motivo) if decl.clase.eq_ignore_ascii_case(lecciones::NINGUNA) => {
+                println!("  Leccion declarada: ninguna ({motivo}).");
+            }
+            Some(motivo) => println!(
+                "  Leccion declarada: {} ({}); motivo: {motivo}.",
+                decl.clase,
+                lecciones::rel_path(&decl.clase)
+            ),
             None => println!(
                 "  Leccion declarada: {} ({}).",
                 decl.clase,
@@ -395,6 +402,12 @@ pub fn run(paths: &HarnessPaths, fid: &str, opts: CierreOpts<'_>) -> anyhow::Res
     // el resultado de un cierre (AC-10).
     if status == "done" && declaracion.is_none() && lecciones::dir(paths).is_dir() {
         let _ = std::io::stderr().write_all(lecciones::texto_contrato_de_cierre(paths).as_bytes());
+    }
+    // Avisos del ciclo de aprendizaje (feature #80): perfil sin alimentar,
+    // consolidacion sin correr. Mismo canal y mismo contrato: stderr, al final,
+    // sin tocar stdout ni exit code. Datos de la RAIZ (history, perfil).
+    if status == "done" && lecciones::dir(raiz).is_dir() {
+        let _ = std::io::stderr().write_all(lecciones::texto_avisos_de_ciclo(raiz, &data).as_bytes());
     }
     Ok(())
 }

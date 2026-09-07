@@ -389,6 +389,12 @@ fi
 # nombre que no coincide BLOQUEAN (decision usuario 2026-08-16, OBS-4 de la #17);
 # la falta de `triggers` solo avisa. Sin docs/lecciones/ el bloque se omite.
 lec_root="$REPO_ROOT/docs/lecciones"
+# Feature #80: tope de lineas por leccion de CLASE (rules.leccion_max_lineas,
+# default 250; <= 0 apaga). Aca solo se AVISA: el bloqueo es del cierre, que es
+# donde se decide. Las de archivo/ y los referencias/ no cuentan.
+# (`|| true`: sin la regla, el grep devuelve 1 y bajo set -e eso mataba el check entero)
+lec_tope="$(grep -oE '"leccion_max_lineas"[[:space:]]*:[[:space:]]*-?[0-9]+' "$HARNESS_DIR/feature_list.json" 2>/dev/null | grep -oE -- '-?[0-9]+$' | head -n 1 || true)"
+[ -z "$lec_tope" ] && lec_tope=250
 if [ -d "$lec_root" ]; then
     while IFS= read -r lec_file; do
         [ -z "$lec_file" ] && continue
@@ -420,6 +426,15 @@ if [ -d "$lec_root" ]; then
         if [ -z "$lec_trig" ]; then
             echo "[i] docs/lecciones/$lec_base no declara 'triggers': nadie la va a encontrar por tema." >&2
         fi
+        case "$lec_file" in
+            */archivo/*) ;;
+            *)
+                lec_lineas="$(wc -l < "$lec_file" | tr -d ' ')"
+                if [ "$lec_tope" -gt 0 ] && [ "$lec_lineas" -gt "$lec_tope" ]; then
+                    echo "[i] docs/lecciones/$lec_base tiene $lec_lineas lineas y el tope es $lec_tope (rules.leccion_max_lineas): el cierre no la va a aceptar hasta partirla. El detalle por feature va a docs/lecciones/$lec_name/referencias/<tema>.md con un puntero de una linea (feature #80)." >&2
+                fi
+                ;;
+        esac
     done <<EOF
 $(find "$lec_root" -maxdepth 2 -type f -name '*.md' | sort)
 EOF

@@ -159,3 +159,7 @@ objetivo del usuario, y ya paso.
   motivo). Con la regla `require_leccion` activa el cierre lo exige; sin ella
   sigue siendo tu trabajo decidirlo, porque es lo unico que evita que el
   aprendizaje quede archivado bajo un numero de feature que nadie va a buscar.
+  Si la leccion supera el tope (`rules.leccion_max_lineas`), primero se parte:
+  el detalle por feature va a `docs/lecciones/<clase>/referencias/` (feature
+  #80). Y si es la misma clase por tercera vez seguida, decis por que no es
+  otra (`--leccion-motivo`).

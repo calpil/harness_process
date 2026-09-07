@@ -103,7 +103,7 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   `hito_marcado`, `escapa_de_la_raiz`, `file_en_raiz` (el PRD del checkout
   principal, no el del worktree) y `scan_dir`.
 - `lecciones.rs`: la memoria procedural (`docs/lecciones/<clase>.md`, feature
-  #17). Expone `validar_nombre_de_clase` (rechaza nombres de sesion: con
+  #17; ciclo de vida de lo aprendido, feature #80: `Politica::from_rules` lee los cuatro umbrales de `rules`, `Leccion::lineas`/`sobre_el_tope`/`secciones_por_feature` y `contrato_de_particion` sostienen el tope, `cierre_declarado`/`racha` leen `history.md` para la racha, y `ultima_consolidacion`/`perfil_pendientes`/`texto_avisos_de_ciclo` arman los avisos que `close` emite por stderr). Expone `validar_nombre_de_clase` (rechaza nombres de sesion: con
   `feature`/`#`, con prefijo `fix-`/`debug-`/`audit-`/`hotfix-`, con fecha o con
   numeros de 3+ digitos; **sin escape hatch**), `Leccion::parse` (frontmatter
   como lineas crudas, asi que preserva orden y claves desconocidas; el cuerpo va

@@ -1,12 +1,12 @@
 ---
 nombre: reglas-que-se-aplican-a-si-mismas
 descripcion: La primera aplicacion de una regla decide si va a existir o no.
-triggers: [convencion, regla, politica, escalera, lint, estandar, excepcion, precedente, guia]
+triggers: [ciclo de vida, tope, memoria acotada, autoaprendizaje, convencion, regla, politica, escalera, lint, estandar, excepcion, precedente, guia]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, probar-contra-datos-reales]
-origen: [24]
-usos: 1
-ultimo_uso: 2026-08-17
-ultima_actualizacion: 2026-08-17
+origen: [24, 80]
+usos: 2
+ultimo_uso: 2026-09-06
+ultima_actualizacion: 2026-09-06
 estado: activa
 ---
 
@@ -121,3 +121,41 @@ bash tests/<chequeo>.sh detecta
 
 Si al terminar la feature la regla todavia no rechazo nada —ni un test, ni un
 diseno, ni una linea— no la agregaste: la anunciaste.
+
+## La regla de aprendizaje que el arnes no se aplico a si mismo (feature #80)
+
+El arnes le pide a cada proyecto que aprenda: lecciones por clase, guia con
+cuatro pasos, curador, perfil, consolidacion. Medido el 2026-09-06 sobre ESTE
+repo, que es el que escribio esas reglas: 10 de los ultimos 15 cierres
+declararon la misma leccion; esa leccion tenia 442 lineas y nueve secciones
+"(feature #N)" —la forma "una-leccion-por-feature" que la guia prohibe, solo
+que adentro de un archivo—; el paso 3 de la guia (`<clase>/referencias/`)
+tenia cero usos en toda la biblioteca; 340 decisiones sin incorporar al
+perfil; la consolidacion sin correr en 19 dias y sin registro.
+
+Tres cosas que se ven solo cuando uno mide la regla contra quien la escribio:
+
+1. **Un gate que mide la declaracion no mide el aprendizaje.** `require_leccion`
+   exigia nombrar una leccion al cerrar. Se cumplia todos los dias y no
+   producia aprendizaje: producia una seccion mas en el mismo archivo. La
+   correccion no fue quitar el gate sino darle un limite fisico (el tope de
+   lineas) y una pregunta (la racha: "¿por que la misma clase otra vez?").
+2. **Un limite que solo existe para el usuario se olvida.** El perfil tenia
+   limite duro (1500 caracteres, falla sin recortar) porque se penso como
+   memoria acotada, copiado de Hermes; las lecciones no lo tenian porque "son
+   del proyecto". Misma memoria, misma regla: el tope de lineas es el limite
+   del perfil, aplicado a las lecciones.
+3. **Lo que nadie recuerda no se hace.** `perfil sugerir` y `lecciones
+   consolidar` existian y funcionaban; nadie los corria porque nada los
+   pedia. El cierre ahora avisa por los dos, con el mismo canal que ya usaba el
+   contrato de lecciones. Y para saber si la consolidacion corrio, la
+   consolidacion tiene que dejar rastro: hasta la #80 el modo informe no
+   escribia ni en la bitacora, por una promesa de la #28 que estaba bien para
+   las lecciones y mal para el registro.
+
+La verificacion es la misma de siempre: correr la regla nueva contra la
+biblioteca propia ANTES de cerrar. `lecciones status` tenia que mostrar
+ninguna leccion sobre 250 al cerrar esta feature, y la primera version del
+`[i]` de `harness_check.sh` mataba el check entero en cualquier proyecto sin la
+regla (`grep` que devuelve 1 bajo `set -e`): lo atrapo `tests/stop_hook_check.sh`,
+no la lectura.

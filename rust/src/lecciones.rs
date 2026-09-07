@@ -442,6 +442,230 @@ impl Umbrales {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Feature #80: el ciclo de vida de lo aprendido (tope, racha, avisos)
+// ---------------------------------------------------------------------------
+
+/// Tope de lineas de una leccion de CLASE: el archivo de la clase, sin contar
+/// `<clase>/referencias/`. Medido el 2026-09-06: la leccion mas usada tenia 442
+/// lineas y 17 secciones, nueve de ellas "(feature #N)" —una-leccion-por-feature
+/// adentro de un archivo—, y el paso 3 de la guia (referencias/) tenia cero usos.
+pub const MAX_LINEAS_DEFAULT: i64 = 250;
+/// Cierres `done` seguidos con la misma clase antes de exigir un motivo.
+/// Medido: 10 de los ultimos 15 cierres declararon la misma leccion.
+pub const REPETICIONES_DEFAULT: i64 = 3;
+/// Decisiones registradas sin incorporar al perfil a partir de las cuales el
+/// cierre avisa. Medido: 340 sin incorporar, ninguna entrada nueva en 3 semanas.
+pub const PERFIL_PENDIENTES_DEFAULT: i64 = 25;
+/// Dias sin `lecciones consolidar|curar` a partir de los cuales el cierre
+/// avisa. El mismo umbral que `stale`: si una leccion se enfria en 30 dias, la
+/// biblioteca merece una pasada en el mismo plazo.
+pub const CONSOLIDAR_DIAS_DEFAULT: i64 = 30;
+
+/// Los cuatro umbrales del ciclo de vida. Viven en `rules`; `<= 0` apaga cada
+/// uno, como `leccion_nudge_interval`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Politica {
+    pub max_lineas: i64,
+    pub repeticiones: i64,
+    pub perfil_pendientes: i64,
+    pub consolidar_dias: i64,
+}
+
+impl Default for Politica {
+    fn default() -> Self {
+        Politica {
+            max_lineas: MAX_LINEAS_DEFAULT,
+            repeticiones: REPETICIONES_DEFAULT,
+            perfil_pendientes: PERFIL_PENDIENTES_DEFAULT,
+            consolidar_dias: CONSOLIDAR_DIAS_DEFAULT,
+        }
+    }
+}
+
+impl Politica {
+    /// Lee `rules.leccion_max_lineas`, `rules.leccion_repeticiones`,
+    /// `rules.perfil_pendientes_max` y `rules.consolidar_cada_dias`.
+    pub fn from_rules(data: &serde_json::Value) -> Politica {
+        let leer = |clave: &str, default: i64| {
+            data.get("rules")
+                .and_then(|r| r.get(clave))
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(default)
+        };
+        Politica {
+            max_lineas: leer("leccion_max_lineas", MAX_LINEAS_DEFAULT),
+            repeticiones: leer("leccion_repeticiones", REPETICIONES_DEFAULT),
+            perfil_pendientes: leer("perfil_pendientes_max", PERFIL_PENDIENTES_DEFAULT),
+            consolidar_dias: leer("consolidar_cada_dias", CONSOLIDAR_DIAS_DEFAULT),
+        }
+    }
+}
+
+impl Leccion {
+    /// Lineas del archivo de la clase, frontmatter incluido. Es lo que se ve al
+    /// abrirlo, y lo que el tope mide.
+    pub fn lineas(&self) -> usize {
+        self.render().lines().count()
+    }
+
+    /// `Some(lineas)` si supera el tope; con el tope apagado, nunca.
+    pub fn sobre_el_tope(&self, politica: &Politica) -> Option<usize> {
+        let n = self.lineas();
+        (politica.max_lineas > 0 && n > politica.max_lineas as usize).then_some(n)
+    }
+
+    /// Titulos `## ...` que llevan `(feature #N)`: secciones que cuentan UNA
+    /// feature, es decir, candidatas a `referencias/`.
+    pub fn secciones_por_feature(&self) -> Vec<String> {
+        self.body
+            .lines()
+            .filter(|l| l.starts_with("## ") && l.contains("(feature #"))
+            .map(|l| l.trim_start_matches("## ").trim().to_string())
+            .collect()
+    }
+}
+
+/// El contrato de particion: que partir y a donde. Es el texto del rechazo del
+/// gate y de `leccion usar`; el tope es DURO (decision del usuario, OBS-4 de la
+/// #80): el del perfil es duro y funciona, y un escape por flag se vuelve el
+/// default.
+pub fn contrato_de_particion(leccion: &Leccion, politica: &Politica) -> String {
+    let n = leccion.lineas();
+    let mut msg = format!(
+        "[GATE] La leccion '{}' tiene {n} lineas y supera el tope de {} (rules.leccion_max_lineas).\n    \
+         Una leccion de clase que crece sin tope es una-leccion-por-feature adentro de un archivo: no se lee.\n    \
+         Partila antes de declararla (el tope es duro; no hay --leccion-motivo para esto):\n",
+        leccion.nombre, politica.max_lineas
+    );
+    let secciones = leccion.secciones_por_feature();
+    if secciones.is_empty() {
+        msg.push_str("      1. Las secciones que cuentan UNA sesion (una feature, un incidente) van a\n");
+    } else {
+        msg.push_str(&format!(
+            "      1. Estas {} secciones cuentan UNA feature; van a\n",
+            secciones.len()
+        ));
+        for s in &secciones {
+            msg.push_str(&format!("           - {s}\n"));
+        }
+    }
+    msg.push_str(&format!(
+        "         docs/lecciones/{}/referencias/<tema>.md (mover, no reescribir).\n      \
+         2. En la leccion queda un puntero de una linea por archivo movido.\n      \
+         3. Lo que queda es la CLASE: cuando aplica, procedimiento, pitfalls, verificacion.\n    \
+         Guia: {} (paso 3). Estado: sh harness_cli lecciones status",
+        leccion.nombre,
+        guia_rel()
+    ));
+    msg
+}
+
+/// Un cierre `done` de `history.md` que declaro una clase (no `ninguna`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CierreDeclarado {
+    pub feature: String,
+    pub clase: String,
+}
+
+/// Parsea `- <ts> close feature #N status=done leccion=<clase>[ (motivo)] note=...`.
+/// Los cierres sin declaracion y los `ninguna` no son cierres declarados: no
+/// cuentan para la racha ni la cortan.
+pub fn cierre_declarado(linea: &str) -> Option<CierreDeclarado> {
+    let resto = linea.split_once("close feature #")?.1;
+    let feature: String = resto.chars().take_while(char::is_ascii_digit).collect();
+    if feature.is_empty() || !resto.contains("status=done") {
+        return None;
+    }
+    let clase: String = resto
+        .split_once("leccion=")?
+        .1
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect();
+    if clase.is_empty() || clase.eq_ignore_ascii_case(NINGUNA) {
+        return None;
+    }
+    Some(CierreDeclarado { feature, clase })
+}
+
+/// Los ultimos `k` cierres declarados, como `#id`, si TODOS declararon
+/// `clase`; si no (o si no llegan a `k`), vacio.
+pub fn racha(paths: &HarnessPaths, clase: &str, k: usize) -> Vec<String> {
+    if k == 0 {
+        return Vec::new();
+    }
+    let texto = std::fs::read_to_string(&paths.history).unwrap_or_default();
+    let declarados: Vec<CierreDeclarado> = texto.lines().filter_map(cierre_declarado).collect();
+    if declarados.len() < k {
+        return Vec::new();
+    }
+    let ultimos = &declarados[declarados.len() - k..];
+    if ultimos.iter().all(|c| c.clase == clase) {
+        ultimos.iter().map(|c| format!("#{}", c.feature)).collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Fecha (`YYYY-MM-DD`) de la ultima corrida registrada de `lecciones
+/// consolidar` o `lecciones curar` en `history.md`. `None` si nunca se registro.
+pub fn ultima_consolidacion(paths: &HarnessPaths) -> Option<String> {
+    let texto = std::fs::read_to_string(&paths.history).ok()?;
+    texto
+        .lines()
+        .rfind(|l| l.contains(" lecciones consolidar") || l.contains(" lecciones curar"))
+        .and_then(|l| l.strip_prefix("- "))
+        .map(|l| l.chars().take(10).collect())
+}
+
+/// Decisiones registradas (bitacora, planes, specs) que ninguna entrada del
+/// perfil cita todavia.
+pub fn perfil_pendientes(paths: &HarnessPaths) -> usize {
+    crate::perfil::recolectar(paths)
+        .iter()
+        .filter(|r| !r.ya_incorporado)
+        .count()
+}
+
+/// Los avisos del ciclo de aprendizaje al cerrar `done` (feature #80). Texto
+/// para stderr —el canal del contrato de la #18—; vacio si no hay nada que
+/// avisar. Nunca cambia stdout ni el exit code.
+pub fn texto_avisos_de_ciclo(paths: &HarnessPaths, data: &serde_json::Value) -> String {
+    let politica = Politica::from_rules(data);
+    let mut out = String::new();
+    if politica.perfil_pendientes > 0 {
+        let pendientes = perfil_pendientes(paths);
+        if pendientes > politica.perfil_pendientes as usize {
+            out.push_str(&format!(
+                "[i] Perfil: {pendientes} decision(es) registradas sin incorporar al perfil (aviso desde {}, rules.perfil_pendientes_max).\n    \
+                 Mira que se repite: sh harness_cli perfil sugerir   (no escribe; cada entrada entra con el si del usuario)\n",
+                politica.perfil_pendientes
+            ));
+        }
+    }
+    if politica.consolidar_dias > 0 {
+        match ultima_consolidacion(paths) {
+            None => out.push_str(
+                "[i] Consolidacion: nunca registrada. La biblioteca no se revisa sola:\n    \
+                 sh harness_cli lecciones consolidar   (informa; --aplicar fusiona)   |   sh harness_cli lecciones curar\n",
+            ),
+            Some(fecha) => {
+                if let Some(d) = dias_entre(&fecha, &hoy()) {
+                    if d > politica.consolidar_dias {
+                        out.push_str(&format!(
+                            "[i] Consolidacion: la ultima corrida registrada fue el {fecha} ({d} dias; aviso desde {}, rules.consolidar_cada_dias).\n    \
+                             sh harness_cli lecciones consolidar   |   sh harness_cli lecciones curar\n",
+                            politica.consolidar_dias
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Que le corresponde a una leccion en esta pasada.
 ///
 /// Es un enum y no un `Option<&str>` porque cada caso tiene su regla, su motivo y
@@ -754,9 +978,42 @@ pub fn gate(
             message: Some(msg),
         });
     }
+    // Feature #80: el tope es duro. Una leccion sobre el tope no se declara:
+    // primero se parte (el contrato dice que y a donde).
+    let politica = Politica::from_rules(data);
+    if let Ok(leccion) = Leccion::load(&file_for(paths, clase)) {
+        if leccion.sobre_el_tope(&politica).is_some() {
+            return Err(Exit {
+                code: 2,
+                message: Some(contrato_de_particion(&leccion, &politica)),
+            });
+        }
+    }
+    // Feature #80: la misma clase K cierres seguidos exige decir por que no es
+    // otra clase. El motivo se registra, como el de `ninguna`.
+    let motivo = motivo.map(str::trim).filter(|s| !s.is_empty());
+    if politica.repeticiones > 0 && motivo.is_none() {
+        let r = racha(paths, clase, politica.repeticiones as usize);
+        if !r.is_empty() {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!(
+                    "[GATE] '{clase}' fue la leccion de los ultimos {} cierres ({}).\n    \
+                     Si esta vez tambien lo es, deci por que NO es otra clase de trabajo:\n      \
+                     --leccion-motivo \"<por que la misma clase>\"\n    \
+                     Si lo aprendido es de otra clase, nombrala (o creala: sh harness_cli leccion nueva <clase>).\n    \
+                     Catalogo: sh harness_cli leccion list\n    \
+                     Diez cierres seguidos con la misma leccion son un archivo que crece, no un proyecto que aprende\n    \
+                     (rules.leccion_repeticiones, 0 apaga).",
+                    r.len(),
+                    r.join(", ")
+                )),
+            });
+        }
+    }
     Ok(Some(Declaracion {
         clase: clase.to_string(),
-        motivo: None,
+        motivo: motivo.map(str::to_string),
     }))
 }
 

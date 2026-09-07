@@ -1,7 +1,7 @@
 ---
 nombre: promesas-estructurales-vs-disciplina
 descripcion: Si el invariante depende de acordarse, no es invariante: es una intencion.
-triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, falso verde, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion, orden, rollback, deshacer, transaccional, efecto irreversible, aislamiento, worktree, paralelo, atribuir, declarar, estado prematuro, approve-spec, feature activa, destino implicito, default implicito, sesiones concurrentes, one_feature_at_a_time, autorizacion, sello, aprobar]
+triggers: [invariante, promesa, no escribe, dry-run, solo lectura, funcion pura, aplicar, trampa, advertencia, arreglar a mano, clase de bug, viaja en el merge, dato compartido, pendiente, best-effort, excepcion, salvo, no se puede, limitacion, orden, rollback, deshacer, transaccional, efecto irreversible, aislamiento, worktree, paralelo, atribuir, declarar, estado prematuro, approve-spec, feature activa, destino implicito, default implicito, sesiones concurrentes, one_feature_at_a_time, autorizacion, sello, aprobar]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, probar-contra-datos-reales]
 origen: [21, 44, 60, 61, 62, 71, 72]
 usos: 6
@@ -124,109 +124,6 @@ falla, y lo que falla primero es lo que mas se usa. Si el limite es real, la
 promesa de la cabecera tiene que decirlo; una promesa con una excepcion muda es
 peor que no prometer nada.
 
-## El ORDEN tambien es estructura
-
-La forma mas barata de no necesitar un rollback es no haber escrito nada
-todavia. Si una operacion tiene varios efectos y alguno puede fallar, el orden
-en que los hacer NO es un detalle de implementacion: es lo que decide si el
-sistema puede mentir.
-
-`close` escribia nueve cosas —backlog en `done`, transicion a Jira, anotacion
-del plan, estado archivado, indice, `history.md`, memoria en el hub, borrado del
-estado vivo y "Feature #N cerrada"— y **despues** integraba. Cuando la
-integracion fallaba, las nueve ya habian pasado sobre un trabajo que no estaba
-integrado.
-
-Procedimiento:
-
-1. **Clasifica los efectos por reversibilidad.** Escribir un JSON se revierte;
-   emitir un evento a un sistema externo, escribir en una base compartida o
-   imprimir una linea en la terminal, no.
-2. **Ordena: lo reversible y lo que puede negarse primero, lo irreversible al
-   final.** En `close` quedo asi: (0) lo que puede negarse, (1) lo que tiene que
-   viajar en la rama, (2) la operacion que puede fallar, (3) todo el estado.
-3. **Lo que no se puede mover, hacelo idempotente.** Dos artefactos del cierre
-   tenian que escribirse antes por una razon fisica —viven en el worktree que el
-   merge borra— asi que se hicieron re-ejecutables sin duplicar.
-4. **No agregues rollback**: seria parcial (los efectos del punto 1 que no se
-   deshacen siguen sin deshacerse) y habria que acordarse de mantenerlo cada vez
-   que la operacion gane un efecto nuevo. Es disciplina otra vez.
-
-Regla corta: **los efectos que no se pueden deshacer van ultimos**. Y el mensaje
-de exito es uno de ellos: una vez que lo leyeron, ya no se puede desdecir.
-
-### La variante que volvio dos veces: DECLARAR antes de conseguir (feature #72)
-
-La #62 ordeno los efectos de `close` por reversibilidad. La #72 encontro la
-misma forma otras dos veces, y en las dos el problema no era el rollback: era que
-el sistema **afirmaba un hecho antes de asegurarlo**.
-
-| Donde | Que afirmaba | Cuando era cierto |
-| --- | --- | --- |
-| `start` | `status: in_progress` + `worktree: <ruta>` | recien despues de que `git worktree add` funcionara |
-| `close` | "commits que se llevan: (ninguno)" | recien despues de commitear el worktree de la feature |
-
-En `start` el costo fue medible: tres features (`#98`, `#122`, `#126`) quedaron
-`in_progress` sin rama ni worktree, escribiendo las tres en el mismo checkout,
-porque el estado se escribia primero y el fallo de git se imprimia con un `[i]`.
-En `close`, el rango se calculaba antes del commit, asi que el cierre anunciaba
-un rango vacio y a la linea siguiente commiteaba y mergeaba.
-
-Los dos son el mismo bug con distinto disfraz, y ninguno es un problema de
-reversibilidad: el JSON se podia reescribir, la linea impresa no. La pregunta que
-los detecta no es "¿esto se puede deshacer?" sino:
-
-> **¿Lo que estoy por escribir o imprimir ya es cierto en este punto del codigo?**
-
-Procedimiento, ademas del de arriba:
-
-1. Para cada afirmacion que el codigo emite —un campo de estado, una linea de
-   consola, un evento— buscá **la linea exacta** donde eso pasa a ser cierto.
-2. Si la afirmacion esta antes, moverla despues. No agregues una correccion
-   posterior ("en realidad eran 2 commits"): nadie lee la segunda linea.
-3. Si no se puede mover porque el dato se necesita antes, **recalcula y volve a
-   preguntar** justo antes de actuar. En `close` quedo: commit -> rango
-   definitivo -> re-chequeo de ajenos -> merge. El primer chequeo no se saco;
-   se le agrego el segundo, sobre el dato ya definitivo.
-
-Y el sintoma que lo delata en una revision: un `println!` con un `[i]` seguido de
-codigo que sigue como si nada. **Un `[i]` antes de un `continue` implicito casi
-siempre es una promesa que se acaba de romper en silencio** — es la misma familia
-que "un `[i]` no es un pendiente", un nivel mas arriba.
-
-## El mismo principio, aplicado a ARREGLAR un bug (feature #44)
-
-No es solo para invariantes. Cuando encontras una trampa —una forma de que la
-herramienta mienta— tenes dos maneras de cerrarla:
-
-| Que haces | Que consegus |
-| --- | --- |
-| arreglas las instancias que ves y escribis una advertencia | documentaste |
-| escribis un chequeo que la detecta sola | la cerraste |
-
-El caso medido: la feature #23 descubrio que `cargo test <nombre-inexistente>`
-imprime `running 0 tests`, dice `ok` y **sale 0**, asi que un AC quedaba verde
-sin ejecutar nada. Lo arreglo **renombrando los tests a mano** y dejo escrita la
-advertencia en `UPDATING.md`.
-
-Cinco features despues volvio a pasar: el AC-12 de la #28 declaraba un test que
-no existia, y el invariante mas citado de ese comando quedo registrado como
-verificado con nada detras. Nadie lo vio hasta que un pase de refutacion lo
-busco a proposito, **un dia** despues de cerrar.
-
-La advertencia estaba escrita. La lei y la escribi yo. No sirvio, porque una
-advertencia solo actua cuando alguien se acuerda de ella en el momento exacto en
-que esta por caer.
-
-La #44 la cerro estructuralmente: `verify` mira la salida ademas del exit code y
-marca `vacio` al AC que no ejecuto ningun caso. Ahora la trampa no depende de
-que nadie se distraiga.
-
-**La pregunta que hay que hacerse al arreglar cualquier bug**: ¿esto arregla el
-caso o la clase? Si la respuesta es "el caso, mas una nota para acordarse", vas a
-volver a verlo. Anotalo en el backlog aunque no lo hagas ahora: la nota en el
-backlog al menos tiene fecha de vencimiento; la advertencia en un documento, no.
-
 ## Pitfalls
 
 - **Confundir el test con la garantia.** Un test que compara mtimes antes y
@@ -261,56 +158,10 @@ Si al leer los `use` del modulo se puede decir "esto no tiene con que romper la
 promesa", la promesa es estructural. Si hace falta leer el cuerpo entero para
 convencerse, todavia depende de disciplina.
 
-## La variante del DESTINO IMPLICITO: un comando que apunta a estado global mutable
+## Referencias (el detalle, caso por caso)
 
-Medido el 2026-09-05 en un proyecto con `one_feature_at_a_time: false` y cinco
-sesiones interactivas trabajando a la vez sobre el mismo backlog.
+Movidas a `promesas-estructurales-vs-disciplina/referencias/` el 2026-09-06 (feature #80). Cada una es el caso que sostiene una regla de arriba: se leen cuando hace falta el detalle, no para entender la clase.
 
-`approve-spec` acepta `--feature` y, cuando no se lo pasan, **apunta a la feature
-ACTIVA**. La feature activa no es un dato de quien invoca: es estado global del
-backlog, y en paralelo **otra sesion la cambia mientras vos trabajas**. La
-secuencia real, con los segundos:
-
-    13:32:09  otra sesion cierra la #100 (que era mia y estaba activa)
-    13:32:17  esa sesion arranca la #99
-    13:33:04  yo corro `approve-spec --yes` para MI feature
-
-Resultado: el sello *"Estado: approved — aprobado por el USUARIO"* quedo sobre el
-spec de la **#99**, que era la plantilla vacia y que el usuario nunca vio, con una
-nota que citaba las decisiones de la #100. Cuarenta y siete segundos de
-diferencia.
-
-Lo que hace grave a este caso y no solo molesto: **el articulo que ese comando
-existe para sostener es "solo el USUARIO aprueba; los agentes tienen PROHIBIDO
-auto-aprobar"**. O sea que el unico comando cuya razon de ser es no fabricar una
-autorizacion fabrica una autorizacion cuando el destino se resuelve solo. Y el
-gate posterior no lo atrapa: `check-spec` de la #99 pasaba a salir **limpio**,
-porque para el binario ese spec estaba aprobado y fresco. La unica forma de
-detectarlo fue leer el sello y no reconocer la nota.
-
-Por que es esta leccion y no otra: la promesa "no se aprueba lo que el usuario no
-vio" se sostenia porque el agente **se acuerda** de pasar `--feature`. Con una
-sola sesion eso es invisible; en paralelo es una bomba de tiempo.
-
-El arreglo estructural, en orden de preferencia:
-
-1. **Exigir el destino explicito en los comandos que ESTAMPAN una autorizacion
-   del usuario.** Sin `--feature`, que se niegue en vez de adivinar. Es una
-   linea, y convierte "acordate" en "no compila".
-2. Si el default implicito se conserva por comodidad, **atarlo al contexto de
-   quien invoca** (el worktree, el cwd) y no al estado global mutable; y con
-   `one_feature_at_a_time: false`, negarse directamente.
-3. **Que el sello lleve de que feature habla** dentro de la nota, no solo en el
-   nombre del archivo: un sello que se puede leer sin ambiguedad es lo unico que
-   permitio descubrir este.
-
-El mismo criterio aplica a todo comando cuyo destino sea implicito: `advance`,
-`close --feature` omitido, `verify`. La pregunta que los detecta:
-
-> **Si otra sesion cambia el estado global entre que yo decido y yo ejecuto,
-> ¿este comando actua sobre lo que yo creia?**
-
-Y el remedio cuando ya paso, porque tambien hubo que inventarlo: revertir el
-`Estado:` a `draft` y **dejar escrito en el cuerpo del spec por que se retiro el
-sello**. El sello se saca; la entrada en `progress/history.md` NO, que es
-append-only, asi que el rastro queda y hay que explicarlo donde se lea.
+- [El ORDEN tambien es estructura](promesas-estructurales-vs-disciplina/referencias/el-orden-tambien-es-estructura.md)
+- [El mismo principio, aplicado a ARREGLAR un bug (feature #44)](promesas-estructurales-vs-disciplina/referencias/el-mismo-principio-aplicado-a-arreglar-un-bug.md)
+- [La variante del DESTINO IMPLICITO: un comando que apunta a estado global mutable](promesas-estructurales-vs-disciplina/referencias/la-variante-del-destino-implicito-un-comando-que-apunta-a-es.md)

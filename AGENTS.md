@@ -108,7 +108,16 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
   narrativas de tarea unica, fracasos disfrazados de practica) estan en
   `docs/lecciones/COMO-ESCRIBIR-UNA-LECCION.md`. Con la regla `require_leccion`
   activa, `close --status done` exige `--leccion <clase>` o
-  `--leccion ninguna --leccion-motivo "<por que>"`.
+  `--leccion ninguna --leccion-motivo "<por que>"`. Lo aprendido tiene ciclo
+  de vida (feature #80): la leccion de CLASE tiene tope de lineas
+  (`rules.leccion_max_lineas`, 250) —sobre el tope, `close --leccion` y
+  `leccion usar` se niegan hasta que muevas el detalle por feature a
+  `docs/lecciones/<clase>/referencias/<tema>.md` y dejes un puntero—; la misma
+  clase `rules.leccion_repeticiones` (3) cierres seguidos exige
+  `--leccion-motivo`; y el cierre avisa cuando el perfil junta mas de
+  `rules.perfil_pendientes_max` (25) decisiones sin incorporar o pasaron mas de
+  `rules.consolidar_cada_dias` (30) sin `lecciones consolidar|curar`.
+  `lecciones status` muestra los cuatro; `0` apaga cada uno.
 - `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
   CLI (exclusiones de contexto, `.kimirules`, acotamiento por archivo, `/new`
   entre tareas).

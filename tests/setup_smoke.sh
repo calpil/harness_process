@@ -1702,3 +1702,9 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if len(d
 HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/backlog_backup_check.sh" todos \
     || { echo "[FALLO] backlog_backup_check: ver arriba"; exit 1; }
 echo "[Ok] Backlog #78: --reset no lo borra, toda corrida lo respalda (tambien con --force), y la siembra sobre un backlog ausente avisa."
+
+# Feature #80: harness_check.sh avisa [i] por cada leccion de clase sobre el tope
+# (rules.leccion_max_lineas), no por referencias/, y calla con la regla en 0.
+HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/leccion_tope_check.sh" \
+    || { echo "[FALLO] leccion_tope_check: ver arriba"; exit 1; }
+echo "[Ok] Lecciones #80: el check avisa por la leccion sobre el tope."
