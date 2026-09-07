@@ -45,6 +45,18 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## `graphify-out/.graphify_stale` ya no bloquea el Stop (feature #83)
+
+El marcador lo deja el arnes: el hook `post-commit` lo crea cada vez que un
+commit toca un `.md` (o sea, en cada cierre) y solo lo borra si logra el rebuild
+semantico, que esta *debounced* a 30 minutos y salta sin backend LLM; `autocheck`
+lo crea cuando `graphify update` falla o se pasa del timeout. Hasta la #83
+`harness_check.sh` lo contaba como fallo, asi que el Stop hook bloqueaba al
+agente hasta un `/graphify --update` a mano o hasta que pasaran los 30 minutos.
+
+Ahora sale como `[i]`: el aviso dice quien lo limpia solo y como forzarlo, y el
+check no falla por el. Nada cambia en el hook ni en el rebuild.
+
 ## Lo aprendido tiene ciclo de vida: tope, racha y dos avisos (feature #80)
 
 Medido el 2026-09-06 en este repo: 10 de los ultimos 15 cierres declararon la

@@ -136,9 +136,11 @@ if [ -f "$HARNESS_DIR/CHECKPOINTS.md" ] && [ ! -s "$HARNESS_DIR/progress/current
     sumar_fallo "$LINENO"
 fi
 
+# Feature #83: el marcador lo deja el hook post-commit (tras commitear un .md) o
+# autocheck (graphify update fallido), y lo limpian ellos cuando el rebuild
+# vuelve a andar. Es enriquecimiento best-effort: se AVISA, no bloquea el Stop.
 if [ -f "$REPO_ROOT/graphify-out/.graphify_stale" ]; then
-    echo "[!] graphify-out/.graphify_stale existe; corre /graphify --update cuando aplique." >&2
-    sumar_fallo "$LINENO"
+    echo "[i] graphify-out/.graphify_stale: el grafo tiene un enriquecimiento pendiente. Lo limpia solo el hook post-commit en el proximo rebuild semantico (cada 30 min, con backend LLM) o harness autocheck cuando graphify update vuelve a andar; para forzarlo: /graphify --update. No bloquea." >&2
 fi
 
 # El guard arranca con `INPUT=$(cat)` porque su uso normal es COMO hook: el

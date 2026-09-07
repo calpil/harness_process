@@ -1708,3 +1708,8 @@ echo "[Ok] Backlog #78: --reset no lo borra, toda corrida lo respalda (tambien c
 HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/leccion_tope_check.sh" \
     || { echo "[FALLO] leccion_tope_check: ver arriba"; exit 1; }
 echo "[Ok] Lecciones #80: el check avisa por la leccion sobre el tope."
+
+# Feature #83: graphify-out/.graphify_stale avisa con [i] y no hace fallar el check.
+HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/graphify_stale_check.sh" \
+    || { echo "[FALLO] graphify_stale_check: ver arriba"; exit 1; }
+echo "[Ok] Graphify #83: el marcador stale avisa y no bloquea el Stop."
