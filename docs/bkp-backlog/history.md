@@ -1,0 +1,12 @@
+- 2026-09-07T02:30:00Z incidente: progress/, bkp/ y feature_list.json desaparecieron a las 23:14 (hora local); backlog restaurado desde docs/bkp-backlog/feature_list.json (a7d0a30, 83 features). history.md anterior perdido: sin copia.
+- 2026-09-07T02:34:15Z start feature #74 add no protege contra la feature duplicada, y no esta medido que haga falta
+- 2026-09-07T02:39:06Z approve-spec feature #74 estado=approved nota=Alan: 'Aprobado'/'approved' a los siete AC; --clave; sin aviso por parecidos
+- 2026-09-07T02:47:02Z revision feature #74 veredicto=approved
+- 2026-09-07T02:47:32Z prd apply feature #74 documentos=3 escritos=3
+- 2026-09-07T02:47:36Z close feature #74 status=done leccion=probar-contra-datos-reales (la medicion sobre el backlog real (0 duplicados) se hizo antes y se dejo escrita en el spec; la feature se implemento por el escenario, no por el dato) note=
+- 2026-09-07T02:48:19Z lecciones curar informe: 0 transicion(es) pendiente(s)
+- 2026-09-07T02:49:41Z start feature #79 close refresca el espejo docs/bkp-backlog/feature_list.json al cerrar una feature
+- 2026-09-07T02:54:25Z approve-spec feature #79 estado=approved nota=Alan: 'Aprobado' a los AC; OBS-2 solo en close; OBS-3 la bitacora se espeja en esta misma feature (AC-10)
+- 2026-09-07T03:02:08Z prd apply feature #79 documentos=3 escritos=2
+- 2026-09-07T03:08:55Z revision feature #79 veredicto=approved
+- 2026-09-07T03:11:09Z close feature #79 status=done leccion=criterios-de-cierre-que-se-pueden-fallar note=

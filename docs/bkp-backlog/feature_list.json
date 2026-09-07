@@ -2123,7 +2123,25 @@
       "acceptance": [
         "Given un repo cuyo backlog esta gitignorado y tiene espejo en docs/bkp-backlog/feature_list.json, When close termina de cerrar una feature, Then el espejo de la RAIZ queda byte-identico al backlog vivo (se crea si no existe), el mensaje de cierre lo nombra y avisa que queda sin commitear como la bitacora; sin espejo previo no se crea nada salvo que rules lo pida. Disparador: harness_process no tuvo espejo hasta el commit eb6e8a9 del 2026-09-06 y hoy se refresca a mano"
       ],
-      "status": "pending"
+      "status": "done",
+      "started_at": "2026-09-07T02:49:41Z",
+      "branch": "feature/79-close-refresca-el-espejo-docs-bkp-backlog-featur",
+      "worktree": "/Users/alan/harness_process-wt/79-close-refresca-el-espejo-docs-bkp-backlog-featur",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/79-close-refresca-el-espejo-docs-bkp-backlog-featur/docs/plan-feature-79-close-refresca-el-espejo-docs-bkp-backlog-featur.md",
+        "mtime": 1788749381.0305922,
+        "size": 692,
+        "hash": "36edec77313f8e93"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/79-close-refresca-el-espejo-docs-bkp-backlog-featur/docs/spec-feature-79-close-refresca-el-espejo-docs-bkp-backlog-featur.md",
+        "mtime": 1788749665.8965952,
+        "size": 10389,
+        "hash": "839a5a7523d7e32b"
+      },
+      "closed_at": "2026-09-07T03:11:05Z",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
     },
     {
       "id": 80,
