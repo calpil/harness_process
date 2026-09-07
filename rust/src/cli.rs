@@ -143,6 +143,11 @@ pub enum Command {
         /// Un id que no existe, o que formaria un ciclo, se rechaza.
         #[arg(long = "depends-on")]
         depends_on: Vec<String>,
+        /// Clave de idempotencia (feature #74): con la misma clave, `add`
+        /// devuelve la feature que ya existe en vez de crear otra. Para scripts
+        /// y reintentos. Es opaca: un slug, un id de Jira, lo que quieras.
+        #[arg(long)]
+        clave: Option<String>,
     },
     /// PRDs anidados: el arbol de producto de docs/prd/
     Prd {
@@ -626,14 +631,18 @@ pub fn run() -> anyhow::Result<()> {
             prd,
             kind,
             depends_on,
+            clave,
         } => commands::add::run(
             &HarnessPaths::resolve()?,
             &name,
             &service,
             &acceptance,
-            prd.as_deref(),
-            kind.as_deref(),
-            &depends_on,
+            commands::add::AltaOpts {
+                prd_ref: prd.as_deref(),
+                kind: kind.as_deref(),
+                depends_on: &depends_on,
+                clave: clave.as_deref(),
+            },
         ),
         Command::Prd { command } => match command {
             PrdCommand::Add { name, parent } => {

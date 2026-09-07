@@ -45,6 +45,13 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   tiene huella y no es `$HOME`, tambien con aviso `[i]` (feature #10); marker con
   otro valor (`root`) => el propio dir, sin inferencia ni aviso.
 - `features.rs`: carga/guarda `feature_list.json` y selecciona la feature activa.
+- `duplicados.rs`: `add` no carga dos veces la misma feature (feature #74). Puro:
+  `normalizar` (minusculas, sin acentos, solo `[a-z0-9]`, sin las 21 palabras
+  vacias de `VACIAS`), `buscar` -> `Coincidencia` {`Abierta` gana sobre `Cerrada`
+  sobre `Ninguna`; `ABIERTAS` = pending/in_progress/blocked} y `por_clave` (la
+  clave opaca de `--clave`). `add` decide antes de escribir: abierta rechaza
+  (exit 2, sin escape), cerrada avisa `[i]`, clave repetida devuelve la existente
+  (exit 0, sin bitacora ni intent). Lo opcional del alta viaja en `AltaOpts`.
 - `dependencias.rs`: que feature espera a cual, y que feature se traba siempre
   (feature #75). Dos preguntas que comparten archivo porque comparten el dato
   —el backlog— y nada mas. Todo PURO: `motivo_invalido` (id inexistente,

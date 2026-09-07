@@ -10,6 +10,7 @@ mod commands;
 mod consolidacion;
 mod contexto;
 mod dependencias;
+mod duplicados;
 mod curador;
 mod documentos;
 mod exit;
