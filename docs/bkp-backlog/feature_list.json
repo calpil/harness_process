@@ -2105,6 +2105,34 @@
         "Given un repo cuyo backlog esta gitignorado y tiene espejo en docs/bkp-backlog/feature_list.json, When close termina de cerrar una feature, Then el espejo de la RAIZ queda byte-identico al backlog vivo (se crea si no existe), el mensaje de cierre lo nombra y avisa que queda sin commitear como la bitacora; sin espejo previo no se crea nada salvo que rules lo pida. Disparador: harness_process no tuvo espejo hasta el commit eb6e8a9 del 2026-09-06 y hoy se refresca a mano"
       ],
       "status": "pending"
+    },
+    {
+      "id": 80,
+      "name": "el autoaprendizaje no tiene ciclo de vida: lecciones sin tope, la misma leccion en diez cierres, perfil sin alimentar y consolidacion sin correr",
+      "microservicios": [],
+      "acceptance": [
+        "Given el repo con lecciones, perfil y curador (#17-#28), When se cierra una feature, Then (1) una leccion por encima del tope de lineas (rules.leccion_max_lineas) no se puede declarar ni parchear sin partirla, y el nudge dice como; (2) declarar la misma leccion K cierres seguidos (rules.leccion_repeticiones) exige --leccion-motivo que diga por que no es otra clase; (3) close avisa por stderr cuando perfil sugerir acumula mas de N decisiones sin incorporar y cuando pasaron mas de D dias sin lecciones consolidar; (4) los cuatro umbrales viven en rules con defaults medidos. Medido 2026-09-06: 10 de 15 cierres con la misma leccion (442 lineas), 4 lecciones con 0 usos, 340 decisiones sin incorporar, ultima consolidacion 2026-08-18"
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-06T23:25:01Z",
+      "branch": "bugfix/80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio",
+      "worktree": "/Users/alan/harness_process-wt/80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio/docs/plan-feature-80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio.md",
+        "mtime": 1788737101.9548428,
+        "size": 770,
+        "hash": "8031f6f4bb27c349"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio/docs/spec-feature-80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio.md",
+        "mtime": 1788739798.7270818,
+        "size": 14470,
+        "hash": "d8f1861f7139b514"
+      },
+      "closed_at": "2026-09-07T00:24:35Z",
+      "leccion": "reglas-que-se-aplican-a-si-mismas"
     }
   ]
 }

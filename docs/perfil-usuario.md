@@ -18,3 +18,7 @@ Entradas (una por linea, empezando con `- `):
 - Prefiere features amplias y completas antes que incrementales: amplia el spec en vez de partirlo. (#15, #16)
 - Ante un gate, prefiere bloquear a avisar cuando el error es caro o irreversible. (#17, #19)
 - Exige sincronia total con sistemas externos, incluido el backfill de lo ya cerrado. (#15, #16)
+- Exige el flujo completo del arnes aunque pida 'fix it now': add -> start -> spec -> aprobacion -> implementar; la urgencia no saltea la aprobacion. (#77)
+- Los commits van sin trailers de IA (Co-Authored-By, Claude-Session); prefirio reescribir un commit ya publicado antes que dejarlo con uno. (#78)
+- Prefiere limites duros sin escape por flag (sin --force, sin motivo que saltee el tope): un escape se vuelve el default. (#17, #80)
+- Quiere decidir los forks de diseno antes de que se implemente: cada OBS se le presenta con recomendacion y el elige. (#72, #75, #80)

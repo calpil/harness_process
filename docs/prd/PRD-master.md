@@ -276,3 +276,4 @@ con su fecha.>
 - #76 una feature sin worktree veta a todas las demas y mata el paralelismo -> done 2026-09-06 · spec: docs/spec-feature-76-una-feature-sin-worktree-veta-a-todas-las-demas-.md · impl: docs/impl-76.md
 - #77 con docs/ como repo aparte, el arnes escribe directo en docs/ y no crea docs-wt -> done 2026-09-06 · spec: docs/spec-feature-77-con-docs-como-repo-aparte-el-arnes-escribe-direc.md · impl: docs/impl-77.md
 - #78 el instalador respalda sus scripts pero no el backlog, que es lo unico irrecuperable -> done 2026-09-06 · spec: docs/spec-feature-78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md · impl: docs/impl-78.md
+- #80 el autoaprendizaje no tiene ciclo de vida: lecciones sin tope, la misma leccion en diez cierres, perfil sin alimentar y consolidacion sin correr -> done 2026-09-07 · spec: docs/spec-feature-80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio.md · impl: docs/impl-80.md
