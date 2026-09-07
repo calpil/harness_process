@@ -1967,10 +1967,28 @@
       "acceptance": [
         "Idea 7 del catalogo de docs/analisis-hermes-agent.md (2026-08-16): Hermes usa un idempotency-key en 'kanban create' y el analisis proponia 'add --idempotency-key' o dedupe por nombre con aviso, porque 'dos add seguidos crean dos features duplicadas'. MEDIDO el 2026-09-05 sobre el backlog real: 73 features, CERO nombres repetidos. La premisa literal no ocurrio nunca. Ademas el escenario de Hermes —reintento tras timeout de red— no aplica: 'add' es un CLI local que escribe un JSON local, sin red ni timeout que reintentar. Lo que SI hay son 8 features superseded (seis absorbidas por la #36, dos por la #47), y eso es solapamiento de ALCANCE, no de nombre: los ocho nombres son distintos, asi que un dedupe por nombre no habria detectado ninguna. AC: (1) ANTES de implementar nada, decidir con el usuario si el problema amerita codigo, mostrandole esta medicion — si la respuesta es que no, cerrar como superseded o blocked con el motivo, que es un resultado valido; (2) si se implementa, 'add' avisa (no bloquea) cuando el nombre nuevo coincide con uno existente, y el aviso nombra la feature que ya existe con su id y su estado; (3) el aviso no puede impedir agregar una feature legitima con nombre parecido: se avisa y se sigue; (4) un test cubre el caso de nombre repetido y otro el de nombre distinto que no debe avisar. NO hacer: un idempotency-key explicito, que agrega un flag que nadie va a escribir a mano para un problema que no se midio."
       ],
-      "status": "blocked",
-      "closed_at": "2026-09-06T00:15:40Z",
+      "status": "done",
+      "closed_at": "2026-09-07T02:47:32Z",
       "bloqueos": 1,
-      "note": "No se implementa: la premisa no se sostiene. Medido el 2026-09-05 sobre el backlog real: 73 features, CERO nombres repetidos, asi que 'dos add seguidos crean features duplicadas' no ocurrio nunca. El escenario de Hermes (idempotency-key ante reintento por timeout de red) no aplica: add es un CLI local que escribe un JSON local. Las 8 features superseded que parecian evidencia son solapamiento de ALCANCE, no de nombre — los ocho nombres son distintos y un dedupe por nombre no habria detectado ninguna. Decision del usuario con la medicion a la vista. Se reabre si alguna vez se mide el problema; la ficha ya tiene la evidencia y el AC-2 (avisar sin bloquear) listo para retomar."
+      "note": "No se implementa: la premisa no se sostiene. Medido el 2026-09-05 sobre el backlog real: 73 features, CERO nombres repetidos, asi que 'dos add seguidos crean features duplicadas' no ocurrio nunca. El escenario de Hermes (idempotency-key ante reintento por timeout de red) no aplica: add es un CLI local que escribe un JSON local. Las 8 features superseded que parecian evidencia son solapamiento de ALCANCE, no de nombre — los ocho nombres son distintos y un dedupe por nombre no habria detectado ninguna. Decision del usuario con la medicion a la vista. Se reabre si alguna vez se mide el problema; la ficha ya tiene la evidencia y el AC-2 (avisar sin bloquear) listo para retomar.",
+      "started_at": "2026-09-07T02:34:15Z",
+      "branch": "feature/74-add-no-protege-contra-la-feature-duplicada-y-no-",
+      "worktree": "/Users/alan/harness_process-wt/74-add-no-protege-contra-la-feature-duplicada-y-no-",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/74-add-no-protege-contra-la-feature-duplicada-y-no-/docs/plan-feature-74-add-no-protege-contra-la-feature-duplicada-y-no-.md",
+        "mtime": 1788748455.3908246,
+        "size": 722,
+        "hash": "8897b223d3ce55bf"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/74-add-no-protege-contra-la-feature-duplicada-y-no-/docs/spec-feature-74-add-no-protege-contra-la-feature-duplicada-y-no-.md",
+        "mtime": 1788748746.4992478,
+        "size": 8264,
+        "hash": "3b33c43933112575"
+      },
+      "leccion": "probar-contra-datos-reales",
+      "leccion_motivo": "la medicion sobre el backlog real (0 duplicados) se hizo antes y se dejo escrita en el spec; la feature se implemento por el escenario, no por el dato"
     },
     {
       "id": 75,
