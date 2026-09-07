@@ -16,8 +16,11 @@
 
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 use crate::exit::Exit;
 use crate::paths::HarnessPaths;
+use crate::pycompat::py_str;
 
 /// Nombre del documento dentro del `docs/` de la RAIZ.
 pub const FILE_NAME: &str = "perfil-usuario.md";
@@ -326,6 +329,11 @@ pub struct Registro {
     /// Id de feature (`14`), o vacio si no se pudo determinar.
     pub feature: String,
     pub fecha: String,
+    /// Cuando se registro, timestamp completo (`2026-09-05T00:00:00Z`): el de
+    /// la linea de bitacora, o el `started_at` de la feature para un plan o un
+    /// spec (que no tienen fecha propia). Vacio si no se pudo fechar, y sin
+    /// fecha se cuenta como nueva (feature #82).
+    pub momento: String,
     /// De donde salio: `history`, `plan` o `spec`.
     pub fuente: &'static str,
     pub texto: String,
@@ -396,6 +404,16 @@ fn recorta(texto: &str, max: usize) -> String {
 /// Junta los registros de decision de `progress/history.md`, de los planes y de
 /// las `## Observaciones` de los specs (OBS-5). No escribe nada.
 pub fn recolectar(paths: &HarnessPaths) -> Vec<Registro> {
+    recolectar_con(paths, &cargar_backlog(paths))
+}
+
+/// El backlog para fechar planes y specs; un backlog ilegible es un backlog
+/// vacio (los registros quedan sin momento y se cuentan), nunca un error.
+fn cargar_backlog(paths: &HarnessPaths) -> Value {
+    crate::features::load_features(paths).unwrap_or_else(|_| serde_json::json!({}))
+}
+
+fn recolectar_con(paths: &HarnessPaths, backlog: &Value) -> Vec<Registro> {
     let perfil = Perfil::load(paths);
     let citadas: Vec<String> = perfil.entradas();
     let ya = |fid: &str| -> bool {
@@ -406,16 +424,18 @@ pub fn recolectar(paths: &HarnessPaths) -> Vec<Registro> {
     // (a) La bitacora: una linea por transicion, con su fecha.
     if let Ok(texto) = std::fs::read_to_string(&paths.history) {
         for linea in texto.lines().filter(|l| tiene_senal(l)) {
-            let fecha = linea
+            let momento = linea
                 .split_whitespace()
-                .find(|t| t.len() >= 10 && t.starts_with("20"))
-                .map(|t| t.chars().take(10).collect::<String>())
-                .unwrap_or_default();
+                .find(|t| es_timestamp(t))
+                .unwrap_or_default()
+                .to_string();
+            let fecha = momento.chars().take(10).collect::<String>();
             let fid = feature_de(linea);
             out.push(Registro {
                 ya_incorporado: ya(&fid),
                 feature: fid,
                 fecha,
+                momento,
                 fuente: "history",
                 texto: recorta(linea.trim_start_matches("- "), 240),
             });
@@ -449,6 +469,9 @@ pub fn recolectar(paths: &HarnessPaths) -> Vec<Registro> {
             continue;
         };
         let fid = feature_de_archivo(&nombre);
+        // Un plan o un spec no tienen fecha propia: se fechan por el inicio de
+        // su feature, la cota inferior (OBS-2 de la #82).
+        let momento = inicio_de_feature(backlog, &fid);
         for linea in texto.lines() {
             let l = linea.trim();
             // Solo items de lista con senal: el cuerpo en prosa no es un registro.
@@ -458,6 +481,7 @@ pub fn recolectar(paths: &HarnessPaths) -> Vec<Registro> {
             out.push(Registro {
                 feature: fid.clone(),
                 fecha: String::new(),
+                momento: momento.clone(),
                 fuente,
                 texto: recorta(l.trim_start_matches("- "), 240),
                 ya_incorporado: ya(&fid),
@@ -465,6 +489,185 @@ pub fn recolectar(paths: &HarnessPaths) -> Vec<Registro> {
         }
     }
     out
+}
+
+/// Un token con la forma de `now_stamp` (`2026-09-05T00:00:00Z`) o al menos su
+/// fecha. Todos los timestamps del arnes salen del mismo formato, asi que se
+/// comparan como texto.
+fn es_timestamp(token: &str) -> bool {
+    token.len() >= 10 && token.starts_with("20") && token.as_bytes().get(4) == Some(&b'-')
+}
+
+/// `started_at` de la feature `fid` en el backlog; vacio si no esta o no arranco.
+fn inicio_de_feature(backlog: &Value, fid: &str) -> String {
+    if fid.is_empty() {
+        return String::new();
+    }
+    crate::features::features_slice(backlog)
+        .iter()
+        .find(|f| py_str(f.get("id")) == fid)
+        .and_then(|f| f.get("started_at"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// El corte: la ultima entrada del perfil (feature #82)
+// ---------------------------------------------------------------------------
+
+/// Desde cuando cuenta el aviso de perfil. Tres estados porque son tres
+/// conductas: sin corte se cuenta todo (como antes de la #82), y con corte el
+/// texto dice de donde salio para que el usuario pueda discutir el numero.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Corte {
+    /// El perfil no tiene entradas fechables: ni linea `perfil add|replace` en
+    /// la bitacora ni cita a una feature iniciada.
+    Ninguno,
+    /// La ultima linea `- <ts> perfil add|replace ...` de `history.md`.
+    Bitacora { momento: String },
+    /// El `started_at` de la feature mas alta que cita el perfil (`#<id>`): lo
+    /// que queda cuando la bitacora se perdio o el perfil se edito a mano.
+    Backlog { feature: String, momento: String },
+}
+
+impl Corte {
+    pub fn momento(&self) -> Option<&str> {
+        match self {
+            Corte::Ninguno => None,
+            Corte::Bitacora { momento } | Corte::Backlog { momento, .. } => Some(momento),
+        }
+    }
+
+    /// `bitacora` o `backlog`; `None` sin corte. Es lo que sale en el JSON.
+    pub fn origen(&self) -> Option<&'static str> {
+        match self {
+            Corte::Ninguno => None,
+            Corte::Bitacora { .. } => Some("bitacora"),
+            Corte::Backlog { .. } => Some("backlog"),
+        }
+    }
+
+    /// Para el texto: `2026-09-05, bitacora` / `2026-09-06, backlog: inicio de
+    /// la #80` / `sin corte`.
+    pub fn describir(&self) -> String {
+        let fecha = |m: &str| m.chars().take(10).collect::<String>();
+        match self {
+            Corte::Ninguno => "sin corte".to_string(),
+            Corte::Bitacora { momento } => format!("{}, bitacora", fecha(momento)),
+            Corte::Backlog { feature, momento } => {
+                format!("{}, backlog: inicio de la #{feature}", fecha(momento))
+            }
+        }
+    }
+}
+
+/// Las dos cuentas del aviso: las nuevas desde el corte y el total historico.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pendientes {
+    pub nuevas: usize,
+    pub total: usize,
+    pub corte: Corte,
+}
+
+impl Pendientes {
+    /// El numero que se compara con `rules.perfil_pendientes_max`: las nuevas,
+    /// o el total cuando no hay corte (nunca menos que antes de la #82).
+    pub fn para_el_umbral(&self) -> usize {
+        match self.corte {
+            Corte::Ninguno => self.total,
+            Corte::Bitacora { .. } | Corte::Backlog { .. } => self.nuevas,
+        }
+    }
+}
+
+/// Ids de feature que citan las entradas (`(#14, #16)`), de mayor a menor.
+fn features_citadas(perfil: &Perfil) -> Vec<u64> {
+    let mut ids: Vec<u64> = perfil
+        .entradas()
+        .iter()
+        .flat_map(|e| {
+            e.split('#')
+                .skip(1)
+                .filter_map(|resto| {
+                    resto
+                        .chars()
+                        .take_while(char::is_ascii_digit)
+                        .collect::<String>()
+                        .parse::<u64>()
+                        .ok()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    ids.sort_unstable_by(|a, b| b.cmp(a));
+    ids.dedup();
+    ids
+}
+
+/// El corte, sin filesystem: `history` es el texto de la bitacora y `backlog`
+/// el JSON. Con las dos senales gana la mas reciente (OBS-1 de la #82);
+/// `perfil remove` no es una entrada (OBS-3).
+pub fn ultima_entrada(perfil: &Perfil, history: &str, backlog: &Value) -> Corte {
+    let de_bitacora = history
+        .lines()
+        .filter_map(|l| {
+            let (ts, mensaje) = l.strip_prefix("- ")?.split_once(' ')?;
+            let escribe =
+                mensaje.starts_with("perfil add ") || mensaje.starts_with("perfil replace ");
+            (escribe && es_timestamp(ts)).then(|| ts.to_string())
+        })
+        .next_back();
+    let de_backlog = features_citadas(perfil).into_iter().find_map(|id| {
+        let fid = id.to_string();
+        let momento = inicio_de_feature(backlog, &fid);
+        (!momento.is_empty()).then_some((fid, momento))
+    });
+    match (de_bitacora, de_backlog) {
+        (None, None) => Corte::Ninguno,
+        (Some(momento), None) => Corte::Bitacora { momento },
+        (None, Some((feature, momento))) => Corte::Backlog { feature, momento },
+        (Some(bitacora), Some((feature, momento))) => {
+            if momento > bitacora {
+                Corte::Backlog { feature, momento }
+            } else {
+                Corte::Bitacora { momento: bitacora }
+            }
+        }
+    }
+}
+
+/// Las dos cuentas, sin filesystem. Un registro sin momento se cuenta como
+/// nuevo: ante la duda el aviso sale de mas, nunca de menos.
+pub fn contar(registros: &[Registro], corte: Corte) -> Pendientes {
+    let sin_incorporar = || registros.iter().filter(|r| !r.ya_incorporado);
+    let total = sin_incorporar().count();
+    let nuevas = match corte.momento() {
+        None => total,
+        Some(desde) => sin_incorporar()
+            .filter(|r| r.momento.is_empty() || r.momento.as_str() > desde)
+            .count(),
+    };
+    Pendientes {
+        nuevas,
+        total,
+        corte,
+    }
+}
+
+/// Las cuentas sobre registros ya juntados (para `sugerir`, que los lista).
+pub fn pendientes_de(paths: &HarnessPaths, registros: &[Registro]) -> Pendientes {
+    let history = std::fs::read_to_string(&paths.history).unwrap_or_default();
+    let corte = ultima_entrada(&Perfil::load(paths), &history, &cargar_backlog(paths));
+    contar(registros, corte)
+}
+
+/// Lo que `close` y `lecciones status` preguntan: junta y cuenta.
+pub fn pendientes(paths: &HarnessPaths) -> Pendientes {
+    let backlog = cargar_backlog(paths);
+    let history = std::fs::read_to_string(&paths.history).unwrap_or_default();
+    let corte = ultima_entrada(&Perfil::load(paths), &history, &backlog);
+    contar(&recolectar_con(paths, &backlog), corte)
 }
 
 /// El contrato que cierra `perfil sugerir`: como se destila una entrada durable.
@@ -751,5 +954,182 @@ mod tests {
         let p = Perfil::parse(&plantilla());
         assert!(p.is_empty());
         assert_eq!(p.porcentaje(), 0);
+    }
+
+    // -- feature #82: el corte y las dos cuentas ---------------------------
+
+    fn backlog_con(features: &[(u64, &str)]) -> serde_json::Value {
+        let lista: Vec<_> = features
+            .iter()
+            .map(|(id, inicio)| {
+                let mut f = serde_json::json!({"id": id, "name": "x", "status": "in_progress"});
+                if !inicio.is_empty() {
+                    f["started_at"] = serde_json::json!(inicio);
+                }
+                f
+            })
+            .collect();
+        serde_json::json!({ "features": lista })
+    }
+
+    fn registro(momento: &str, ya_incorporado: bool) -> Registro {
+        Registro {
+            feature: String::new(),
+            fecha: momento.chars().take(10).collect(),
+            momento: momento.to_string(),
+            fuente: "history",
+            texto: String::new(),
+            ya_incorporado,
+        }
+    }
+
+    #[test]
+    fn momento_de_plan_should_be_the_started_at_of_its_feature() {
+        // AC-2: un spec no tiene fecha propia; se fecha por su feature, y sin
+        // feature iniciada queda sin momento (y se cuenta como nuevo).
+        let dir = tempfile::tempdir().unwrap();
+        let paths = HarnessPaths::from_root(dir.path().to_path_buf());
+        std::fs::create_dir_all(&paths.plans).unwrap();
+        for n in ["spec-feature-2-x.md", "spec-feature-3-y.md"] {
+            std::fs::write(paths.plans.join(n), "- OBS-1: algo. DECIDIDO: si.\n").unwrap();
+        }
+        std::fs::write(
+            &paths.features,
+            backlog_con(&[(2, "2026-09-03T00:00:00Z"), (3, "")]).to_string(),
+        )
+        .unwrap();
+        let registros = recolectar(&paths);
+        assert_eq!(registros.len(), 2, "{registros:?}");
+        let de2 = registros.iter().find(|r| r.feature == "2").unwrap();
+        assert_eq!(de2.momento, "2026-09-03T00:00:00Z");
+        let de3 = registros.iter().find(|r| r.feature == "3").unwrap();
+        assert!(de3.momento.is_empty(), "{de3:?}");
+        let cuentas = contar(
+            &registros,
+            Corte::Bitacora {
+                momento: "2026-09-04T00:00:00Z".into(),
+            },
+        );
+        assert_eq!((cuentas.nuevas, cuentas.total), (1, 2), "{cuentas:?}");
+    }
+
+    #[test]
+    fn momento_de_plan_should_keep_the_full_timestamp_of_a_history_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = HarnessPaths::from_root(dir.path().to_path_buf());
+        std::fs::create_dir_all(&paths.progress).unwrap();
+        std::fs::write(
+            &paths.history,
+            "- 2026-08-14T03:43:37Z approve-spec feature #14 nota=Alan eligio la opcion segura\n",
+        )
+        .unwrap();
+        let registros = recolectar(&paths);
+        assert_eq!(registros[0].momento, "2026-08-14T03:43:37Z");
+        assert_eq!(registros[0].fecha, "2026-08-14");
+    }
+
+    #[test]
+    fn corte_desde_el_backlog_should_use_the_highest_cited_feature_without_a_bitacora_entry() {
+        // AC-3: gana la feature mas ALTA, no la que arranco mas tarde.
+        let perfil = perfil_con(&["Una. (#14, #16)", "Otra. (#15)"]);
+        let backlog = backlog_con(&[
+            (14, "2026-09-01T00:00:00Z"),
+            (15, "2026-09-05T00:00:00Z"),
+            (16, "2026-09-02T00:00:00Z"),
+        ]);
+        assert_eq!(
+            ultima_entrada(&perfil, "", &backlog),
+            Corte::Backlog {
+                feature: "16".into(),
+                momento: "2026-09-02T00:00:00Z".into()
+            }
+        );
+    }
+
+    #[test]
+    fn corte_desde_el_backlog_should_skip_a_cited_feature_that_never_started() {
+        let perfil = perfil_con(&["Una. (#20, #14)"]);
+        let backlog = backlog_con(&[(14, "2026-09-01T00:00:00Z"), (20, "")]);
+        assert_eq!(
+            ultima_entrada(&perfil, "", &backlog),
+            Corte::Backlog {
+                feature: "14".into(),
+                momento: "2026-09-01T00:00:00Z".into()
+            }
+        );
+    }
+
+    #[test]
+    fn corte_desde_el_backlog_should_lose_to_a_newer_bitacora_entry_and_ignore_remove() {
+        let perfil = perfil_con(&["Una. (#14)"]);
+        let backlog = backlog_con(&[(14, "2026-09-02T00:00:00Z")]);
+        let history = "- 2026-09-01T00:00:00Z perfil add Una. (#14)\n\
+                       - 2026-09-03T00:00:00Z perfil replace Una -> Una. (#14)\n\
+                       - 2026-09-09T00:00:00Z perfil remove Otra.\n";
+        assert_eq!(
+            ultima_entrada(&perfil, history, &backlog),
+            Corte::Bitacora {
+                momento: "2026-09-03T00:00:00Z".into()
+            }
+        );
+        // Y una bitacora mas vieja que el inicio de la feature citada pierde.
+        let vieja = "- 2026-09-01T00:00:00Z perfil add Una. (#14)\n";
+        assert_eq!(
+            ultima_entrada(&perfil, vieja, &backlog),
+            Corte::Backlog {
+                feature: "14".into(),
+                momento: "2026-09-02T00:00:00Z".into()
+            }
+        );
+    }
+
+    #[test]
+    fn perfil_sin_corte_should_count_everything() {
+        // AC-4: sin cita y sin linea `perfil add`, no hay corte y se cuenta todo.
+        let perfil = perfil_con(&["Sin cita."]);
+        let backlog = backlog_con(&[(1, "2026-09-01T00:00:00Z")]);
+        let history = "- 2026-09-01T00:00:00Z start feature #1 x\n\
+                       - 2026-09-02T00:00:00Z perfil remove Sin cita.\n";
+        assert_eq!(ultima_entrada(&perfil, history, &backlog), Corte::Ninguno);
+        let registros = [
+            registro("2026-09-01T00:00:00Z", false),
+            registro("2026-09-05T00:00:00Z", false),
+            registro("2026-09-06T00:00:00Z", true),
+        ];
+        let cuentas = contar(&registros, Corte::Ninguno);
+        assert_eq!(
+            (cuentas.nuevas, cuentas.total, cuentas.para_el_umbral()),
+            (2, 2, 2)
+        );
+        assert_eq!(cuentas.corte.describir(), "sin corte");
+        assert_eq!(cuentas.corte.origen(), None);
+    }
+
+    #[test]
+    fn dos_cuentas_should_split_nuevas_from_total_by_the_corte() {
+        // AC-5: el mismo momento que el corte NO es posterior; lo incorporado
+        // no entra en ninguna de las dos.
+        let registros = [
+            registro("2026-09-01T00:00:00Z", false),
+            registro("2026-09-05T00:00:00Z", false),
+            registro("2026-09-06T00:00:00Z", false),
+            registro("2026-09-07T00:00:00Z", true),
+        ];
+        let corte = Corte::Bitacora {
+            momento: "2026-09-05T00:00:00Z".into(),
+        };
+        let cuentas = contar(&registros, corte);
+        assert_eq!(
+            (cuentas.nuevas, cuentas.total, cuentas.para_el_umbral()),
+            (1, 3, 1)
+        );
+        assert_eq!(cuentas.corte.describir(), "2026-09-05, bitacora");
+        assert_eq!(cuentas.corte.origen(), Some("bitacora"));
+        let backlog = Corte::Backlog {
+            feature: "80".into(),
+            momento: "2026-09-06T23:25:01Z".into(),
+        };
+        assert_eq!(backlog.describir(), "2026-09-06, backlog: inicio de la #80");
+        assert_eq!(backlog.momento(), Some("2026-09-06T23:25:01Z"));
     }
 }

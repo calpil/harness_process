@@ -9,6 +9,7 @@ use crate::exit::Exit;
 use crate::features::{active_indices, feature_at, load_features};
 use crate::lecciones::{self, Leccion};
 use crate::paths::HarnessPaths;
+use crate::perfil::{self, Corte};
 use crate::pycompat::py_str;
 
 /// Feature activa (si hay exactamente una) para sembrar `origen` al crear.
@@ -276,8 +277,9 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
     let pol = politica(paths);
     let (activas, _) = lecciones::scan(paths);
     let archivadas = lecciones::scan_archivadas(paths);
-    // Feature #80: lo que el cierre avisa, aca se ve sin cerrar nada.
-    let pendientes = lecciones::perfil_pendientes(paths);
+    // Feature #80: lo que el cierre avisa, aca se ve sin cerrar nada. Feature
+    // #82: las dos cuentas (nuevas desde el corte, y el total) y el corte.
+    let cuentas = perfil::pendientes(paths);
     let ultima = lecciones::ultima_consolidacion(paths);
 
     // Proxima transicion de cada una: cuantos dias faltan y hacia donde.
@@ -327,7 +329,10 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
                     "perfil_pendientes_max": pol.perfil_pendientes,
                     "consolidar_cada_dias": pol.consolidar_dias,
                 },
-                "perfil_pendientes": pendientes,
+                "perfil_pendientes": cuentas.para_el_umbral(),
+                "perfil_pendientes_total": cuentas.total,
+                "perfil_corte": cuentas.corte.momento(),
+                "perfil_corte_origen": cuentas.corte.origen(),
                 "ultima_consolidacion": ultima,
                 "hoy": hoy,
             }))?
@@ -384,13 +389,25 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
         .filter(|a| a.transicion == Transicion::AArchivada)
         .count();
     // Feature #80: lo que el cierre avisa, aca se ve sin cerrar nada.
+    let perfil_texto = match &cuentas.corte {
+        Corte::Ninguno => format!(
+            "Perfil: {} decision(es) sin incorporar, sin corte (el perfil no tiene entradas fechables: se cuenta todo)",
+            cuentas.total
+        ),
+        corte => format!(
+            "Perfil: {} decision(es) nueva(s) sin incorporar desde la ultima entrada del perfil ({}); {} en total",
+            cuentas.nuevas,
+            corte.describir(),
+            cuentas.total
+        ),
+    };
     if pol.perfil_pendientes > 0 {
         println!(
-            "\nPerfil: {pendientes} decision(es) sin incorporar (aviso desde {}; sh harness_cli perfil sugerir).",
+            "\n{perfil_texto} (aviso desde {}; sh harness_cli perfil sugerir).",
             pol.perfil_pendientes
         );
     } else {
-        println!("\nPerfil: {pendientes} decision(es) sin incorporar (aviso apagado).");
+        println!("\n{perfil_texto} (aviso apagado).");
     }
     match &ultima {
         None => println!(
