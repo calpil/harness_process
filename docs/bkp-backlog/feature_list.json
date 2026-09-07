@@ -2154,6 +2154,35 @@
       ],
       "status": "pending",
       "kind": "bug"
+    },
+    {
+      "id": 83,
+      "name": "el Stop hook bloquea por graphify-out/.graphify_stale, un marcador de enriquecimiento best-effort que el hook post-commit deja y solo borra si logra el rebuild semantico",
+      "microservicios": [],
+      "acceptance": [
+        "Given un repo con graphify-out/.graphify_stale (lo deja el hook post-commit tras commitear un .md, y solo lo borra un rebuild semantico que esta debounced 30 min o salta sin backend LLM), When corre harness_check.sh (y por lo tanto el Stop hook), Then NO cuenta como fallo: avisa con [i] diciendo que el hook lo va a limpiar solo en el proximo rebuild y como forzarlo (/graphify --update), y el check termina en 0 si no hay otro problema; templates/harness_check.sh identico; un test lo prueba contra el check de HEAD. Disparador: captura del usuario 2026-09-06, Stop hook de realestate bloqueado por el marcador junto a cambios sin commitear ajenos"
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-07T01:41:43Z",
+      "branch": "bugfix/83-el-stop-hook-bloquea-por-graphify-out-graphify-s",
+      "worktree": "/Users/alan/harness_process-wt/83-el-stop-hook-bloquea-por-graphify-out-graphify-s",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/83-el-stop-hook-bloquea-por-graphify-out-graphify-s/docs/plan-feature-83-el-stop-hook-bloquea-por-graphify-out-graphify-s.md",
+        "mtime": 1788745303.0396955,
+        "size": 795,
+        "hash": "9a37212ef5463e66"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/83-el-stop-hook-bloquea-por-graphify-out-graphify-s/docs/spec-feature-83-el-stop-hook-bloquea-por-graphify-out-graphify-s.md",
+        "mtime": 1788745427.645208,
+        "size": 5551,
+        "hash": "ee458b5dc991cdff"
+      },
+      "closed_at": "2026-09-07T01:49:56Z",
+      "leccion": "ninguna",
+      "leccion_motivo": "la leccion criterios-de-cierre (referencia #78, el rojo por precondicion) sirvio tal cual y quedo registrada con leccion usar; el fix es un cambio de severidad sin tecnica nueva"
     }
   ]
 }

@@ -4,8 +4,8 @@ descripcion: Un criterio que no se puede fallar no verifica nada: solo tranquili
 triggers: [criterios de cierre, precondicion, rojo falso, verde falso por etiqueta, IFS, efecto y no llamada, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test, regla ancha, gate de mas, paralelismo, pieza de mas, lugar nuevo, ciclo de vida]
 relacionadas: [hitos-del-prd, probar-contra-datos-reales, promesas-estructurales-vs-disciplina]
 origen: [20, 23, 63, 73, 75, 76, 77, 78]
-usos: 7
-ultimo_uso: 2026-09-06
+usos: 8
+ultimo_uso: 2026-09-07
 ultima_actualizacion: 2026-09-06
 estado: activa
 ---
