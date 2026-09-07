@@ -284,3 +284,4 @@ con su fecha.>
 - #83 el Stop hook bloquea por graphify-out/.graphify_stale, un marcador de enriquecimiento best-effort que el hook post-commit deja y solo borra si logra el rebuild semantico -> done 2026-09-07 · spec: docs/spec-feature-83-el-stop-hook-bloquea-por-graphify-out-graphify-s.md · impl: docs/impl-83.md
 - #74 add no protege contra la feature duplicada, y no esta medido que haga falta -> done 2026-09-07 · spec: docs/spec-feature-74-add-no-protege-contra-la-feature-duplicada-y-no-.md · impl: docs/impl-74.md
 - #79 close refresca el espejo docs/bkp-backlog/feature_list.json al cerrar una feature -> done 2026-09-07 · spec: docs/spec-feature-79-close-refresca-el-espejo-docs-bkp-backlog-featur.md · impl: docs/impl-79.md
+- #82 el aviso de perfil del cierre cuenta solo las decisiones posteriores a la ultima entrada del perfil -> done 2026-09-07 · spec: docs/spec-feature-82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de.md · impl: docs/impl-82.md

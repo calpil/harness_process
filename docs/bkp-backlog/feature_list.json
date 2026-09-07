@@ -2178,8 +2178,24 @@
       "acceptance": [
         "Given dos lecciones que se declaran mutuamente en relacionadas pero cuyo nombre, descripcion y triggers no se solapan segun el LLM (o sin backend), When lecciones consolidar informa, Then el par sale con una confianza menor a 1.00 que refleja solo la senal local y el informe dice que la declaracion mutua es la unica evidencia; con senal del LLM ademas, la confianza sube como hoy. Disparador: 2026-09-07, cuatro clases distintas (criterios-de-cierre, probar-contra-datos-reales, promesas-estructurales, reglas-que-se-aplican-a-si-mismas) propuestas para fusion con 1.00 por citarse entre si (#41)"
       ],
-      "status": "pending",
-      "kind": "bug"
+      "status": "in_progress",
+      "kind": "bug",
+      "started_at": "2026-09-07T12:49:37Z",
+      "branch": "bugfix/81-consolidar-la-declaracion-mutua-en-relacionadas-",
+      "worktree": "/Users/alan/harness_process-wt/81-consolidar-la-declaracion-mutua-en-relacionadas-",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/81-consolidar-la-declaracion-mutua-en-relacionadas-/docs/plan-feature-81-consolidar-la-declaracion-mutua-en-relacionadas-.md",
+        "mtime": 1788785672.002869,
+        "size": 4036,
+        "hash": "922fe50f4ef5d5da"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/81-consolidar-la-declaracion-mutua-en-relacionadas-/docs/spec-feature-81-consolidar-la-declaracion-mutua-en-relacionadas-.md",
+        "mtime": 1788785601.6125782,
+        "size": 6774,
+        "hash": "030309150f6ad5b0"
+      }
     },
     {
       "id": 82,
@@ -2188,8 +2204,26 @@
       "acceptance": [
         "Given un perfil con entradas y una bitacora con decisiones anteriores y posteriores a la fecha de la ultima entrada, When un cierre done evalua rules.perfil_pendientes_max, Then cuenta solo las decisiones sin incorporar posteriores a esa fecha (crecimiento, no acumulado historico), lecciones status y perfil sugerir muestran las dos cuentas, y con un perfil sin entradas cuenta todo como hoy. Disparador: 2026-09-07, 289 decisiones historicas sin incorporar hacian saltar el aviso en cada cierre para siempre (#80)"
       ],
-      "status": "pending",
-      "kind": "bug"
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-07T13:06:27Z",
+      "branch": "bugfix/82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de",
+      "worktree": "/Users/alan/harness_process-wt/82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de/docs/plan-feature-82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de.md",
+        "mtime": 1788786387.1308222,
+        "size": 725,
+        "hash": "414a25b82145ebec"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de/docs/spec-feature-82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de.md",
+        "mtime": 1788789117.6033013,
+        "size": 9026,
+        "hash": "d59979b35a514cb2"
+      },
+      "closed_at": "2026-09-07T23:33:06Z",
+      "leccion": "criterios-de-cierre-que-se-pueden-fallar"
     },
     {
       "id": 83,

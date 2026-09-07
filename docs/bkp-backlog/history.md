@@ -10,3 +10,13 @@
 - 2026-09-07T03:02:08Z prd apply feature #79 documentos=3 escritos=2
 - 2026-09-07T03:08:55Z revision feature #79 veredicto=approved
 - 2026-09-07T03:11:09Z close feature #79 status=done leccion=criterios-de-cierre-que-se-pueden-fallar note=
+- 2026-09-07T12:49:37Z start feature #81 consolidar: la declaracion mutua en relacionadas no alcanza sola para confianza 1.00
+- 2026-09-07T12:53:21Z approve-spec feature #81 estado=approved nota=Alan aprobo explicitamente el spec y OBS-1 (confianza local 0.50) en el chat: approved
+- 2026-09-07T12:54:32Z advance feature #81 Spec aprobado por Alan; plan completo y leido, OBS-1 aceptada: local 0.50 y maximo con modelo. Preparada regresion antes del fix.
+- 2026-09-07T13:06:27Z start feature #82 el aviso de perfil del cierre cuenta solo las decisiones posteriores a la ultima entrada del perfil
+- 2026-09-07T13:51:57Z approve-spec feature #82 estado=approved nota=Alan: 'Aprobado' a los siete AC; OBS-1 bitacora + backlog (gana la mas reciente); OBS-2 started_at; OBS-3 perfil remove no cuenta
+- 2026-09-07T23:21:04Z revision feature #82 veredicto=approved
+- 2026-09-07T23:29:21Z revision feature #82 veredicto=approved
+- 2026-09-07T23:32:17Z prd apply feature #82 documentos=3 escritos=2
+- 2026-09-07T23:33:10Z close feature #82 status=done leccion=criterios-de-cierre-que-se-pueden-fallar note=
+- 2026-09-07T23:33:50Z perfil add Un aviso mide crecimiento desde la ultima accion del usuario, no el acumulado historico; un umbral que hay que subir para callarlo no mide nada. (#80, #82)

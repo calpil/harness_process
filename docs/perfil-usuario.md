@@ -22,3 +22,4 @@ Entradas (una por linea, empezando con `- `):
 - Los commits van sin trailers de IA (Co-Authored-By, Claude-Session); prefirio reescribir un commit ya publicado antes que dejarlo con uno. (#78)
 - Prefiere limites duros sin escape por flag (sin --force, sin motivo que saltee el tope): un escape se vuelve el default. (#17, #80)
 - Quiere decidir los forks de diseno antes de que se implemente: cada OBS se le presenta con recomendacion y el elige. (#72, #75, #80)
+- Un aviso mide crecimiento desde la ultima accion del usuario, no el acumulado historico; un umbral que hay que subir para callarlo no mide nada. (#80, #82)

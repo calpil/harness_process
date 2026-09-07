@@ -17,4 +17,4 @@ __pycache__/
 .harness.env
 
 # Basura de macOS: nunca entra al repo (ni al commit del cierre).
-.DS_Store
+.DS_Store*
