@@ -119,7 +119,7 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   `hito_marcado`, `escapa_de_la_raiz`, `file_en_raiz` (el PRD del checkout
   principal, no el del worktree) y `scan_dir`.
 - `lecciones.rs`: la memoria procedural (`docs/lecciones/<clase>.md`, feature
-  #17; ciclo de vida de lo aprendido, feature #80: `Politica::from_rules` lee los cuatro umbrales de `rules`, `Leccion::lineas`/`sobre_el_tope`/`secciones_por_feature` y `contrato_de_particion` sostienen el tope, `cierre_declarado`/`racha` leen `history.md` para la racha, y `ultima_consolidacion`/`perfil_pendientes`/`texto_avisos_de_ciclo` arman los avisos que `close` emite por stderr). Expone `validar_nombre_de_clase` (rechaza nombres de sesion: con
+  #17; ciclo de vida de lo aprendido, feature #80: `Politica::from_rules` lee los cuatro umbrales de `rules`, `Leccion::lineas`/`sobre_el_tope`/`secciones_por_feature` y `contrato_de_particion` sostienen el tope, `cierre_declarado`/`racha` leen `history.md` para la racha, y `ultima_consolidacion`/`texto_avisos_de_ciclo` arman los avisos que `close` emite por stderr; el de perfil lo cuenta `perfil::pendientes`, feature #82). Expone `validar_nombre_de_clase` (rechaza nombres de sesion: con
   `feature`/`#`, con prefijo `fix-`/`debug-`/`audit-`/`hotfix-`, con fecha o con
   numeros de 3+ digitos; **sin escape hatch**), `Leccion::parse` (frontmatter
   como lineas crudas, asi que preserva orden y claves desconocidas; el cuerpo va
@@ -142,6 +142,14 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   Unicode invisible que BLOQUEA antes de escribir), `bloque` (lo que el
   instalador inyecta entre marcadores) y `recolectar` (la evidencia de
   `history.md`, planes y specs para `perfil sugerir`). No abre conexion al hub.
+  Feature #82: `Registro.momento` fecha cada decision (la bitacora con su
+  timestamp; un plan o spec con el `started_at` de su feature), `Corte`
+  (`Ninguno`/`Bitacora`/`Backlog`) es la ultima entrada del perfil —la ultima
+  linea `perfil add|replace` o el inicio de la feature mas alta citada, la mas
+  reciente—, `ultima_entrada` y `contar` son puros y `pendientes` junta las dos
+  cuentas (`nuevas`, `total`) que `close`, `lecciones status` (`--json`:
+  `perfil_pendientes_total`, `perfil_corte`, `perfil_corte_origen`) y
+  `perfil sugerir` muestran.
 - `buscar.rs`: la busqueda sobre los artefactos del proceso (feature #20).
   `Fuente` es un enum cuyo ORDEN es el orden de relevancia (leccion/perfil >
   spec/plan/adr/prd > impl/review/estado > doc > historia) y cuyo `peso()` tiene

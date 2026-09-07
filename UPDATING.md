@@ -125,7 +125,12 @@ Cuatro umbrales nuevos en `rules` (todos opcionales; `0` apaga cada uno):
   `--leccion-motivo "<por que no es otra clase>"`. El motivo queda en
   `history.md` y en la feature. `ninguna` no cuenta ni corta la racha.
 - `perfil_pendientes_max` (25): el cierre `done` avisa por stderr cuando hay
-  mas decisiones registradas sin incorporar al perfil (`perfil sugerir`).
+  mas decisiones NUEVAS sin incorporar al perfil desde la ultima entrada del
+  perfil (feature #82). El corte es la ultima linea `perfil add|replace` de
+  `history.md` o el `started_at` de la feature mas alta que cita el perfil,
+  el que sea mas reciente; sin corte se cuenta todo, como antes. Un plan o
+  un spec se fecha por el inicio de su feature, y sin fecha se cuenta.
+  `perfil sugerir` muestra las dos cuentas y desde cuando.
 - `consolidar_cada_dias` (30): el cierre avisa por stderr cuando `lecciones
   consolidar` o `lecciones curar` no corrieron en ese plazo, o nunca. Los dos
   registran su corrida en `history.md` (`lecciones consolidar informe: N
@@ -133,7 +138,9 @@ Cuatro umbrales nuevos en `rules` (todos opcionales; `0` apaga cada uno):
 
 Los avisos van por stderr al final del cierre, como el contrato de la #18:
 stdout y exit code no cambian. `lecciones status` muestra lineas/tope por
-leccion, las decisiones sin incorporar y la ultima consolidacion (`--json` los
+leccion, las dos cuentas del perfil (nuevas desde el corte y total;
+`perfil_pendientes_total`, `perfil_corte` y `perfil_corte_origen` en `--json`)
+y la ultima consolidacion (`--json` los
 lleva en `politica`, `perfil_pendientes`, `ultima_consolidacion`).
 `harness_check.sh` avisa `[i]` por cada leccion activa sobre el tope.
 

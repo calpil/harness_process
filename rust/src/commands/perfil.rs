@@ -10,7 +10,7 @@
 
 use crate::exit::Exit;
 use crate::paths::HarnessPaths;
-use crate::perfil::{self, Coincidencia, Perfil};
+use crate::perfil::{self, Coincidencia, Corte, Perfil};
 use crate::progress::log;
 
 /// Gate del `--yes`, comun a los tres comandos de escritura (AC-6).
@@ -204,6 +204,18 @@ pub fn sugerir(paths: &HarnessPaths) -> anyhow::Result<()> {
     );
     if ya > 0 {
         println!("  ({ya} ya citado(s) por una entrada del perfil: se omiten.)");
+    }
+    // Feature #82: la cuenta que usa el aviso del cierre, y desde cuando.
+    let cuentas = perfil::pendientes_de(paths, &registros);
+    match &cuentas.corte {
+        Corte::Ninguno => println!(
+            "  Sin corte: el perfil no tiene entradas fechables, el aviso del cierre cuenta todas."
+        ),
+        corte => println!(
+            "  {} posterior(es) a la ultima entrada del perfil ({}); el aviso del cierre cuenta esas.",
+            cuentas.nuevas,
+            corte.describir()
+        ),
     }
     // Agrupado por feature: las preferencias se ven cuando se REPITEN, y agrupar
     // por origen es lo que deja ver la repeticion.

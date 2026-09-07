@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use crate::exit::Exit;
 use crate::paths::HarnessPaths;
+use crate::perfil::Corte;
 use crate::plan::slugify;
 use crate::progress::now_stamp;
 
@@ -619,15 +620,6 @@ pub fn ultima_consolidacion(paths: &HarnessPaths) -> Option<String> {
         .map(|l| l.chars().take(10).collect())
 }
 
-/// Decisiones registradas (bitacora, planes, specs) que ninguna entrada del
-/// perfil cita todavia.
-pub fn perfil_pendientes(paths: &HarnessPaths) -> usize {
-    crate::perfil::recolectar(paths)
-        .iter()
-        .filter(|r| !r.ya_incorporado)
-        .count()
-}
-
 /// Los avisos del ciclo de aprendizaje al cerrar `done` (feature #80). Texto
 /// para stderr —el canal del contrato de la #18—; vacio si no hay nada que
 /// avisar. Nunca cambia stdout ni el exit code.
@@ -635,13 +627,27 @@ pub fn texto_avisos_de_ciclo(paths: &HarnessPaths, data: &serde_json::Value) -> 
     let politica = Politica::from_rules(data);
     let mut out = String::new();
     if politica.perfil_pendientes > 0 {
-        let pendientes = perfil_pendientes(paths);
-        if pendientes > politica.perfil_pendientes as usize {
-            out.push_str(&format!(
-                "[i] Perfil: {pendientes} decision(es) registradas sin incorporar al perfil (aviso desde {}, rules.perfil_pendientes_max).\n    \
-                 Mira que se repite: sh harness_cli perfil sugerir   (no escribe; cada entrada entra con el si del usuario)\n",
-                politica.perfil_pendientes
-            ));
+        // Feature #82: el aviso mide crecimiento desde la ultima entrada del
+        // perfil, y solo sin corte vuelve a medir el acumulado.
+        let cuentas = crate::perfil::pendientes(paths);
+        if cuentas.para_el_umbral() > politica.perfil_pendientes as usize {
+            let cabeza = match &cuentas.corte {
+                Corte::Ninguno => format!(
+                    "[i] Perfil: {} decision(es) registradas sin incorporar al perfil (sin corte: el perfil no tiene entradas fechables, se cuenta todo; aviso desde {}, rules.perfil_pendientes_max).",
+                    cuentas.total, politica.perfil_pendientes
+                ),
+                corte => format!(
+                    "[i] Perfil: {} decision(es) nueva(s) sin incorporar al perfil desde la ultima entrada ({}); {} sin incorporar en total (aviso desde {}, rules.perfil_pendientes_max).",
+                    cuentas.nuevas,
+                    corte.describir(),
+                    cuentas.total,
+                    politica.perfil_pendientes
+                ),
+            };
+            out.push_str(&cabeza);
+            out.push_str(
+                "\n    Mira que se repite: sh harness_cli perfil sugerir   (no escribe; cada entrada entra con el si del usuario)\n",
+            );
         }
     }
     if politica.consolidar_dias > 0 {

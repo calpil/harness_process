@@ -9024,3 +9024,277 @@ fn espejo_bitacora_should_mirror_history_including_the_close_line_of_this_same_c
     assert!(String::from_utf8_lossy(&espejo).contains("close feature #1 status=done"), "el espejo no tiene la linea del cierre");
     assert_eq!(vivo, espejo, "la bitacora espejada no es byte-identica");
 }
+
+// ---------------------------------------------------------------------------
+// El aviso de perfil mide crecimiento, no acumulado (feature #82)
+// ---------------------------------------------------------------------------
+
+/// Fixture de la #82: dos features, la #1 iniciada, `require_leccion`, umbral 2
+/// y una leccion declarable. El perfil se escribe A MANO (sin `perfil add`) para
+/// que la bitacora diga exactamente lo que el test quiere que diga. Devuelve la
+/// ruta de `history.md`.
+fn seed_perfil_con_corte(dir: &Path, harness_dir: &Path, bin: &Path, entrada: &str) -> PathBuf {
+    cmd(bin).args(["add", "--name", "Demo"]).assert().success();
+    cmd(bin).args(["add", "--name", "Otra"]).assert().success();
+    cmd(bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    enable_leccion_rule(harness_dir);
+    set_rule(harness_dir, "perfil_pendientes_max", serde_json::json!(2));
+    seed_leccion(dir, "espejo-de-roles", "2026-09-01", "activa", false);
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    std::fs::write(
+        dir.join("docs/perfil-usuario.md"),
+        format!(
+            "# Perfil de usuario\n\nEntradas (una por linea, empezando con `- `):\n\n- {entrada}\n"
+        ),
+    )
+    .unwrap();
+    harness_dir.join("progress/history.md")
+}
+
+/// Agrega a la bitacora `n` decisiones de la feature #2 con las fechas dadas.
+fn anotar_decisiones(history: &Path, fechas: &[&str]) {
+    let mut texto = std::fs::read_to_string(history).unwrap_or_default();
+    for (i, f) in fechas.iter().enumerate() {
+        texto.push_str(&format!(
+            "- {f}T00:00:00Z advance feature #2 Decision usuario: regla {i} elegida\n"
+        ));
+    }
+    std::fs::write(history, texto).unwrap();
+}
+
+fn anotar_linea(history: &Path, linea: &str) {
+    let mut texto = std::fs::read_to_string(history).unwrap_or_default();
+    texto.push_str(linea);
+    texto.push('\n');
+    std::fs::write(history, texto).unwrap();
+}
+
+#[test]
+fn close_aviso_de_perfil_cuenta_solo_lo_posterior_a_la_ultima_entrada() {
+    // AC-1: cuatro decisiones ANTES del `perfil add` y una DESPUES, umbral 2.
+    // Antes de la #82 el cierre avisaba (5 > 2); ahora no (1 <= 2).
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    let history = seed_perfil_con_corte(dir.path(), &harness_dir, &bin, "Elige la opcion segura.");
+    anotar_decisiones(
+        &history,
+        &["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"],
+    );
+    anotar_linea(
+        &history,
+        "- 2026-09-05T00:00:00Z perfil add Elige la opcion segura.",
+    );
+    anotar_decisiones(&history, &["2026-09-06"]);
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 cerrada como done"))
+        .stderr(predicate::str::contains("sin incorporar al perfil").not());
+    // Tres decisiones mas despues del corte: 4 nuevas > 2. El aviso dice las
+    // nuevas, el total y desde cuando cuenta; el canal y el exit no cambian.
+    anotar_decisiones(&history, &["2026-09-07", "2026-09-08", "2026-09-09"]);
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #2 cerrada como done"))
+        .stdout(predicate::str::contains("nueva(s)").not())
+        .stderr(predicate::str::contains(
+            "4 decision(es) nueva(s) sin incorporar al perfil",
+        ))
+        .stderr(predicate::str::contains("8 sin incorporar en total"))
+        .stderr(predicate::str::contains("2026-09-05, bitacora"))
+        .stderr(predicate::str::contains("perfil sugerir"));
+}
+
+#[test]
+fn lecciones_status_y_perfil_sugerir_muestran_las_dos_cuentas() {
+    // AC-5: nuevas, total y el corte con su origen, en texto, en --json y en sugerir.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    let history = seed_perfil_con_corte(dir.path(), &harness_dir, &bin, "Elige la opcion segura.");
+    anotar_decisiones(
+        &history,
+        &["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"],
+    );
+    anotar_linea(
+        &history,
+        "- 2026-09-05T00:00:00Z perfil add Elige la opcion segura.",
+    );
+    anotar_decisiones(&history, &["2026-09-06"]);
+    cmd(&bin)
+        .args(["lecciones", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Perfil: 1 decision(es) nueva(s) sin incorporar desde la ultima entrada del perfil (2026-09-05, bitacora); 5 en total",
+        ));
+    let out = cmd(&bin)
+        .args(["lecciones", "status", "--json"])
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["perfil_pendientes"], 1, "{json}");
+    assert_eq!(json["perfil_pendientes_total"], 5, "{json}");
+    assert_eq!(json["perfil_corte"], "2026-09-05T00:00:00Z", "{json}");
+    assert_eq!(json["perfil_corte_origen"], "bitacora", "{json}");
+    cmd(&bin)
+        .args(["perfil", "sugerir"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5 sin incorporar al perfil"))
+        .stdout(predicate::str::contains(
+            "1 posterior(es) a la ultima entrada del perfil (2026-09-05, bitacora)",
+        ));
+}
+
+#[test]
+fn close_corte_desde_el_backlog_cuando_la_bitacora_perdio_la_linea_del_perfil() {
+    // AC-3: sin `perfil add` en la bitacora, el corte es el started_at de la
+    // feature mas alta que cita el perfil (#1, iniciada por el fixture). Una
+    // linea `perfil add` mas vieja no gana, y `perfil remove` no cuenta aunque
+    // sea la mas nueva de todas.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    let history = seed_perfil_con_corte(
+        dir.path(),
+        &harness_dir,
+        &bin,
+        "Elige la opcion segura. (#1)",
+    );
+    anotar_decisiones(
+        &history,
+        &["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"],
+    );
+    anotar_linea(
+        &history,
+        "- 2026-08-01T00:00:00Z perfil add Una entrada vieja.",
+    );
+    anotar_linea(
+        &history,
+        "- 2099-01-01T00:00:00Z perfil remove Una entrada vieja.",
+    );
+    let backlog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(harness_dir.join("feature_list.json")).unwrap(),
+    )
+    .unwrap();
+    let started_at = backlog["features"][0]["started_at"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let out = cmd(&bin)
+        .args(["lecciones", "status", "--json"])
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["perfil_corte_origen"], "backlog", "{json}");
+    assert_eq!(json["perfil_corte"], started_at.as_str(), "{json}");
+    assert_eq!(json["perfil_pendientes"], 0, "{json}");
+    assert_eq!(json["perfil_pendientes_total"], 4, "{json}");
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("sin incorporar al perfil").not());
+    // Tres decisiones posteriores al inicio de la #1: vuelve a avisar, y dice
+    // que el corte salio del backlog.
+    anotar_decisiones(&history, &["2099-02-01", "2099-02-02", "2099-02-03"]);
+    cmd(&bin)
+        .args(["start", "--feature", "2"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "2",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "3 decision(es) nueva(s) sin incorporar al perfil",
+        ))
+        .stderr(predicate::str::contains("backlog: inicio de la #1"));
+}
+
+#[test]
+fn close_perfil_sin_corte_cuenta_todo_como_antes() {
+    // AC-4: sin perfil, y con una entrada sin cita ni linea en la bitacora, se
+    // cuenta todo y el texto lo dice.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    let history = seed_perfil_con_corte(dir.path(), &harness_dir, &bin, "Elige la opcion segura.");
+    anotar_decisiones(
+        &history,
+        &["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"],
+    );
+    let out = cmd(&bin)
+        .args(["lecciones", "status", "--json"])
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(json["perfil_corte"].is_null(), "{json}");
+    assert_eq!(json["perfil_pendientes"], 4, "{json}");
+    assert_eq!(json["perfil_pendientes_total"], 4, "{json}");
+    cmd(&bin)
+        .args([
+            "close",
+            "--feature",
+            "1",
+            "--status",
+            "done",
+            "--leccion",
+            "espejo-de-roles",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "4 decision(es) registradas sin incorporar al perfil",
+        ))
+        .stderr(predicate::str::contains("sin corte"));
+    // Sin perfil siquiera: lo mismo.
+    std::fs::remove_file(dir.path().join("docs/perfil-usuario.md")).unwrap();
+    cmd(&bin)
+        .args(["lecciones", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Perfil: 4 decision(es) sin incorporar, sin corte",
+        ));
+}

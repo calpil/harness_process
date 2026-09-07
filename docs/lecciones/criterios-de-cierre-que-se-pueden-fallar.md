@@ -3,8 +3,8 @@ nombre: criterios-de-cierre-que-se-pueden-fallar
 descripcion: Un criterio que no se puede fallar no verifica nada: solo tranquiliza.
 triggers: [stderr limpio, no paso nada, mutante que avisa, no-fail-fast, criterios de cierre, precondicion, rojo falso, verde falso por etiqueta, IFS, efecto y no llamada, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test, regla ancha, gate de mas, paralelismo, pieza de mas, lugar nuevo, ciclo de vida]
 relacionadas: [hitos-del-prd, probar-contra-datos-reales, promesas-estructurales-vs-disciplina]
-origen: [20, 23, 63, 73, 75, 76, 77, 78, 79]
-usos: 9
+origen: [20, 23, 63, 73, 75, 76, 77, 78, 79, 82]
+usos: 10
 ultimo_uso: 2026-09-07
 ultima_actualizacion: 2026-09-07
 estado: activa
@@ -189,6 +189,20 @@ afirmar la AUSENCIA del efecto, no solo la ausencia del artefacto.
 Y para las mutaciones: `cargo test` se detiene en el primer binario de tests
 que falla. Si el unitario cae primero, el de integracion no llega a correr y
 uno no sabe si lo mataba. `--no-fail-fast` es lo que deja ver los dos.
+
+## El AC manual tambien se puede fallar: la prediccion se mide (feature #82)
+
+Un AC "(MANUAL)" escrito antes de medir es una hipotesis con numero: "al
+cerrar, menos de 25 nuevas". La medicion sobre los datos reales dio 26. Lo
+que NO se hace: mover el umbral, retocar el AC (invalida la aprobacion) o
+redondear. Lo que se hace: medir con el binario de la rama sobre una copia
+de los datos reales ANTES de cerrar, escribir el numero en el review con la
+desviacion y su causa (las 26 eran decisiones reales de ese mismo dia), y
+dejar que el aviso salga si tiene que salir. El AC manual fallo por uno y
+eso es evidencia de que verificaba algo.
+
+Regla: un AC manual lleva el comando o el procedimiento con el que se mide y
+el numero que salio, no solo el que se esperaba.
 
 ## Referencias (el detalle, caso por caso)
 

@@ -724,11 +724,13 @@ todos con default y `0` para apagar:
 | --- | --- | --- |
 | `leccion_max_lineas` | 250 | Tope de la leccion de CLASE (sin contar `<clase>/referencias/`). Sobre el tope, `close --leccion` y `leccion usar` se niegan (exit 2) con el contrato de particion: que secciones cuentan una sola feature y a donde van. Es duro: no hay flag que lo saltee |
 | `leccion_repeticiones` | 3 | La misma clase K cierres `done` seguidos exige `--leccion-motivo "<por que no es otra clase>"`; `ninguna` no cuenta ni corta la racha |
-| `perfil_pendientes_max` | 25 | El cierre avisa por stderr cuando hay mas decisiones registradas sin incorporar al perfil (`perfil sugerir`) |
+| `perfil_pendientes_max` | 25 | El cierre avisa por stderr cuando hay mas decisiones NUEVAS sin incorporar al perfil desde la ultima entrada del perfil (feature #82: la ultima linea `perfil add`/`replace` de la bitacora, o el inicio de la feature mas alta que cita el perfil; gana la mas reciente). Sin corte cuenta todo, como antes. `perfil sugerir` muestra las dos cuentas |
 | `consolidar_cada_dias` | 30 | El cierre avisa por stderr cuando `lecciones consolidar` o `lecciones curar` no corrieron en ese plazo, o nunca; los dos registran su corrida en `history.md` |
 
-`lecciones status` muestra lineas/tope por leccion, las decisiones sin incorporar
-y la ultima consolidacion; `harness_check.sh` avisa `[i]` por cada leccion sobre
+`lecciones status` muestra lineas/tope por leccion, las dos cuentas del perfil
+(nuevas desde el corte y total; en `--json`: `perfil_pendientes`,
+`perfil_pendientes_total`, `perfil_corte` y `perfil_corte_origen`) y la ultima
+consolidacion; `harness_check.sh` avisa `[i]` por cada leccion sobre
 el tope.
 
 `harness_check.sh` valida el arbol: frontmatter ilegible o un `nombre:` que no
