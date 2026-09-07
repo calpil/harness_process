@@ -7,6 +7,17 @@ set -Eeuo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 BIN="${HARNESS_PREBUILT_BIN:-$REPO_ROOT/rust/target/debug/harness}"
 [ -x "$BIN" ] || BIN="$REPO_ROOT/harness"
+# En un worktree no hay binario propio (feature #83, leccion #78: un test que
+# cae por una precondicion no es rojo): se toma el del checkout principal, y si
+# tampoco esta, se compila.
+if [ ! -x "$BIN" ] && command -v git >/dev/null 2>&1; then
+    MAIN_ROOT="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir 2>/dev/null)"
+    MAIN_ROOT="$(cd "$REPO_ROOT" && cd "$(dirname "$MAIN_ROOT")" 2>/dev/null && pwd -P)"
+    [ -n "$MAIN_ROOT" ] && [ -x "$MAIN_ROOT/harness" ] && BIN="$MAIN_ROOT/harness"
+fi
+if [ ! -x "$BIN" ] && command -v cargo >/dev/null 2>&1; then
+    ( cd "$REPO_ROOT/rust" && cargo build --locked >/dev/null 2>&1 ) && BIN="$REPO_ROOT/rust/target/debug/harness"
+fi
 [ -x "$BIN" ] || { echo "[!] leccion_tope: falta el binario (HARNESS_PREBUILT_BIN o rust/target/debug/harness)" >&2; exit 1; }
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
