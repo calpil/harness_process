@@ -3,10 +3,10 @@ nombre: probar-contra-datos-reales
 descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
-origen: [22, 25, 30, 36, 29, 28, 47]
-usos: 1
-ultimo_uso: 2026-08-24
-ultima_actualizacion: 2026-08-21
+origen: [22, 25, 30, 36, 29, 28, 47, 81]
+usos: 2
+ultimo_uso: 2026-09-07
+ultima_actualizacion: 2026-09-07
 estado: activa
 ---
 
@@ -217,6 +217,12 @@ valiendo, y ademas:
   salia 0 y las siete areas parecian bien; recien al comparar **cada linea**
   contra el estado real del filesystem aparecio que el `[ok]` del hub era falso.
   El exit code es un resumen: los resumenes esconden justo lo que hay que ver.
+
+- **Confundir relacion con equivalencia.** Para un score que combina fuentes,
+  probar cada fuente sola, sin respaldo de la otra, y despues combinadas con
+  orden inverso y duplicados. Publicar que evidencia existe; una cita mutua no
+  demuestra que dos procedimientos ensenen lo mismo. Conservar la procedencia
+  como dato: el texto libre de una fuente no puede atribuirse otra autoridad.
 
 ## Verificacion
 

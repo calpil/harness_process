@@ -4533,7 +4533,8 @@ fn consolidar_should_report_mutual_relacionadas_without_a_backend() {
         .success()
         .stdout(predicate::str::contains("Consolidacion APAGADA"))
         .stdout(predicate::str::contains("1 candidato(s) a consolidar"))
-        .stdout(predicate::str::contains("procedimiento-a + procedimiento-b"))
+        .stdout(predicate::str::contains("procedimiento-a + procedimiento-b (confianza 0.50)"))
+        .stdout(predicate::str::contains("unica evidencia"))
         .stdout(predicate::str::contains("relacionadas mutuas"));
     assert_eq!(antes_a, std::fs::read(&leccion_a).unwrap());
     assert_eq!(antes_b, std::fs::read(&leccion_b).unwrap());

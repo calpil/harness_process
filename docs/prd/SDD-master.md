@@ -232,6 +232,12 @@ entorno. Tres decisiones que valen para cualquier feature futura con modelo:
   `verificacion::ejecutar`, que si corre con shell.
 - **El modelo propone; lo que muta sale de argv.** La mitad que escribe se
   verifica sin backend y de forma determinista.
+- **La procedencia de una candidata es un dato (#81).** Las referencias mutuas
+  aportan confianza local 0.50; el modelo mantiene su valor. La union canonica
+  conserva el maximo y ambas razones, sin premiar duplicados. El informe decide
+  si la declaracion mutua es la unica evidencia a partir de esa procedencia,
+  nunca interpretando palabras del motivo generado por el modelo. 0.50 es un
+  peso heuristico acordado, no una probabilidad calibrada.
 
 El tramo HTTP con API key **no esta implementado** y el mensaje de skip lo dice.
 

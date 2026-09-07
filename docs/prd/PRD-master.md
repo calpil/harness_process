@@ -136,6 +136,13 @@ CUANDO <ocurre el disparador>
 **Promesas:** <una sola vez por caso> · <nunca fuera de horario> · <si no
 contesta, no insiste>.
 
+**Consolidacion de lecciones (#81).** Al consultar, una declaracion mutua
+propone un par con confianza local 0.50 y se identifica como unica evidencia
+cuando no hay propuesta del modelo para ese par. Con ambas fuentes, se muestran
+las dos razones y la mayor confianza; repetir una fuente no la aumenta. La
+consulta conserva las lecciones y registra su corrida. El peso local es
+heuristico, no una probabilidad calibrada.
+
 ## 9. Restricciones y supuestos
 
 - Tecnicas: <stack obligado, sistemas con los que hay que integrar>
