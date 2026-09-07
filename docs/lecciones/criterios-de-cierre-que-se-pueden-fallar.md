@@ -1,12 +1,12 @@
 ---
 nombre: criterios-de-cierre-que-se-pueden-fallar
 descripcion: Un criterio que no se puede fallar no verifica nada: solo tranquiliza.
-triggers: [criterios de cierre, precondicion, rojo falso, verde falso por etiqueta, IFS, efecto y no llamada, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test, regla ancha, gate de mas, paralelismo, pieza de mas, lugar nuevo, ciclo de vida]
+triggers: [stderr limpio, no paso nada, mutante que avisa, no-fail-fast, criterios de cierre, precondicion, rojo falso, verde falso por etiqueta, IFS, efecto y no llamada, plan, reviewer, verificacion, ranking, heuristica, SLO, exit code, comando, verde falso, AC ejecutable, timeout, herramienta externa, portabilidad, macOS, skip, prueba del rojo, oraculo, test que acompaña, mutacion, invariante falso, recorrido, alcance, codigo inalcanzable, nombre del test, regla ancha, gate de mas, paralelismo, pieza de mas, lugar nuevo, ciclo de vida]
 relacionadas: [hitos-del-prd, probar-contra-datos-reales, promesas-estructurales-vs-disciplina]
-origen: [20, 23, 63, 73, 75, 76, 77, 78]
-usos: 8
+origen: [20, 23, 63, 73, 75, 76, 77, 78, 79]
+usos: 9
 ultimo_uso: 2026-09-07
-ultima_actualizacion: 2026-09-06
+ultima_actualizacion: 2026-09-07
 estado: activa
 ---
 
@@ -170,6 +170,25 @@ positivo.
 
 Regla corta: **no se endurece codigo que funciona contra un bug que no se pudo
 reproducir.** El bug hipotetico cuesta cero; el que introduce el arreglo, no.
+
+## "No paso nada" tambien se afirma: el mutante que avisa (feature #79)
+
+Un criterio del tipo "sin X no pasa nada" tienta a afirmar solo lo que se ve
+—no se creo el archivo, stdout no lo menciona— y a dar por hecho el resto. En
+la #79 el test de "sin directorio no se crea el espejo" miraba stdout y el
+directorio, y pasaba en verde con un mutante que decidia "si" en ese caso: el
+mutante no creaba el directorio (eso es de otra politica), fallaba al escribir
+y lo AVISABA por stderr. Nadie miraba stderr. El unitario de la decision pura
+lo atrapo; el de integracion, que es el que prueba el comando, no.
+
+La regla: un criterio de "no paso nada" afirma tambien lo que NO debe salir
+(`stderr` sin `[!]`, bitacora sin linea nueva, backlog byte-identico). Es el
+mismo principio que "afirmar el efecto y no la llamada" (#78), del otro lado:
+afirmar la AUSENCIA del efecto, no solo la ausencia del artefacto.
+
+Y para las mutaciones: `cargo test` se detiene en el primer binario de tests
+que falla. Si el unitario cae primero, el de integracion no llega a correr y
+uno no sabe si lo mataba. `--no-fail-fast` es lo que deja ver los dos.
 
 ## Referencias (el detalle, caso por caso)
 

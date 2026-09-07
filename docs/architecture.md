@@ -52,6 +52,15 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   clave opaca de `--clave`). `add` decide antes de escribir: abierta rechaza
   (exit 2, sin escape), cerrada avisa `[i]`, clave repetida devuelve la existente
   (exit 0, sin bitacora ni intent). Lo opcional del alta viaja en `AltaOpts`.
+- `espejo.rs`: `close` refresca el espejo del backlog y de la bitacora en
+  `<raiz>/docs/bkp-backlog/` (feature #79). `Politica` {`Auto` si el directorio
+  existe, `Siempre` crea, `Nunca` no toca} desde `rules.espejo_backlog`;
+  `decidir` es pura; `refrescar` copia byte a byte con `write_text_atomic`
+  DESPUES de `save_features` y de la linea de bitacora del cierre, intenta las
+  dos copias siempre y devuelve `Refresco` {escritos, fallos}. Best-effort, no
+  mudo: `close` avisa `[!]` por cada archivo que fallo y nombra los que si
+  escribio. Queda sin commitear, como el sello (#71): lo commitea el usuario
+  con la raiz, y el mensaje de cierre lo dice.
 - `dependencias.rs`: que feature espera a cual, y que feature se traba siempre
   (feature #75). Dos preguntas que comparten archivo porque comparten el dato
   —el backlog— y nada mas. Todo PURO: `motivo_invalido` (id inexistente,

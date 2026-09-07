@@ -45,6 +45,32 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## `close` refresca el espejo del backlog y de la bitacora (feature #79)
+
+`feature_list.json` y `progress/history.md` estan gitignorados: son los dos
+datos del proyecto que el instalador no puede regenerar (#78). El 2026-09-06 el
+checkout de este repo se borro por error: el backlog volvio de un espejo
+versionado en `docs/bkp-backlog/` que alguien habia refrescado a mano en el
+ultimo cierre; la bitacora no tenia espejo y se perdio.
+
+Desde la #79, cada `close` (cualquier `--status`) deja en la RAIZ del repo
+principal `docs/bkp-backlog/feature_list.json` y `docs/bkp-backlog/history.md`
+byte-identicos al backlog y a la bitacora —despues de guardar el estado y de la
+linea de bitacora de ese mismo cierre—, con copia atomica, y lo dice:
+`Espejo del backlog refrescado: ... (sin commitear: vive en la raiz, no en la
+rama)`. Los commiteas vos, como el sello y la bitacora del PRD.
+
+La politica va en `rules.espejo_backlog`:
+
+- ausente: refresca solo si `docs/bkp-backlog/` ya existe (el directorio es tu
+  opt-in; adentro crea o refresca los dos archivos);
+- `true`: refresca y crea lo que falte, directorio incluido;
+- `false`: no toca nada.
+
+Si la copia falla, el cierre NO falla: sale `[!]` por stderr con la ruta y el
+error. `add` y `start` no refrescan: el espejo queda, como mucho, un alta o un
+arranque atras del vivo.
+
 ## `add` no carga dos veces la misma feature (feature #74)
 
 Medido antes de escribirlo (83 features reales): cero nombres repetidos y cero

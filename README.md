@@ -1222,6 +1222,16 @@ coincide solo con una cerrada, avisa con `[i]` y la crea igual: una regresion
 es legitima, citala en el spec. Para scripts y reintentos, `add --clave <k>`:
 con la misma clave devuelve la feature existente (exit 0) sin escribir nada.
 
+`close` refresca el espejo del backlog (feature #79): con `docs/bkp-backlog/`
+presente en la raiz (o `"espejo_backlog": true` en `rules`, que lo crea), cada
+cierre —al final, despues de guardar el estado y de la linea de bitacora de ese
+mismo cierre, por eso la bitacora espejada lo incluye— deja
+`docs/bkp-backlog/feature_list.json` y `docs/bkp-backlog/history.md`
+byte-identicos al backlog y a la bitacora, y lo dice en el mensaje de cierre.
+Quedan sin commitear, como el sello. `"espejo_backlog": false` lo apaga. Si la
+copia falla, el cierre sigue y avisa con `[!]`. Es lo que devolvio el backlog
+de este repo cuando se borro por error el 2026-09-06.
+
 
 ### PRDs anidados: el arbol de producto
 
