@@ -45,6 +45,29 @@ Comparaba `pwd -P` (`/c/Users/...`) contra `git rev-parse --show-toplevel`
 haber mirado nada. Ahora se lo pregunta a git (`--show-prefix` vacio), que no
 depende de la forma de la ruta.
 
+## `add` no carga dos veces la misma feature (feature #74)
+
+Medido antes de escribirlo (83 features reales): cero nombres repetidos y cero
+parecidos. La defensa es para el escenario que no deja huella —dos sesiones que
+descubren el mismo problema, un `add` re-corrido tras un corte, un script que
+carga hitos y se relanza—, y por eso es chica:
+
+- **Mismo nombre normalizado** (minusculas, sin acentos ni puntuacion, sin
+  palabras vacias como `el`, `de`, `no`) **que una feature abierta**
+  (`pending`, `in_progress`, `blocked`): `add` se niega con exit 2 antes de
+  escribir, nombrando `#id (status)`. Sin flag de escape (misma decision que el
+  tope de lecciones, #80): si es OTRA cosa, el nombre tiene que decirlo.
+- **Mismo nombre que una cerrada** (`done`, `superseded`,
+  `resuelto-aguas-arriba`): se crea igual, con `[i] Mismo nombre que #id
+  (status fecha)`. Una regresion es legitima; citala en el spec.
+- **`--clave <k>`** (el idempotency-key de Hermes): con la misma clave, `add`
+  imprime `Feature #N ya existe (clave k).`, sale 0 y no escribe nada —ni
+  backlog, ni bitacora, ni intent de Atlassian—. La clave es opaca y queda en
+  la feature como campo opcional `clave`.
+
+Ninguna feature existente se toca ni se migra. No hay aviso por nombres
+parecidos: medido cero pares, y un umbral sin evidencia es un numero inventado.
+
 ## `graphify-out/.graphify_stale` ya no bloquea el Stop (feature #83)
 
 El marcador lo deja el arnes: el hook `post-commit` lo crea cada vez que un

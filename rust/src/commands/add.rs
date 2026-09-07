@@ -11,15 +11,32 @@ use crate::pycompat::py_str;
 /// Tipos validos de `--kind` (feature #16). El default es `feature`.
 pub const KINDS: [&str; 3] = ["feature", "bug", "task"];
 
+/// Lo opcional de un alta, junto (como `CierreOpts` en `close`): ninguno de
+/// estos campos cambia el backlog si no viene.
+pub struct AltaOpts<'a> {
+    /// PRD del que sale el hito (`--prd`).
+    pub prd_ref: Option<&'a str>,
+    /// `feature` (default), `bug` o `task` (`--kind`).
+    pub kind: Option<&'a str>,
+    /// Features de las que depende (`--depends-on`, feature #75).
+    pub depends_on: &'a [String],
+    /// Clave de idempotencia (`--clave`, feature #74).
+    pub clave: Option<&'a str>,
+}
+
 pub fn run(
     paths: &HarnessPaths,
     name: &str,
     services: &[String],
     acceptance: &[String],
-    prd_ref: Option<&str>,
-    kind: Option<&str>,
-    depends_on: &[String],
+    opts: AltaOpts<'_>,
 ) -> anyhow::Result<()> {
+    let AltaOpts {
+        prd_ref,
+        kind,
+        depends_on,
+        clave,
+    } = opts;
     // AC-10: un kind invalido se rechaza ANTES de tocar el backlog, con la
     // lista de validos en el mensaje.
     if let Some(k) = kind
@@ -41,6 +58,37 @@ pub fn run(
         None => None,
     };
     let mut data = load_features(paths)?;
+    // Feature #74: la misma clave devuelve la feature existente. No es un
+    // error: es exactamente lo que un script que se relanza espera. Sin
+    // escribir, sin bitacora, sin intent.
+    if let Some(k) = clave
+        && let Some(id) = crate::duplicados::por_clave(features_slice(&data), k)
+    {
+        println!("Feature #{id} ya existe (clave {k}).");
+        return Ok(());
+    }
+    // Feature #74: el mismo nombre normalizado que una feature ABIERTA se
+    // rechaza antes de escribir nada, sin flag de escape (decision del usuario,
+    // #80 OBS-4). Sobre una cerrada solo se avisa: una regresion es legitima.
+    match crate::duplicados::buscar(features_slice(&data), name) {
+        crate::duplicados::Coincidencia::Abierta { id, status, nombre } => {
+            return Err(crate::exit::Exit {
+                code: 2,
+                message: Some(format!(
+                    "Ya existe #{id} ({status}): \"{nombre}\".\n    \
+                     Trabaja en esa, o si es OTRA cosa, ponele un nombre que lo diga.\n    \
+                     Un script que se relanza usa --clave <k> para no duplicar."
+                )),
+            }
+            .into());
+        }
+        crate::duplicados::Coincidencia::Cerrada { id, status, fecha } => {
+            eprintln!(
+                "[i] Mismo nombre que #{id} ({status} {fecha}). Si es una regresion, decilo en el spec y cita la #{id}."
+            );
+        }
+        crate::duplicados::Coincidencia::Ninguna => {}
+    }
     // Python: int(id) para los ids cuyo str() es puramente digito.
     let max_id = features_slice(&data)
         .iter()
@@ -97,6 +145,10 @@ pub fn run(
     // Campo OPCIONAL: sin --prd la feature se guarda exactamente como siempre.
     if let Some(target) = &prd_slug {
         feature.insert("prd".to_string(), json!(target.reference()));
+    }
+    // Campo OPCIONAL (feature #74): la clave de idempotencia, solo si vino.
+    if let Some(k) = clave {
+        feature.insert("clave".to_string(), json!(k));
     }
     // data.setdefault("features", []).append(feature)
     let Some(obj) = data.as_object_mut() else {

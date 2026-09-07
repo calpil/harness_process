@@ -8756,3 +8756,128 @@ fn close_should_print_the_aviso_de_consolidacion_until_the_curator_records_a_run
         .success()
         .stderr(predicate::str::contains("nunca registrada").not());
 }
+
+// ---------------------------------------------------------------------------
+// Feature #74: add no carga dos veces la misma feature
+// ---------------------------------------------------------------------------
+
+fn leer(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_default()
+}
+
+#[test]
+fn add_duplicado_abierto_should_refuse_with_exit_2_and_leave_backlog_and_history_untouched() {
+    // AC-1: mismo nombre normalizado (mayusculas, acentos, puntuacion, espacios)
+    // que una feature pending -> exit 2, nombra la existente, no escribe nada.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin)
+        .args(["add", "--name", "El instalador respalda el backlog"])
+        .assert()
+        .success();
+    let backlog = harness_dir.join("feature_list.json");
+    let history = harness_dir.join("progress/history.md");
+    let (antes, hist_antes) = (leer(&backlog), leer(&history));
+    cmd(&bin)
+        .args(["add", "--name", "  el INSTALADOR, respalda  él backlog!! "])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Ya existe #1 (pending)"))
+        .stderr(predicate::str::contains("El instalador respalda el backlog"));
+    assert_eq!(antes, leer(&backlog), "el backlog cambio");
+    assert_eq!(hist_antes, leer(&history), "el rechazo dejo bitacora");
+}
+
+#[test]
+fn add_duplicado_abierto_should_count_a_blocked_feature_as_open() {
+    // AC-1: una feature bloqueada sigue siendo la feature; cargar otra igual
+    // es esconder el bloqueo.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["add", "--name", "el guard no revisa trailers"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "blocked", "--note", "sin tiempo"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["add", "--name", "El guard no revisa trailers"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Ya existe #1 (blocked)"));
+    let text = leer(&dir.path().join("hp/feature_list.json"));
+    assert_eq!(text.matches("\"name\"").count(), 1, "se creo una segunda feature");
+}
+
+#[test]
+fn add_mismo_nombre_cerrada_should_warn_and_create_a_new_feature() {
+    // AC-2: sobre una feature done el mismo nombre es una regresion legitima:
+    // se crea, con [i] que cita la cerrada.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["add", "--name", "el checkout compartido tiene capacidad uno"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["start", "--feature", "1"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["close", "--feature", "1", "--status", "done", "--note", "listo"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["add", "--name", "El checkout compartido tiene capacidad UNO"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #2 agregada."))
+        .stderr(predicate::str::contains("[i] Mismo nombre que #1 (done"));
+    let text = leer(&dir.path().join("hp/feature_list.json"));
+    assert_eq!(text.matches("\"name\"").count(), 2, "no se creo la regresion");
+}
+
+#[test]
+fn add_clave_idempotente_should_return_the_existing_feature_without_writing() {
+    // AC-3: la misma --clave devuelve la feature existente (exit 0) y no toca
+    // el backlog ni la bitacora, aunque el nombre sea otro.
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin)
+        .args(["add", "--name", "cargar hitos de mora", "--clave", "prd/cobranza/mora/3"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 agregada."));
+    let backlog = harness_dir.join("feature_list.json");
+    let history = harness_dir.join("progress/history.md");
+    assert!(leer(&backlog).contains("\"clave\": \"prd/cobranza/mora/3\""), "la clave no se guardo");
+    let (antes, hist_antes) = (leer(&backlog), leer(&history));
+    cmd(&bin)
+        .args(["add", "--name", "OTRO nombre", "--clave", "prd/cobranza/mora/3"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Feature #1 ya existe (clave prd/cobranza/mora/3)."));
+    assert_eq!(antes, leer(&backlog), "la segunda corrida escribio el backlog");
+    assert_eq!(hist_antes, leer(&history), "la segunda corrida dejo bitacora");
+}
+
+#[test]
+fn add_sin_clave_no_cambia_el_backlog_should_write_exactly_the_fields_of_before() {
+    // AC-5: sin --clave y sin duplicado, la feature tiene los mismos campos de
+    // siempre: ningun campo nuevo se cuela.
+    let (dir, bin) = sandbox_with_binary();
+    cmd(&bin)
+        .args(["add", "--name", "una feature cualquiera"])
+        .assert()
+        .success();
+    let text = leer(&dir.path().join("hp/feature_list.json"));
+    let data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let feature = &data["features"][0];
+    let mut claves: Vec<&str> = feature.as_object().unwrap().keys().map(String::as_str).collect();
+    claves.sort_unstable();
+    assert_eq!(claves, ["acceptance", "id", "microservicios", "name", "status"]);
+}

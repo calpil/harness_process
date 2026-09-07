@@ -1213,6 +1213,16 @@ implementacion -> docs/impl-<id>.md -> docs/review-<id>.md
 el PRD de origen: hito marcado `done (fecha)` + linea en su `## Bitacora`
 ```
 
+`add` no carga dos veces la misma feature (feature #74): compara el nombre
+normalizado —minusculas, sin acentos ni puntuacion, sin palabras vacias— con el
+backlog ANTES de escribir. Si coincide con una feature abierta (`pending`,
+`in_progress` o `blocked`) se niega con exit 2 y la nombra: trabaja en esa, o
+ponele un nombre que diga en que se diferencia; no hay flag de escape. Si
+coincide solo con una cerrada, avisa con `[i]` y la crea igual: una regresion
+es legitima, citala en el spec. Para scripts y reintentos, `add --clave <k>`:
+con la misma clave devuelve la feature existente (exit 0) sin escribir nada.
+
+
 ### PRDs anidados: el arbol de producto
 
 Un producto grande no entra en un documento. `prd add` parte el PRD en hijos
