@@ -1264,6 +1264,7 @@ mod tests {
                 "76-una-feature-sin-worktree-veta-a-todas-las-demas-.md:AC-9",
                 "77-con-docs-como-repo-aparte-el-arnes-escribe-direc.md:AC-9",
                 "78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md:AC-8",
+                "80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio.md:AC-7",
             ],
             "el arreglo trae AC distintos de los medidos en el corpus real"
         );

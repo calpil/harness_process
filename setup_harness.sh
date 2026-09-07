@@ -1249,6 +1249,15 @@ Archivos principales:
   solo: cada 25 escrituras (`rules.leccion_nudge_interval`, `0` apaga) y al
   cerrar sin declarar, cuando emite por stderr el CONTRATO completo leido de esa
   misma guia. Cuando lo veas, no lo ignores: mira el catalogo y patchea.
+  Y lo aprendido tiene ciclo de vida (feature #80): la leccion de CLASE tiene
+  tope de lineas (`rules.leccion_max_lineas`, 250) —sobre el tope, `close
+  --leccion` y `leccion usar` se niegan hasta que muevas el detalle por feature
+  a `docs/lecciones/<clase>/referencias/<tema>.md` y dejes un puntero—;
+  declarar la misma clase `rules.leccion_repeticiones` (3) cierres seguidos
+  exige `--leccion-motivo`; y el cierre avisa cuando el perfil junta mas de
+  `rules.perfil_pendientes_max` (25) decisiones sin incorporar (`perfil
+  sugerir`) o pasaron mas de `rules.consolidar_cada_dias` (30) sin `lecciones
+  consolidar|curar`. `lecciones status` muestra los cuatro; `0` apaga cada uno.
 - `sh harness_cli doctor`: diagnostica la INSTALACION (binario, hooks,
   superficies, marker, hub, herramientas, graphify) e imprime el COMANDO EXACTO
   de remedio por cada problema. Es lo primero que hay que correr cuando algo del

@@ -717,6 +717,20 @@ Sin la regla (ausente o en `false`, el default) el cierre se comporta exactament
 como antes. `ninguna` siempre es una salida valida —pero no deberia ser la
 respuesta por default—; sin motivo, el comando se niega.
 
+Lo aprendido tiene **ciclo de vida** (feature #80). Cuatro umbrales en `rules`,
+todos con default y `0` para apagar:
+
+| Regla | Default | Que hace |
+| --- | --- | --- |
+| `leccion_max_lineas` | 250 | Tope de la leccion de CLASE (sin contar `<clase>/referencias/`). Sobre el tope, `close --leccion` y `leccion usar` se niegan (exit 2) con el contrato de particion: que secciones cuentan una sola feature y a donde van. Es duro: no hay flag que lo saltee |
+| `leccion_repeticiones` | 3 | La misma clase K cierres `done` seguidos exige `--leccion-motivo "<por que no es otra clase>"`; `ninguna` no cuenta ni corta la racha |
+| `perfil_pendientes_max` | 25 | El cierre avisa por stderr cuando hay mas decisiones registradas sin incorporar al perfil (`perfil sugerir`) |
+| `consolidar_cada_dias` | 30 | El cierre avisa por stderr cuando `lecciones consolidar` o `lecciones curar` no corrieron en ese plazo, o nunca; los dos registran su corrida en `history.md` |
+
+`lecciones status` muestra lineas/tope por leccion, las decisiones sin incorporar
+y la ultima consolidacion; `harness_check.sh` avisa `[i]` por cada leccion sobre
+el tope.
+
 `harness_check.sh` valida el arbol: frontmatter ilegible o un `nombre:` que no
 coincide con el archivo **bloquean** nombrando el archivo; una leccion sin
 `triggers` solo avisa con `[i]`. Sin `docs/lecciones/` el bloque entero se omite.

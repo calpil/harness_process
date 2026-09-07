@@ -1005,7 +1005,15 @@ or `--leccion ninguna --leccion-motivo "<why>"`. The harness reminds you on its
 own: every 25 writes (`rules.leccion_nudge_interval`, `0` turns it off) and when
 you close without declaring, where it prints the full CONTRACT on stderr, read
 from that same guide. When you see it, don't ignore it: check the catalog and
-patch.
+patch. What you learn has a lifecycle (feature #80): a CLASS lesson has a line
+cap (`rules.leccion_max_lineas`, 250) -- over the cap, `close --leccion` and
+`leccion usar` refuse until you move the per-feature detail to
+`docs/lecciones/<class>/referencias/<topic>.md` and leave a pointer --; declaring
+the same class `rules.leccion_repeticiones` (3) closes in a row demands
+`--leccion-motivo`; and the close warns when the profile has more than
+`rules.perfil_pendientes_max` (25) decisions not yet incorporated (`perfil
+sugerir`) or more than `rules.consolidar_cada_dias` (30) days went by without
+`lecciones consolidar|curar`. `lecciones status` shows all four; `0` disables each.
 
 `harness_cli doctor` diagnoses the INSTALLATION (binary, hooks, surfaces,
 marker, hub, tools, graphify) and prints the EXACT remedy command for each

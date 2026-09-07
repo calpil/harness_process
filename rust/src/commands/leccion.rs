@@ -182,6 +182,15 @@ pub fn usar(paths: &HarnessPaths, nombre: &str) -> anyhow::Result<()> {
         }
         Err(_) => return Err(no_existe(paths, nombre).into()),
     };
+    // Feature #80: sobre el tope no se registra uso; primero se parte.
+    let politica = politica(paths);
+    if leccion.sobre_el_tope(&politica).is_some() {
+        return Err(Exit {
+            code: 2,
+            message: Some(lecciones::contrato_de_particion(&leccion, &politica)),
+        }
+        .into());
+    }
     leccion.registrar_uso();
     leccion.save()?;
     println!(
@@ -242,6 +251,13 @@ fn umbrales(paths: &HarnessPaths) -> Umbrales {
         .unwrap_or_default()
 }
 
+/// Feature #80: los umbrales del ciclo de vida (tope, racha, avisos).
+fn politica(paths: &HarnessPaths) -> lecciones::Politica {
+    load_features(paths)
+        .map(|d| lecciones::Politica::from_rules(&d))
+        .unwrap_or_default()
+}
+
 /// Timestamp compacto para backups y reportes: `20260817-041530`.
 fn ts() -> String {
     now_stamp()
@@ -257,8 +273,12 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
     }
     let hoy = lecciones::hoy();
     let u = umbrales(paths);
+    let pol = politica(paths);
     let (activas, _) = lecciones::scan(paths);
     let archivadas = lecciones::scan_archivadas(paths);
+    // Feature #80: lo que el cierre avisa, aca se ve sin cerrar nada.
+    let pendientes = lecciones::perfil_pendientes(paths);
+    let ultima = lecciones::ultima_consolidacion(paths);
 
     // Proxima transicion de cada una: cuantos dias faltan y hacia donde.
     let fila = |l: &Leccion| {
@@ -288,6 +308,9 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
                     "ultimo_uso": l.ultimo_uso(),
                     "dias_inactiva": dias,
                     "pinneada": l.pinneada(),
+                    "lineas": l.lineas(),
+                    "tope_lineas": pol.max_lineas,
+                    "sobre_el_tope": l.sobre_el_tope(&pol).is_some(),
                     "proxima_transicion": proxima,
                     "dias_para_transicion": faltan,
                 })
@@ -298,6 +321,14 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
             serde_json::to_string_pretty(&serde_json::json!({
                 "lecciones": rows,
                 "umbrales": {"stale_dias": u.stale, "archivo_dias": u.archivo},
+                "politica": {
+                    "leccion_max_lineas": pol.max_lineas,
+                    "leccion_repeticiones": pol.repeticiones,
+                    "perfil_pendientes_max": pol.perfil_pendientes,
+                    "consolidar_cada_dias": pol.consolidar_dias,
+                },
+                "perfil_pendientes": pendientes,
+                "ultima_consolidacion": ultima,
                 "hoy": hoy,
             }))?
         );
@@ -320,8 +351,18 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
         } else {
             format!("{proxima} en {faltan}d")
         };
+        let lineas = if pol.max_lineas > 0 {
+            format!("{:>4}/{} lineas", l.lineas(), pol.max_lineas)
+        } else {
+            format!("{:>4} lineas", l.lineas())
+        };
+        let tope = if l.sobre_el_tope(&pol).is_some() {
+            " SOBRE EL TOPE"
+        } else {
+            ""
+        };
         println!(
-            "  {:<40}{marca} {:>3} usos | {:>4}d inactiva | {} | -> {cuando}",
+            "  {:<40}{marca} {:>3} usos | {:>4}d inactiva | {lineas}{tope} | {} | -> {cuando}",
             l.nombre,
             l.usos(),
             dias,
@@ -342,6 +383,31 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
         .iter()
         .filter(|a| a.transicion == Transicion::AArchivada)
         .count();
+    // Feature #80: lo que el cierre avisa, aca se ve sin cerrar nada.
+    if pol.perfil_pendientes > 0 {
+        println!(
+            "\nPerfil: {pendientes} decision(es) sin incorporar (aviso desde {}; sh harness_cli perfil sugerir).",
+            pol.perfil_pendientes
+        );
+    } else {
+        println!("\nPerfil: {pendientes} decision(es) sin incorporar (aviso apagado).");
+    }
+    match &ultima {
+        None => println!(
+            "Ultima consolidacion: nunca registrada (sh harness_cli lecciones consolidar | lecciones curar)."
+        ),
+        Some(fecha) => {
+            let d = lecciones::dias_entre(fecha, &hoy).unwrap_or(0);
+            if pol.consolidar_dias > 0 {
+                println!(
+                    "Ultima consolidacion: {fecha} ({d} dias; aviso desde {}).",
+                    pol.consolidar_dias
+                );
+            } else {
+                println!("Ultima consolidacion: {fecha} ({d} dias; aviso apagado).");
+            }
+        }
+    }
     println!("\nCandidatas HOY: {a_stale} a stale, {a_archivo} a archivar.");
     if !plan.vacio() {
         println!("  Vealas con 'sh harness_cli lecciones curar' (solo informa).");
@@ -357,6 +423,17 @@ pub fn curar(paths: &HarnessPaths, aplicar: bool) -> anyhow::Result<()> {
     let u = umbrales(paths);
     let plan = curador::planificar(paths, &hoy, u);
     imprimir_plan(&plan);
+    // Feature #80: la pasada queda registrada aunque no cambie nada; es lo que
+    // el cierre lee para saber si la biblioteca se reviso.
+    if !aplicar || plan.vacio() {
+        log(
+            paths,
+            &format!(
+                "lecciones curar informe: {} transicion(es) pendiente(s)",
+                plan.acciones.len()
+            ),
+        )?;
+    }
     if plan.vacio() {
         println!("\nNada que hacer: ninguna leccion cambia de estado hoy.");
         return Ok(());
@@ -547,7 +624,8 @@ pub fn consolidar(
     detectar(paths)
 }
 
-/// La mitad que necesita modelo. **No escribe nada.**
+/// La mitad que necesita modelo. **No toca ninguna leccion ni crea backup**;
+/// desde la #80 deja su corrida en `history.md`, que es lo que el cierre lee.
 fn detectar(paths: &HarnessPaths) -> anyhow::Result<()> {
     // Las referencias `relacionadas` son una señal local: se calculan antes
     // de decidir si hay backend. Así una pareja escrita mutuamente sigue siendo
@@ -586,7 +664,7 @@ fn detectar(paths: &HarnessPaths) -> anyhow::Result<()> {
         if candidatos.is_empty() && diagnosticos.is_empty() {
             return Ok(());
         }
-        return informar_candidatos(candidatos, &diagnosticos, &existentes, &pinneadas);
+        return informar_candidatos(paths, candidatos, &diagnosticos, &existentes, &pinneadas);
     }
     let Some(argv) = backend.argv() else {
         return Ok(());
@@ -616,7 +694,7 @@ fn detectar(paths: &HarnessPaths) -> anyhow::Result<()> {
             if candidatos.is_empty() && diagnosticos.is_empty() {
                 return Ok(());
             }
-            return informar_candidatos(candidatos, &diagnosticos, &existentes, &pinneadas);
+            return informar_candidatos(paths, candidatos, &diagnosticos, &existentes, &pinneadas);
         }
     };
 
@@ -625,17 +703,18 @@ fn detectar(paths: &HarnessPaths) -> anyhow::Result<()> {
         if candidatos.is_empty() && diagnosticos.is_empty() {
             return Ok(());
         }
-        return informar_candidatos(candidatos, &diagnosticos, &existentes, &pinneadas);
+        return informar_candidatos(paths, candidatos, &diagnosticos, &existentes, &pinneadas);
     };
     candidatos.extend(consolidacion::marcar_triggers(
         consolidacion::leer_candidatos(&json),
     ));
-    informar_candidatos(candidatos, &diagnosticos, &existentes, &pinneadas)
+    informar_candidatos(paths, candidatos, &diagnosticos, &existentes, &pinneadas)
 }
 
 /// Imprime señales locales y candidatas validadas. No recibe `HarnessPaths`,
 /// por lo que este tramo de detección sigue sin poder escribir.
 fn informar_candidatos(
+    paths: &HarnessPaths,
     candidatos: Vec<consolidacion::Candidato>,
     diagnosticos: &[String],
     existentes: &[String],
@@ -649,6 +728,11 @@ fn informar_candidatos(
         println!("[i] Candidato descartado: {}", d.mensaje());
     }
     let ok = consolidacion::unir_candidatos(ok);
+    // Feature #80: la corrida queda registrada; el cierre la lee.
+    log(
+        paths,
+        &format!("lecciones consolidar informe: {} candidato(s)", ok.len()),
+    )?;
     if ok.is_empty() {
         println!("\nNingun solapamiento: el catalogo esta limpio.");
         return Ok(());
