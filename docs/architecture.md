@@ -245,7 +245,11 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   cuerpo— y el prompt viaja como item de argv, jamas por `sh -c`, asi que una
   descripcion con backticks no puede inyectar nada. `revisar_paraguas()` exige
   que el paraguas herede todos los triggers de lo que archiva, porque `buscar`
-  puntua una leccion activa 100 y una archivada 30.
+  puntua una leccion activa 100 y una archivada 30. Desde la #81,
+  `por_relacionadas()` asigna confianza local 0.50 y `Candidato` conserva su
+  procedencia (referencias, modelo o ambas). `unir_candidatos()` deduplica por
+  miembros, conserva la mayor confianza y ambas razones. El informe solo declara
+  unica evidencia local cuando no hay propuesta del modelo para ese grupo.
 - `progress.rs`: `current.md` / `history.md` (estado vivo y bitacora).
 - `memories.rs`, `graphify.rs`, `graph/` (`commands`, `derive`, `ids`, `store`,
   `tls`): Memory Hub y su integracion con graphify.

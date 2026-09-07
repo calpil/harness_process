@@ -728,8 +728,8 @@ fn detectar(paths: &HarnessPaths) -> anyhow::Result<()> {
     informar_candidatos(paths, candidatos, &diagnosticos, &existentes, &pinneadas)
 }
 
-/// Imprime señales locales y candidatas validadas. No recibe `HarnessPaths`,
-/// por lo que este tramo de detección sigue sin poder escribir.
+/// Imprime señales locales y candidatas validadas y registra la corrida.
+/// No modifica lecciones ni crea backups.
 fn informar_candidatos(
     paths: &HarnessPaths,
     candidatos: Vec<consolidacion::Candidato>,
@@ -764,7 +764,7 @@ fn informar_candidatos(
             c.miembros.join(" + "),
             c.confianza
         );
-        println!("      {}", c.motivo);
+        println!("      {}", c.motivo_para_informe());
     }
     println!("\nEsto SOLO informa: no se toco ningun archivo.");
     println!("Para fusionar, escribi primero el paraguas y despues:");

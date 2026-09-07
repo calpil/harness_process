@@ -48,7 +48,7 @@ leccion() {
 nombre: $2
 descripcion: $3
 triggers: [$4]
-relacionadas: []
+relacionadas: [${6:-}]
 origen: [1]
 usos: 0
 ultimo_uso:
@@ -125,6 +125,47 @@ modo_propuesta() {
     printf '%s' "$salida" | grep -q "triggers/LLM" \
         || fail "propuesta: no conserva la evidencia observable. Dijo: $salida"
     ok "propuesta: backend falso por defecto, aun con variable real heredada"
+}
+
+# #81: una cita mutua mantiene la candidata, pero no prueba solapamiento.
+modo_relacionadas() {
+    local caso tmp salida antes despues
+    for caso in sin-backend vacio descarte malformado falla; do
+        tmp="$(sandbox)"
+        leccion "$tmp" "una-cosa" "Una cosa." "alfa" "Cuando alfa." "otra-cosa"
+        leccion "$tmp" "otra-cosa" "Otra cosa." "beta" "Cuando beta." "una-cosa"
+        antes="$(find "$tmp/docs" -type f -exec shasum {} + | sort)"
+        if [ "$caso" = sin-backend ]; then
+            printf '%s\n' '{"features":[],"rules":{}}' > "$tmp/hp/feature_list.json"
+            salida="$(cd "$tmp/hp" && HARNESS_REPO_ROOT="$tmp" HARNESS_CONSOLIDAR_CMD=/bin/false ./harness lecciones consolidar 2>&1)"
+            [[ "$salida" == *"Consolidacion APAGADA"* ]] || fail "relacionadas: no ejercio el caso sin backend"
+        else
+            salida="$(ejecutar_falso "$tmp" "$caso")"
+        fi
+        despues="$(find "$tmp/docs" -type f -exec shasum {} + | sort)"
+        [ "$antes" = "$despues" ] || fail "relacionadas/$caso: modifico lecciones"
+        [ ! -d "$tmp/bkp" ] && [ ! -d "$tmp/hp/bkp" ] || fail "relacionadas/$caso: creo backup"
+        [[ "$salida" == *"1 candidato(s) a consolidar"* ]] || fail "relacionadas/$caso: falta el par unico. Dijo: $salida"
+        [[ "$salida" == *"otra-cosa + una-cosa (confianza 0.50)"* ]] || fail "relacionadas/$caso: la cita mutua se presenta como certeza. Dijo: $salida"
+        [[ "$salida" == *"unica evidencia"* ]] || fail "relacionadas/$caso: no explica que solo hay evidencia local. Dijo: $salida"
+        grep -Fq 'lecciones consolidar informe: 1 candidato(s)' "$tmp/hp/progress/history.md" || fail "relacionadas/$caso: falta la bitacora"
+        rm -rf "$tmp"
+        ok "relacionadas/$caso: confianza local y unica evidencia; lecciones intactas"
+    done
+}
+
+modo_combinadas() {
+    local tmp salida
+    tmp="$(sandbox)"
+    leccion "$tmp" "una-cosa" "Una cosa." "alfa" "Cuando alfa." "otra-cosa"
+    leccion "$tmp" "otra-cosa" "Otra cosa." "beta" "Cuando beta." "una-cosa"
+    salida="$(ejecutar_falso "$tmp" propuesta)"
+    rm -rf "$tmp"
+    [[ "$salida" == *"1 candidato(s) a consolidar"* ]] || fail "combinadas: duplico o perdio el par. Dijo: $salida"
+    [[ "$salida" == *"otra-cosa + una-cosa (confianza 0.91)"* ]] || fail "combinadas: no conserva la confianza mayor del modelo. Dijo: $salida"
+    [[ "$salida" == *"relacionadas mutuas"* && "$salida" == *"triggers/LLM: respuesta controlada"* ]] || fail "combinadas: perdio una de las razones. Dijo: $salida"
+    [[ "$salida" != *"unica evidencia"* ]] || fail "combinadas: afirma evidencia exclusiva cuando hay dos fuentes. Dijo: $salida"
+    ok "combinadas: par unico con ambas razones y confianza del modelo"
 }
 
 modo_descarte() {
@@ -230,17 +271,21 @@ asegurar_harness
 
 case "$MODO" in
     propuesta) modo_propuesta ;;
+    relacionadas) modo_relacionadas ;;
+    combinadas) modo_combinadas ;;
     descarte) modo_descarte ;;
     error) modo_error ;;
     paraguas) modo_paraguas ;;
     no-toca-nada) modo_no_toca_nada ;;
     todos)
         modo_propuesta
+        modo_relacionadas
+        modo_combinadas
         modo_descarte
         modo_error
         modo_paraguas
         modo_no_toca_nada
         ok "consolidacion: suite local completa, sin red ni cuota"
         ;;
-    *) fail "modo desconocido: $MODO (propuesta|descarte|error|paraguas|no-toca-nada|todos)" ;;
+    *) fail "modo desconocido: $MODO (propuesta|relacionadas|combinadas|descarte|error|paraguas|no-toca-nada|todos)" ;;
 esac

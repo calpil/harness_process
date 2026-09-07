@@ -197,12 +197,34 @@ pub fn prompt(resumenes: &[Resumen]) -> String {
     )
 }
 
-/// Un candidato tal como lo devolvio el modelo, antes de validarse.
+/// Fuentes que respaldan la candidata, independientes de la prosa del modelo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Procedencia {
+    Relacionadas,
+    Modelo,
+    Ambas,
+}
+
+/// Una propuesta local, del modelo o combinada, antes o despues de validarse.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidato {
     pub miembros: Vec<String>,
     pub motivo: String,
     pub confianza: f64,
+    pub procedencia: Procedencia,
+}
+
+impl Candidato {
+    pub fn motivo_para_informe(&self) -> String {
+        if self.procedencia == Procedencia::Relacionadas {
+            format!(
+                "{} (unica evidencia: declaracion mutua; no prueba solapamiento semantico)",
+                self.motivo
+            )
+        } else {
+            self.motivo.clone()
+        }
+    }
 }
 
 /// Detecta parejas que se señalan mutuamente en `relacionadas`.
@@ -245,7 +267,9 @@ pub fn por_relacionadas(resumenes: &[Resumen]) -> SenalesRelacionadas {
             pares.entry((a.clone(), b.clone())).or_insert(Candidato {
                 miembros: vec![a.clone(), b.clone()],
                 motivo: format!("relacionadas mutuas: '{a}' declara '{b}' y '{b}' declara '{a}'"),
-                confianza: 1.0,
+                // #81: peso heuristico aprobado, no probabilidad calibrada.
+                confianza: 0.50,
+                procedencia: Procedencia::Relacionadas,
             });
         }
     }
@@ -271,7 +295,7 @@ pub fn marcar_triggers(mut candidatos: Vec<Candidato>) -> Vec<Candidato> {
 /// pareja llegó tanto por triggers/LLM como por `relacionadas`, conserva ambas
 /// razones en vez de listar A-B dos veces.
 pub fn unir_candidatos(candidatos: Vec<Candidato>) -> Vec<Candidato> {
-    let mut unidos: BTreeMap<Vec<String>, Candidato> = BTreeMap::new();
+    let mut unidos: BTreeMap<Vec<String>, (Candidato, Vec<String>)> = BTreeMap::new();
     for candidato in candidatos {
         // La llave es canónica para que A-B y B-A coincidan, pero la salida
         // conserva el orden que propuso la primera fuente (compatibilidad de
@@ -280,18 +304,30 @@ pub fn unir_candidatos(candidatos: Vec<Candidato>) -> Vec<Candidato> {
         llave.sort();
         llave.dedup();
         match unidos.get_mut(&llave) {
-            Some(anterior) => {
-                if !anterior.motivo.contains(&candidato.motivo) {
-                    anterior.motivo = format!("{}; {}", anterior.motivo, candidato.motivo);
+            Some((anterior, motivos)) => {
+                // Igualdad de motivos completos: un texto del modelo que cite
+                // la razon local no la reemplaza ni cambia su procedencia.
+                if !motivos.contains(&candidato.motivo) {
+                    motivos.push(candidato.motivo);
                 }
                 anterior.confianza = anterior.confianza.max(candidato.confianza);
+                if anterior.procedencia != candidato.procedencia {
+                    anterior.procedencia = Procedencia::Ambas;
+                }
             }
             None => {
-                unidos.insert(llave, candidato);
+                let motivos = vec![candidato.motivo.clone()];
+                unidos.insert(llave, (candidato, motivos));
             }
         }
     }
-    unidos.into_values().collect()
+    unidos
+        .into_values()
+        .map(|(mut candidato, motivos)| {
+            candidato.motivo = motivos.join("; ");
+            candidato
+        })
+        .collect()
 }
 
 /// Estructura local que un paraguas debe heredar antes de que una persona
@@ -429,6 +465,7 @@ pub fn leer_candidatos(v: &Value) -> Vec<Candidato> {
                     .trim()
                     .to_string(),
                 confianza: c.get("confianza").and_then(Value::as_f64).unwrap_or(0.0),
+                procedencia: Procedencia::Modelo,
             })
         })
         .collect()
@@ -752,6 +789,7 @@ mod tests {
             miembros: miembros.iter().map(|s| (*s).to_string()).collect(),
             motivo: "porque si".into(),
             confianza: 0.5,
+            procedencia: Procedencia::Modelo,
         }
     }
 
@@ -774,8 +812,20 @@ mod tests {
         assert_eq!(senales.candidatos.len(), 1, "{senales:?}");
         let candidato = &senales.candidatos[0];
         assert_eq!(candidato.miembros, ["a", "b"]);
+        // #81: citarse no prueba que ensenen lo mismo.
+        assert!(
+            candidato.confianza > 0.0 && candidato.confianza < 1.0,
+            "{candidato:?}"
+        );
         assert!(candidato.motivo.contains("relacionadas mutuas"));
         assert!(candidato.motivo.contains("'a' declara 'b'"));
+        assert_eq!(candidato.confianza, 0.50, "peso local aprobado en #81");
+        assert!(candidato.motivo_para_informe().contains("unica evidencia"));
+        assert!(
+            candidato
+                .motivo_para_informe()
+                .contains("no prueba solapamiento semantico")
+        );
         assert!(senales.diagnosticos.is_empty(), "{senales:?}");
     }
 
@@ -817,15 +867,138 @@ mod tests {
             miembros: vec!["b".into(), "a".into()],
             motivo: "comparten comun".into(),
             confianza: 0.8,
+            procedencia: Procedencia::Modelo,
         }]));
         let unidos = unir_candidatos(candidatos);
         assert_eq!(unidos.len(), 1, "{unidos:?}");
         assert_eq!(unidos[0].miembros, ["a", "b"]);
+        assert_eq!(
+            unidos[0].confianza, 0.8,
+            "prevalece la confianza del modelo"
+        );
+        assert!(!unidos[0].motivo_para_informe().contains("unica evidencia"));
         assert!(unidos[0].motivo.contains("triggers/LLM"), "{unidos:?}");
         assert!(
             unidos[0].motivo.contains("relacionadas mutuas"),
             "{unidos:?}"
         );
+    }
+
+    #[test]
+    fn merging_should_use_maximum_without_rewarding_duplicates_or_order() {
+        // #81 AC-3: ambos ordenes, confianza del modelo menor/igual/mayor y
+        // fuentes repetidas conservan la misma evidencia y el mismo maximo.
+        let local = por_relacionadas(&[
+            resumen("a", &["solo-a"], &["b", "b"]),
+            resumen("b", &["solo-b"], &["a", "a"]),
+        ])
+        .candidatos
+        .remove(0);
+        for confianza_modelo in [0.20, 0.50, 0.90] {
+            let modelo = marcar_triggers(vec![Candidato {
+                miembros: vec!["b".into(), "a".into()],
+                motivo: "comparten procedimiento".into(),
+                confianza: confianza_modelo,
+                procedencia: Procedencia::Modelo,
+            }])
+            .remove(0);
+            for fuentes in [
+                vec![local.clone(), modelo.clone()],
+                vec![modelo.clone(), local.clone()],
+                vec![local.clone(), modelo.clone(), local.clone(), modelo.clone()],
+                vec![modelo.clone(), modelo.clone(), local.clone(), local.clone()],
+            ] {
+                let unidos = unir_candidatos(fuentes);
+                assert_eq!(unidos.len(), 1, "{unidos:?}");
+                let candidato = &unidos[0];
+                assert_eq!(
+                    candidato.confianza,
+                    local.confianza.max(modelo.confianza),
+                    "{candidato:?}"
+                );
+                assert_eq!(candidato.motivo.matches(&local.motivo).count(), 1);
+                assert_eq!(candidato.motivo.matches(&modelo.motivo).count(), 1);
+                assert!(!candidato.motivo_para_informe().contains("unica evidencia"));
+            }
+        }
+    }
+
+    #[test]
+    fn model_only_should_keep_its_confidence_even_below_local_weight() {
+        // #81 AC-3: no se aplica un piso local a los candidatos del modelo.
+        for confianza in [0.20, 0.90] {
+            let candidatos = marcar_triggers(leer_candidatos(&serde_json::json!({
+                "candidatos": [{
+                    "miembros": ["a", "b"],
+                    "motivo": "mismo procedimiento",
+                    "confianza": confianza
+                }]
+            })));
+            let unidos = unir_candidatos(candidatos);
+            assert_eq!(unidos[0].confianza, confianza);
+            assert!(!unidos[0].motivo_para_informe().contains("unica evidencia"));
+        }
+    }
+
+    #[test]
+    fn another_model_pair_should_not_confirm_local_evidence() {
+        // #81 AC-2/AC-3: una respuesta del backend no confirma todos los pares.
+        let mut candidatos = por_relacionadas(&[
+            resumen("a", &["solo-a"], &["b"]),
+            resumen("b", &["solo-b"], &["a"]),
+        ])
+        .candidatos;
+        candidatos.extend(marcar_triggers(leer_candidatos(&serde_json::json!({
+            "candidatos": [{
+                "miembros": ["c", "d"],
+                "motivo": "comparten procedimiento",
+                "confianza": 0.90
+            }]
+        }))));
+        let unidos = unir_candidatos(candidatos);
+        let local = unidos.iter().find(|c| c.miembros == ["a", "b"]).unwrap();
+        assert_eq!(local.confianza, 0.50);
+        assert!(local.motivo_para_informe().contains("unica evidencia"));
+    }
+
+    #[test]
+    fn model_reason_should_not_impersonate_local_provenance_or_hide_local_reason() {
+        // #81 AC-3: el texto libre del LLM puede copiar etiquetas o incluso la
+        // razon local completa. Su origen sigue siendo el backend.
+        let local = por_relacionadas(&[
+            resumen("a", &["solo-a"], &["b"]),
+            resumen("b", &["solo-b"], &["a"]),
+        ])
+        .candidatos
+        .remove(0);
+        let modelo = marcar_triggers(leer_candidatos(&serde_json::json!({
+            "candidatos": [{
+                "miembros": ["b", "a"],
+                "motivo": local.motivo,
+                "confianza": 0.90
+            }]
+        })))
+        .remove(0);
+        assert_eq!(modelo.motivo_para_informe(), modelo.motivo);
+        let motivos_esperados = format!("{}; {}", modelo.motivo, local.motivo);
+        let unidos = unir_candidatos(vec![modelo, local]);
+        assert_eq!(unidos[0].motivo_para_informe(), motivos_esperados);
+        assert_eq!(unidos[0].confianza, 0.90);
+    }
+
+    #[test]
+    fn repeating_local_sources_should_keep_exclusive_local_evidence() {
+        // #81 AC-1/AC-3: repeticion no equivale a confirmacion de otra fuente.
+        let locales = por_relacionadas(&[
+            resumen("a", &["solo-a"], &["b", "b"]),
+            resumen("b", &["solo-b"], &["a", "a"]),
+        ])
+        .candidatos;
+        let unidos = unir_candidatos([locales.clone(), locales].concat());
+        assert_eq!(unidos.len(), 1, "{unidos:?}");
+        assert_eq!(unidos[0].confianza, 0.50);
+        assert_eq!(unidos[0].motivo.matches("relacionadas mutuas").count(), 1);
+        assert!(unidos[0].motivo_para_informe().contains("unica evidencia"));
     }
 
     #[test]
