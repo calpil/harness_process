@@ -14,6 +14,7 @@
 #   smokes                AC-5   los dos smokes cubren los mismos bloques
 #   promesa-acotada       AC-7   verification.md no manda correr lo que nadie corre
 #   en-harness-check      AC-8   el aviso corre y NO cambia el exit code
+#   reset-targets         ---    los dos --reset borran la misma lista
 #   sin-ps1               AC-9   sin el .ps1, silencio
 set -Eeuo pipefail
 
@@ -287,6 +288,53 @@ modo_en_harness_check() {
     ok "en-harness-check: corre el chequeo y no cambia el exit code"
 }
 
+# Lo que --reset borra en cada instalador. Es la lista que mas barato se
+# desincroniza: se agrega una superficie nueva de un lado y del otro queda
+# huerfana en el disco del usuario despues de un reset. Paso: `.gemini/agents`
+# estaba solo en el .ps1 y el .sh dejaba los subagentes viejos.
+#
+# Asimetrias ACEPTADAS, por plataforma (no por olvido): los lanzadores y el
+# runtime de hooks de Windows son .ps1 y no existen en la superficie sh.
+RESET_SOLO_PS1="bin/harness-hook.ps1 bin/harness-claude.ps1 bin/harness-codex.ps1 bin/harness-gemini.ps1 bin/harness-grok.ps1 bin/harness-kimi.ps1 bin/harness-antigravity.ps1"
+
+reset_targets_sh() {
+    sed -n '/^    reset_targets=(/,/^    )/p' "$REPO_ROOT/setup_harness.sh" \
+        | grep -oE '"\$(SURFACE_DIR|HARNESS_DIR)/[^"]+"' \
+        | sed -E 's|"\$(SURFACE_DIR\|HARNESS_DIR)/||; s|"$||' \
+        | sort -u
+}
+
+reset_targets_ps1() {
+    # El cuerpo de Invoke-HarnessReset: strings sueltos del array y los
+    # (Join-Path $script:HarnessDir "x") que se agregan despues.
+    sed -n '/^function Invoke-HarnessReset/,/^function Write-FinalReport/p' "$REPO_ROOT/setup_harness.ps1" \
+        | grep -oE '"[A-Za-z0-9_./-]+"' \
+        | tr -d '"' \
+        | grep -vE '^(roles/|templates/)?$' \
+        | sort -u
+}
+
+modo_reset_targets() {
+    sh_lista="$(reset_targets_sh)"
+    ps1_lista="$(reset_targets_ps1)"
+    [ -n "$sh_lista" ] || fail "reset-targets: no se pudo leer reset_targets= de setup_harness.sh"
+    [ -n "$ps1_lista" ] || fail "reset-targets: no se pudo leer Invoke-HarnessReset de setup_harness.ps1"
+    faltan=""
+    while IFS= read -r t; do
+        [ -z "$t" ] && continue
+        printf '%s\n' "$ps1_lista" | grep -qx -- "$t" \
+            || faltan="$faltan $t(solo-sh)"
+    done <<< "$sh_lista"
+    while IFS= read -r t; do
+        [ -z "$t" ] && continue
+        case " $RESET_SOLO_PS1 " in *" $t "*) continue ;; esac
+        printf '%s\n' "$sh_lista" | grep -qx -- "$t" \
+            || faltan="$faltan $t(solo-ps1)"
+    done <<< "$ps1_lista"
+    [ -z "$faltan" ] || fail "reset-targets: --reset limpia cosas distintas en cada instalador:$faltan"
+    ok "reset-targets: los dos --reset borran lo mismo (salvo los lanzadores .ps1 de Windows)"
+}
+
 modo_sin_ps1() {
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/harness-parity-sin.XXXXXX")"
     mkdir -p "$tmp/hp" "$tmp/docs"
@@ -312,6 +360,7 @@ case "$MODO" in
     cableado-hooks)        modo_cableado_hooks ;;
     promesa-acotada)       modo_promesa_acotada ;;
     en-harness-check)      modo_en_harness_check ;;
+    reset-targets)         modo_reset_targets ;;
     sin-ps1)               modo_sin_ps1 ;;
     todos)
         modo_opciones
@@ -323,8 +372,9 @@ case "$MODO" in
         modo_cableado_hooks
         modo_promesa_acotada
         modo_en_harness_check
+        modo_reset_targets
         modo_sin_ps1
-        ok "paridad: los diez modos verdes"
+        ok "paridad: los once modos verdes"
         ;;
     *) fail "modo desconocido: $MODO" ;;
 esac

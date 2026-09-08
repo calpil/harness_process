@@ -785,6 +785,12 @@ if [ "$RESET" -eq 1 ]; then
         "$SURFACE_DIR/.codex/agents"
         "$SURFACE_DIR/.gemini/settings.json"
         "$SURFACE_DIR/.gemini/commands"
+        # Los subagentes de Gemini se escriben (write_agent_definitions) y se
+        # respaldan, pero hasta hoy NO se limpiaban: un --reset dejaba los tres
+        # .gemini/agents/*.md de la instalacion anterior. El .ps1 si los borraba,
+        # y nada comparaba las dos listas (por eso ahora existe el modo
+        # reset-targets de tests/parity_check.sh).
+        "$SURFACE_DIR/.gemini/agents"
         "$SURFACE_DIR/.grok/hooks"
         "$SURFACE_DIR/.grok/GROK.md"
         # Kimi Code: SOLO el artefacto de proyecto. El bloque de hooks GLOBALES
