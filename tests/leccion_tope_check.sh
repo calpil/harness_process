@@ -43,23 +43,29 @@ mkdir -p "$d/docs/lecciones/corta/referencias"; seq 1 400 | sed 's/^/detalle /' 
 correr() { ( cd "$d" && bash harness_check.sh >"$d/.check.out" 2>"$d/.check.err" || true ); }
 
 correr
-grep -q 'docs/lecciones/larga.md tiene 3[0-9][0-9] lineas y el tope es 250' "$d/.check.err" || fail "sin la regla, no aviso por la leccion larga con el default 250: $(grep -c . "$d/.check.err") lineas de stderr"
-grep -q 'referencias/' "$d/.check.err" && grep -q 'partirla' "$d/.check.err" || fail "el aviso no dice a donde va el detalle"
-grep -q 'lecciones/corta.md tiene' "$d/.check.err" && fail "aviso por la leccion corta, que esta bajo el tope"
+grep -q '1 leccion(es) sobre el tope de 250 lineas.*larga (3[0-9][0-9])' "$d/.check.err" || fail "sin la regla, no aviso por la leccion larga con el default 250: $(grep -c . "$d/.check.err") lineas de stderr"
+grep -q 'referencias/' "$d/.check.err" && grep -q 'partirlas' "$d/.check.err" && grep -q 'leccion partir' "$d/.check.err" || fail "el aviso no dice a donde va el detalle ni el comando"
+grep -q 'corta (' "$d/.check.err" && fail "aviso por la leccion corta, que esta bajo el tope"
 grep -q 'detalle.md' "$d/.check.err" && fail "aviso por un archivo de referencias/, que no cuenta"
+# Feature #84: dos sobre el tope -> UNA linea con las dos, no un parrafo por leccion.
+leccion larga2 280
+correr
+[ "$(grep -c 'sobre el tope de' "$d/.check.err")" = 1 ] || fail "dos lecciones sobre el tope, mas de una linea [i]: $(grep -c 'sobre el tope de' "$d/.check.err")"
+grep -q '2 leccion(es) sobre el tope de 250 lineas.*larga (3[0-9][0-9]).*larga2 (2[0-9][0-9])' "$d/.check.err" || fail "la linea no nombra las dos con sus lineas: $(grep 'sobre el tope' "$d/.check.err")"
+rm -f "$d/docs/lecciones/larga2.md"
 
 python3 - "$d/feature_list.json" 0 <<'PY'
 import json,sys
 p=sys.argv[1]; j=json.load(open(p)); j.setdefault('rules',{})['leccion_max_lineas']=int(sys.argv[2]); json.dump(j,open(p,'w'),indent=2)
 PY
 correr
-grep -q 'el tope es' "$d/.check.err" && fail "con la regla en 0 sigue avisando"
+grep -q 'sobre el tope' "$d/.check.err" && fail "con la regla en 0 sigue avisando"
 
 python3 - "$d/feature_list.json" 400 <<'PY'
 import json,sys
 p=sys.argv[1]; j=json.load(open(p)); j['rules']['leccion_max_lineas']=int(sys.argv[2]); json.dump(j,open(p,'w'),indent=2)
 PY
 correr
-grep -q 'el tope es' "$d/.check.err" && fail "con el tope en 400 avisa por una leccion de 3xx lineas"
+grep -q 'sobre el tope' "$d/.check.err" && fail "con el tope en 400 avisa por una leccion de 3xx lineas"
 
 echo "[Ok] leccion_tope: el check avisa [i] por la leccion sobre el tope, no por referencias/, y calla con la regla en 0 o mas alta"

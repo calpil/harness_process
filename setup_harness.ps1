@@ -1054,7 +1054,8 @@ from that same guide. When you see it, don't ignore it: check the catalog and
 patch. What you learn has a lifecycle (feature #80): a CLASS lesson has a line
 cap (`rules.leccion_max_lineas`, 250) -- over the cap, `close --leccion` and
 `leccion usar` refuse until you move the per-feature detail to
-`docs/lecciones/<class>/referencias/<topic>.md` and leave a pointer --; declaring
+`docs/lecciones/<class>/referencias/<topic>.md` and leave a pointer; the
+mechanical part is `leccion partir <class>` (reports; `--aplicar` moves) --; declaring
 the same class `rules.leccion_repeticiones` (3) closes in a row demands
 `--leccion-motivo`; and the close warns when the profile has more than
 `rules.perfil_pendientes_max` (25) decisions not yet incorporated (`perfil

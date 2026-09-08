@@ -3,9 +3,9 @@ nombre: probar-contra-datos-reales
 descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
-origen: [22, 25, 30, 36, 29, 28, 47, 81]
-usos: 2
-ultimo_uso: 2026-09-07
+origen: [22, 25, 30, 36, 29, 28, 47, 81, 84]
+usos: 3
+ultimo_uso: 2026-09-08
 ultima_actualizacion: 2026-09-07
 estado: activa
 ---
@@ -162,6 +162,10 @@ Formas degeneradas que casi siempre faltan:
 | ranking | todos los items empatan |
 | parseo | el ejemplo vive dentro del documento que se parsea (#23) |
 | filtro por nombre | el filtro no matchea nada y sale 0 (#23) |
+
+Y el detector que solo ve la forma que vos escribiste (#84): el contrato del
+tope buscaba `(feature #N)`; las cuatro lecciones reales traian `(#115, fecha)`,
+`feature #100 (fecha)` y `Patch #100:`. Los unitarios usan esos titulos, no ejemplos.
 
 ## Cuando la herramienta que medis es un modelo
 

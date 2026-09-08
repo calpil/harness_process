@@ -1266,6 +1266,7 @@ mod tests {
                 "78-el-instalador-respalda-sus-scripts-pero-no-el-ba.md:AC-8",
                 "80-el-autoaprendizaje-no-tiene-ciclo-de-vida-leccio.md:AC-7",
                 "82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de.md:AC-6",
+                "84-leccion-partir-parte-una-leccion-sobre-el-tope-a.md:AC-9",
             ],
             "el arreglo trae AC distintos de los medidos en el corpus real"
         );

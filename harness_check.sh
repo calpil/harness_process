@@ -397,6 +397,9 @@ lec_root="$REPO_ROOT/docs/lecciones"
 # (`|| true`: sin la regla, el grep devuelve 1 y bajo set -e eso mataba el check entero)
 lec_tope="$(grep -oE '"leccion_max_lineas"[[:space:]]*:[[:space:]]*-?[0-9]+' "$HARNESS_DIR/feature_list.json" 2>/dev/null | grep -oE -- '-?[0-9]+$' | head -n 1 || true)"
 [ -z "$lec_tope" ] && lec_tope=250
+# Feature #84: las lecciones sobre el tope se juntan y se avisan en UNA linea.
+lec_sobre=""
+lec_n=0
 if [ -d "$lec_root" ]; then
     while IFS= read -r lec_file; do
         [ -z "$lec_file" ] && continue
@@ -433,13 +436,17 @@ if [ -d "$lec_root" ]; then
             *)
                 lec_lineas="$(wc -l < "$lec_file" | tr -d ' ')"
                 if [ "$lec_tope" -gt 0 ] && [ "$lec_lineas" -gt "$lec_tope" ]; then
-                    echo "[i] docs/lecciones/$lec_base tiene $lec_lineas lineas y el tope es $lec_tope (rules.leccion_max_lineas): el cierre no la va a aceptar hasta partirla. El detalle por feature va a docs/lecciones/$lec_name/referencias/<tema>.md con un puntero de una linea (feature #80)." >&2
+                    lec_sobre="$lec_sobre $lec_name ($lec_lineas)"
+                    lec_n=$((lec_n + 1))
                 fi
                 ;;
         esac
     done <<EOF
 $(find "$lec_root" -maxdepth 2 -type f -name '*.md' | sort)
 EOF
+fi
+if [ "$lec_n" -gt 0 ]; then
+    echo "[i] $lec_n leccion(es) sobre el tope de $lec_tope lineas (rules.leccion_max_lineas):$lec_sobre. El cierre no las acepta hasta partirlas: sh harness_cli leccion partir <clase> (informa; --aplicar mueve el detalle por feature a docs/lecciones/<clase>/referencias/ con un puntero de una linea; feature #84). No bloquea." >&2
 fi
 
 # Integridad del perfil de usuario (docs/perfil-usuario.md, feature #19). El

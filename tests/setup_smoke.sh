@@ -1703,7 +1703,7 @@ HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/backlog_backup_check
     || { echo "[FALLO] backlog_backup_check: ver arriba"; exit 1; }
 echo "[Ok] Backlog #78: --reset no lo borra, toda corrida lo respalda (tambien con --force), y la siembra sobre un backlog ausente avisa."
 
-# Feature #80: harness_check.sh avisa [i] por cada leccion de clase sobre el tope
+# Feature #80/#84: harness_check.sh avisa [i] (una linea por todas) por las lecciones de clase sobre el tope
 # (rules.leccion_max_lineas), no por referencias/, y calla con la regla en 0.
 HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/leccion_tope_check.sh" \
     || { echo "[FALLO] leccion_tope_check: ver arriba"; exit 1; }

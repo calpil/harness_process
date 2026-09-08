@@ -8,6 +8,7 @@ use serde_json::json;
 use crate::exit::Exit;
 use crate::features::{active_indices, feature_at, load_features};
 use crate::lecciones::{self, Leccion};
+use crate::particion;
 use crate::paths::HarnessPaths;
 use crate::perfil::{self, Corte};
 use crate::pycompat::py_str;
@@ -203,6 +204,139 @@ pub fn usar(paths: &HarnessPaths, nombre: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `leccion partir <clase> [--aplicar] [--seccion <titulo>]...` (feature #84).
+/// Sin `--aplicar` INFORMA y no toca nada, la misma simetria que `curar` y
+/// `consolidar`. Lo que se mueve es lo mecanico (las secciones que cuentan
+/// UNA feature, AC-2, mas las `--seccion`); si con eso no alcanza, lo dice
+/// con el numero y sale 2 (OBS-2).
+pub fn partir(paths: &HarnessPaths, nombre: &str, aplicar: bool, pedidas: &[String]) -> anyhow::Result<()> {
+    let file = lecciones::file_for(paths, nombre);
+    let mut leccion = match Leccion::load(&file) {
+        Ok(l) => l,
+        Err(motivo) if file.exists() => {
+            return Err(Exit {
+                code: 2,
+                message: Some(format!("La leccion '{nombre}' esta ilegible: {motivo}.")),
+            }
+            .into());
+        }
+        Err(_) => return Err(no_existe(paths, nombre).into()),
+    };
+    let tope = usize::try_from(politica(paths).max_lineas).unwrap_or(0);
+    let secciones = particion::secciones(&leccion.body);
+    let mut elegidas = Vec::new();
+    for pedido in pedidas {
+        elegidas.push(particion::resolver(&secciones, pedido)?.clone());
+    }
+    let plan = particion::planificar(leccion.lineas(), tope, &leccion.body, nombre, &elegidas);
+    let tope_txt = if tope == 0 {
+        "sin tope (rules.leccion_max_lineas: 0)".to_string()
+    } else {
+        format!("tope {tope} (rules.leccion_max_lineas)")
+    };
+    // Con el tope apagado nada "queda bajo el tope": no hay tope que exigir.
+    let alcanza_txt = if tope == 0 { "sin tope que exigir" } else { "bajo el tope" };
+    println!("Leccion '{nombre}': {} lineas, {tope_txt}.", plan.lineas);
+    // Bajo el tope no hay nada que partir, salvo que el usuario nombre una seccion.
+    if tope > 0 && !plan.sobre_el_tope_hoy() && pedidas.is_empty() {
+        println!("  bajo el tope, nada que partir.");
+        return Ok(());
+    }
+    if plan.candidatas.is_empty() {
+        let msg = format!(
+            "Ninguna seccion cuenta una sola feature (titulos con #N o fecha, fuera de las canonicas); {}",
+            que_falta(&plan)
+        );
+        if aplicar {
+            return Err(Exit {
+                code: 2,
+                message: Some(msg),
+            }
+            .into());
+        }
+        print!("{msg}");
+        return Ok(());
+    }
+    println!("Secciones que cuentan UNA feature o sesion (se mueven a docs/lecciones/{nombre}/referencias/):");
+    for s in &plan.candidatas {
+        println!("  - {:>4} lineas  {}", s.lineas(), s.titulo);
+    }
+    if plan.falta() == 0 {
+        println!("Quedarian {} lineas: {alcanza_txt}.", plan.saldo());
+    } else {
+        print!("Quedarian {} lineas: {}", plan.saldo(), que_falta(&plan));
+    }
+    if !aplicar {
+        // El remedio lleva los --seccion que el usuario ya paso: corrido tal
+        // cual mueve exactamente lo que el informe lista.
+        let con_secciones: String = pedidas.iter().map(|p| format!(" --seccion \"{p}\"")).collect();
+        println!("(informe; para moverlas: sh harness_cli leccion partir {nombre} --aplicar{con_secciones})");
+        return Ok(());
+    }
+    let hoy = lecciones::hoy();
+    let res = particion::aplicar(paths, &mut leccion, &plan, &hoy, &ts())?;
+    println!(
+        "Respaldo: {}/ (sh harness_cli lecciones rollback lo deshace)",
+        relativo(paths, &res.respaldo)
+    );
+    for m in &res.movidas {
+        println!("Movida: {} -> {} ({} lineas)", m.titulo, relativo(paths, &m.destino), m.lineas);
+    }
+    log(
+        paths,
+        &format!(
+            "leccion partir {nombre}: {} seccion(es) a referencias/, quedan {} lineas",
+            res.movidas.len(),
+            res.lineas
+        ),
+    )?;
+    let plan_final = particion::planificar(res.lineas, tope, &leccion.body, nombre, &[]);
+    if plan_final.falta() == 0 {
+        println!("Leccion '{nombre}': {} lineas ({tope_txt}): {alcanza_txt}.", res.lineas);
+        return Ok(());
+    }
+    Err(Exit {
+        code: 2,
+        message: Some(format!(
+            "Leccion '{nombre}': {} lineas ({tope_txt}): {}",
+            res.lineas,
+            que_falta(&plan_final)
+        )),
+    }
+    .into())
+}
+
+/// "faltan N para el tope" y las secciones no canonicas mas grandes, para que
+/// el remedio que se sugiere (`--seccion`) venga con sus argumentos posibles.
+fn que_falta(plan: &particion::Plan) -> String {
+    let mut s = if plan.tope == 0 {
+        "sin tope no falta nada; secciones que podrian ir con --seccion \"<titulo>\" (las mas grandes, no canonicas):\n".to_string()
+    } else {
+        format!(
+            "faltan {} para el tope. Candidatas para --seccion \"<titulo>\" (las mas grandes, no canonicas):\n",
+            plan.falta()
+        )
+    };
+    if plan.sugeridas.is_empty() {
+        s.push_str("  (ninguna: lo que queda son las secciones de la clase; se parten a mano, guia paso 3)\n");
+    }
+    for x in plan.sugeridas.iter().take(8) {
+        s.push_str(&format!("  - {:>4} lineas  {}\n", x.lineas(), x.titulo));
+    }
+    s
+}
+
+/// Ruta relativa a la raiz del repo (o a la carpeta de docs), con `/`.
+fn relativo(paths: &HarnessPaths, p: &std::path::Path) -> String {
+    let bases = [Some(paths.repo_root.as_path()), paths.plans.parent(), Some(paths.root.as_path())];
+    for base in bases.into_iter().flatten() {
+        if let Ok(r) = p.strip_prefix(base) {
+            return r.to_string_lossy().replace('\\', "/");
+        }
+    }
+    p.to_string_lossy().replace('\\', "/")
+}
+
 /// Error de "no existe" con las clases mas parecidas: un typo tiene que sugerir
 /// la leccion buena, no empujar a crear una duplicada.
 pub fn no_existe(paths: &HarnessPaths, nombre: &str) -> Exit {
@@ -372,6 +506,12 @@ pub fn status(paths: &HarnessPaths, as_json: bool) -> anyhow::Result<()> {
             l.usos(),
             dias,
             l.estado()
+        );
+    }
+    // Feature #84: el remedio para las que superan el tope, con su comando.
+    if activas.iter().any(|l| l.sobre_el_tope(&pol).is_some()) {
+        println!(
+            "  Sobre el tope: sh harness_cli leccion partir <clase>   (informa; --aplicar mueve el detalle por feature a referencias/)"
         );
     }
     for l in &archivadas {
@@ -982,7 +1122,10 @@ fn aplicar_fusion(
         .into());
     }
 
-    let backup = curador::respaldar(paths, "consolidar", &motivo)?;
+    // El id lleva timestamp, como los de `curar` y `partir`: un id fijo ordena
+    // despues de cualquier timestamp y `lecciones rollback` sin `--id` elegia
+    // siempre este (hallazgo de la revision de la #84; bug de la #28).
+    let backup = curador::respaldar(paths, &format!("{}-consolidar", ts()), &motivo)?;
     let mut archivadas = Vec::new();
     let nombres: Vec<String> = a_archivar.iter().map(|l| l.nombre.clone()).collect();
     for n in &nombres {
