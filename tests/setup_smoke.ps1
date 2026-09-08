@@ -42,7 +42,32 @@ function Copy-Fixture {
     Copy-Item -LiteralPath (Join-Path $repoRoot "templates") -Destination $Target -Recurse
 }
 
+# Fixture con el binario REAL sembrado, para los bloques que EJECUTAN el CLI.
+# Paridad con copy_fixture() del smoke sh, que siempre siembra $PREBUILT_BIN.
+# Sin esto el bloque de PRDs anidados corria contra el harness.exe que deja el
+# cargo simulado (un archivo de TEXTO) y en Windows eso no arranca: el bloque
+# moria con "not a valid application for this OS platform" y por eso este smoke
+# nunca pudo pasar en Windows (en CI no corre: el workflow solo ejecuta
+# cmd_installer_check.ps1).
+function Copy-FixtureConBinario {
+    param([string]$Target)
+    Copy-Fixture -Target $Target
+    # La fixture no trae rust/Cargo.toml, asi que Build-HarnessBinary toma la
+    # rama "binario preexistente" y deja este intacto.
+    Copy-Item -LiteralPath $script:PrebuiltBin -Destination (Join-Path $Target "harness.exe") -Force
+}
+
 try {
+    # Rust-only: el binario es requisito del arnes, asi que tambien lo es del
+    # smoke. Se compila UNA vez, ANTES de tocar CARGO_TARGET_DIR mas abajo.
+    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $cargo) "cargo es requerido para el smoke (harness Rust-only): no convierte su ausencia en un verde."
+    $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot "rust/target" }
+    & $cargo.Source build --release --quiet --manifest-path (Join-Path $repoRoot "rust/Cargo.toml")
+    Assert-True ($LASTEXITCODE -eq 0) "cargo build --release fallo: sin binario real no se puede ejercitar el CLI."
+    $script:PrebuiltBin = Join-Path $targetRoot "release/harness.exe"
+    Assert-True (Test-Path -LiteralPath $script:PrebuiltBin -PathType Leaf) "cargo no dejo harness.exe en $($script:PrebuiltBin)"
+
     $env:DB_HOST = "postgres.example"
     $env:DB_USER = "harness"
     $env:DB_PASSWORD = "secret"
@@ -262,21 +287,70 @@ exit 0
     Assert-True ($prdGuideText -match 'PRD-cobranza-mora\.md') "The PRD guide does not show the nested folder layout."
 
     # Feature #13 / AC-1 + AC-4 + AC-7: el arbol de PRDs anidados de punta a
-    # punta con el binario ya sembrado (paridad con el bloque PRD_E2E del sh).
-    & (Join-Path $fixture "harness_cli.ps1") prd add --name cobranza | Out-Null
-    & (Join-Path $fixture "harness_cli.ps1") prd add --name mora --parent cobranza | Out-Null
-    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/cobranza/PRD-cobranza.md")) "prd add did not create the child PRD folder."
-    Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md")) "prd add did not nest the grandchild PRD."
-    $childText = Get-Content -LiteralPath (Join-Path $fixture "docs/prd/cobranza/mora/PRD-cobranza-mora.md") -Raw
-    Assert-True ($childText -match '(?m)^Padre: cobranza') "The nested PRD does not declare its parent."
-    Assert-True ($childText -match '## 10\. Hitos -> features') "The nested PRD is missing the milestones table."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match '\| cobranza \| \[cobranza/PRD-cobranza\.md\]') "The master PRD does not link its child."
-    $treeOut = (& (Join-Path $fixture "harness_cli.ps1") prd tree | Out-String)
-    Assert-True ($treeOut -match 'PRD-cobranza-mora') "prd tree did not draw the nested PRD."
-    # Feature #13 / AC-5 + AC-6: la cadena PRD hoja -> feature -> spec.
-    & (Join-Path $fixture "harness_cli.ps1") add --name avisar_mora --service cobranza --acceptance "llega el aviso" --prd mora | Out-Null
-    & (Join-Path $fixture "harness_cli.ps1") start --feature 1 | Out-Null
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/spec-feature-1-avisar-mora.md") -Raw) -match '(?m)^PRD: docs/prd/cobranza/mora/PRD-cobranza-mora\.md') "The generated spec does not cite its source PRD."
+    # punta, en una fixture PROPIA con el binario real (paridad con el bloque
+    # PRD_E2E del sh, que tambien usa una fixture aparte). No se puede reusar
+    # $fixture: ahi el cargo simulado dejo un harness.exe de texto.
+    $prdE2E = Join-Path $tempRoot "prd-e2e"
+    Copy-FixtureConBinario -Target $prdE2E
+    & (Join-Path $prdE2E "setup_harness.ps1") -Root -NoGraphify -NoGraphifySkills -NoAntigravity
+
+    # El binario busca credenciales de Atlassian en el entorno, en .harness.env y
+    # en el HOME: un test JAMAS puede tomar las reales. Y el hub por defecto es
+    # ~/.harness-hub, el de verdad. Las dos cosas se apuntan a la fixture.
+    $prdEnvPrevio = @{
+        HARNESS_HUB = $env:HARNESS_HUB
+        HARNESS_REPO_ROOT = $env:HARNESS_REPO_ROOT
+        USERPROFILE = $env:USERPROFILE
+        HOME = $env:HOME
+    }
+    $env:HARNESS_HUB = Join-Path $prdE2E ".test-hub"
+    $env:HARNESS_REPO_ROOT = $prdE2E
+    $env:USERPROFILE = Join-Path $tempRoot "home"
+    $env:HOME = $env:USERPROFILE
+    New-Item -ItemType Directory -Path $env:USERPROFILE -Force | Out-Null
+    try {
+        & (Join-Path $prdE2E "harness_cli.ps1") prd add --name cobranza | Out-Null
+        & (Join-Path $prdE2E "harness_cli.ps1") prd add --name mora --parent cobranza | Out-Null
+        Assert-True (Test-Path -LiteralPath (Join-Path $prdE2E "docs/prd/cobranza/PRD-cobranza.md")) "prd add did not create the child PRD folder."
+        Assert-True (Test-Path -LiteralPath (Join-Path $prdE2E "docs/prd/cobranza/mora/PRD-cobranza-mora.md")) "prd add did not nest the grandchild PRD."
+        $childText = Get-Content -LiteralPath (Join-Path $prdE2E "docs/prd/cobranza/mora/PRD-cobranza-mora.md") -Raw
+        Assert-True ($childText -match '(?m)^Padre: cobranza') "The nested PRD does not declare its parent."
+        Assert-True ($childText -match '## 10\. Hitos -> features') "The nested PRD is missing the milestones table."
+        Assert-True ((Get-Content -LiteralPath (Join-Path $prdE2E "docs/prd/PRD-master.md") -Raw) -match '\| cobranza \| \[cobranza/PRD-cobranza\.md\]') "The master PRD does not link its child."
+        $treeOut = (& (Join-Path $prdE2E "harness_cli.ps1") prd tree | Out-String)
+        Assert-True ($treeOut -match 'PRD-cobranza-mora') "prd tree did not draw the nested PRD."
+        # Feature #13 / AC-5 + AC-6: la cadena PRD hoja -> feature -> spec.
+        & (Join-Path $prdE2E "harness_cli.ps1") add --name avisar_mora --service cobranza --acceptance "llega el aviso" --prd mora | Out-Null
+        & (Join-Path $prdE2E "harness_cli.ps1") start --feature 1 | Out-Null
+        Assert-True ((Get-Content -LiteralPath (Join-Path $prdE2E "docs/spec-feature-1-avisar-mora.md") -Raw) -match '(?m)^PRD: docs/prd/cobranza/mora/PRD-cobranza-mora\.md') "The generated spec does not cite its source PRD."
+
+        # Los roles instalados por el .ps1 tienen que ser IGUALES a su plantilla
+        # modulo __HREL__, que es lo que exige el sub-gate del Articulo 6 en
+        # harness_check.sh. Windows PowerShell 5.1 lee con la codepage ANSI si no
+        # se le dice otra cosa, y el instalador reescribia los roles con los
+        # acentos rotos: una instalacion limpia dejaba el gate de cierre en rojo
+        # con cuatro "Divergencia roles/...".
+        foreach ($role in @("leader", "implementer", "reviewer", "README")) {
+            $instalado = Get-Content -LiteralPath (Join-Path $prdE2E "roles/$role.md") -Raw -Encoding UTF8
+            $plantilla = (Get-Content -LiteralPath (Join-Path $prdE2E "templates/roles/$role.md") -Raw -Encoding UTF8).Replace("__HREL__", "")
+            Assert-True ($instalado -eq $plantilla) "roles/$role.md no coincide con su plantilla modulo __HREL__: el gate de espejos (Articulo 6) quedaria en rojo tras instalar."
+        }
+        # El patron se arma POR CODIGO de caracter a proposito: este archivo no
+        # tiene BOM, Windows PowerShell 5.1 lo lee como ANSI, y escribir el
+        # mojibake literal aca rompe el parseo del propio test. Es el mismo bug
+        # que se esta verificando, un piso mas abajo.
+        $marcaMojibake = [string][char]0x00C3 + "|" + [string][char]0x00E2
+        foreach ($superficie in @("CLAUDE.md", "AGENTS.md", "GEMINI.md", "LLM.md")) {
+            $texto = Get-Content -LiteralPath (Join-Path $prdE2E $superficie) -Raw -Encoding UTF8
+            Assert-True (-not ($texto -match $marcaMojibake)) "$superficie salio con los acentos rotos (mojibake): el instalador escribio o leyo en la codepage equivocada."
+        }
+    }
+    finally {
+        $env:HARNESS_HUB = $prdEnvPrevio.HARNESS_HUB
+        $env:HARNESS_REPO_ROOT = $prdEnvPrevio.HARNESS_REPO_ROOT
+        $env:USERPROFILE = $prdEnvPrevio.USERPROFILE
+        $env:HOME = $prdEnvPrevio.HOME
+    }
 
     # Feature #11 / AC-4: la superficie que genera el ps1 referencia la guia de
     # uso eficiente de Kimi CLI (paridad con el grep del smoke sh).
@@ -294,18 +368,32 @@ exit 0
     # Feature #5 / AC-3: el PRD del proyecto es del USUARIO; el reinstall no lo pisa.
     $prdSentinel = "SENTINEL-PRD-NO-PISA-PS"
     Add-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Value "<!-- $prdSentinel -->"
-    & (Join-Path $fixture "setup_harness.ps1") `
-        -Root -NoGraphify -NoGraphifySkills -NoAntigravity -CargoTargetDir $cargoTarget
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/conventions.md") -Raw) -match $docsSentinel) "Reinstall overwrote a harness doc already present in the root docs/."
-    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match $prdSentinel) "Reinstall overwrote the project's PRD."
+    # El cargo FALSO tiene que estar en el PATH en toda corrida sobre $fixture:
+    # la fixture tiene un rust/Cargo.toml de juguete (un [package] sin targets) y
+    # el cargo de verdad lo rechaza con "no targets specified in the manifest",
+    # que el instalador reporta como ERROR y aborta el smoke. Estas dos corridas
+    # se habian quedado fuera de la ventana; no se notaba porque el smoke moria
+    # antes, en el bloque de PRDs.
+    $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
+    $env:CARGO_TARGET_DIR = $cargoTarget
+    try {
+        & (Join-Path $fixture "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity -CargoTargetDir $cargoTarget
+        Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/conventions.md") -Raw) -match $docsSentinel) "Reinstall overwrote a harness doc already present in the root docs/."
+        Assert-True ((Get-Content -LiteralPath (Join-Path $fixture "docs/prd/PRD-master.md") -Raw) -match $prdSentinel) "Reinstall overwrote the project's PRD."
 
-    # Feature #4 / AC-6: los artefactos de feature comparten carpeta con los docs
-    # generados y el reset NO puede llevarselos por delante.
-    Set-TextUtf8NoBom -Path (Join-Path $fixture "docs/spec-feature-1-demo.md") -Value "# spec"
-    Set-TextUtf8NoBom -Path (Join-Path $fixture "docs/plan-feature-1-demo.md") -Value "# plan"
+        # Feature #4 / AC-6: los artefactos de feature comparten carpeta con los docs
+        # generados y el reset NO puede llevarselos por delante.
+        Set-TextUtf8NoBom -Path (Join-Path $fixture "docs/spec-feature-1-demo.md") -Value "# spec"
+        Set-TextUtf8NoBom -Path (Join-Path $fixture "docs/plan-feature-1-demo.md") -Value "# plan"
 
-    & (Join-Path $fixture "setup_harness.ps1") `
-        -Root -NoGraphify -NoGraphifySkills -NoAntigravity -Reset
+        & (Join-Path $fixture "setup_harness.ps1") `
+            -Root -NoGraphify -NoGraphifySkills -NoAntigravity -Reset
+    }
+    finally {
+        $env:PATH = $oldPath
+        $env:CARGO_TARGET_DIR = $oldCargoTarget
+    }
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixture ".harness_layout"))) "Reset did not remove the layout marker."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "docs/constitution.md")) "Reset removed the user's constitution."
     foreach ($artifact in @("spec-feature-1-demo.md", "plan-feature-1-demo.md")) {
@@ -412,7 +500,12 @@ exit 0
 
     function Get-NormalizedText {
         param([string]$Path)
-        return ((Get-Content -LiteralPath $Path -Raw) -replace "`r`n", "`n").TrimEnd()
+        # ReadAllText y no Get-Content: el otro lado de la comparacion
+        # (Get-AgentBody) lee con ReadAllLines, que detecta UTF-8, mientras que
+        # Get-Content en 5.1 decodifica con la codepage ANSI. Con acentos de
+        # verdad en los roles, las dos mitades daban strings distintos y el
+        # espejo parecia desincronizado sin estarlo.
+        return ([IO.File]::ReadAllText($Path) -replace "`r`n", "`n").TrimEnd()
     }
 
     $checkRobust = Join-Path $tempRoot "check-robust-ps"
@@ -476,9 +569,16 @@ exit 0
         $sourceParent = Join-Path $tempRoot "source-sim"
         $sourceClone = Join-Path $sourceParent "harness_process"
         New-Item -ItemType Directory -Path $sourceClone -Force | Out-Null
-        foreach ($f in @("harness_check.sh", "commit_guard.sh", "CHECKPOINTS.md")) {
+        # harness_cli y el binario REAL van si o si (paridad con el fixture del
+        # smoke sh): sin el shim, `harness_cli rutas --violaciones` falla con un
+        # error que el check no sabe clasificar y lo reporta como
+        # "[!] Rutas PROTEGIDAS modificadas y sin commitear" -- acusando de tocar
+        # documentos a quien solo tiene la instalacion incompleta.
+        foreach ($f in @("harness_check.sh", "harness_status.sh", "init.sh", "commit_guard.sh", "harness_cli", "setup_harness.sh", "CHECKPOINTS.md")) {
             Copy-Item -LiteralPath (Join-Path $repoRoot $f) -Destination (Join-Path $sourceClone $f)
         }
+        Copy-Item -LiteralPath $script:PrebuiltBin -Destination (Join-Path $sourceClone "harness.exe")
+        Copy-Item -LiteralPath $script:PrebuiltBin -Destination (Join-Path $sourceClone "harness")
         Copy-Item -LiteralPath (Join-Path $repoRoot "templates") -Destination $sourceClone -Recurse
         Copy-Item -LiteralPath (Join-Path $repoRoot "roles") -Destination $sourceClone -Recurse
         New-Item -ItemType Directory -Path (Join-Path $sourceClone "rust") -Force | Out-Null
@@ -489,8 +589,8 @@ exit 0
         Copy-Item -LiteralPath (Join-Path $repoRoot "docs/constitution.md") -Destination (Join-Path $sourceClone "docs/constitution.md")
         Copy-Item -Path (Join-Path $repoRoot ".claude/agents/*.md") -Destination (Join-Path $sourceClone ".claude/agents")
         Copy-Item -LiteralPath (Join-Path $repoRoot "templates/progress/current.md") -Destination (Join-Path $sourceClone "progress/current.md")
-        # Sin feature_list.json: el check omite los subcomandos del binario (el
-        # fixture ps1 solo tiene el harness.exe fake del cargo simulado).
+        Copy-Item -LiteralPath (Join-Path $repoRoot "templates/progress/history.md") -Destination (Join-Path $sourceClone "progress/history.md")
+        Copy-Item -LiteralPath (Join-Path $repoRoot "templates/feature_list.json") -Destination (Join-Path $sourceClone "feature_list.json")
         Set-Content -LiteralPath (Join-Path $sourceClone ".harness_layout") -Value "subdir" -Encoding Ascii
 
         $oldRepoRootEnv = $env:HARNESS_REPO_ROOT
@@ -498,12 +598,20 @@ exit 0
         $env:HARNESS_REPO_ROOT = $null
         $env:CLAUDE_PROJECT_DIR = $null
         Push-Location $sourceClone
+        # Windows PowerShell 5.1 convierte cada linea de stderr de un proceso
+        # nativo en un ErrorRecord: con $ErrorActionPreference = "Stop", el
+        # PRIMER [!] del check aborta el smoke en vez de dejar que se inspeccione
+        # la salida, que es justo lo que este bloque afirma. En pwsh no pasa, y
+        # por eso no se habia visto.
+        $eapPrevio = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         try {
             # $null en el pipe cierra stdin (commit_guard.sh hace cat de stdin).
             $checkOutput = $null | & $bashCmd.Source "harness_check.sh" 2>&1 | Out-String
             $checkExit = $LASTEXITCODE
         }
         finally {
+            $ErrorActionPreference = $eapPrevio
             Pop-Location
             $env:HARNESS_REPO_ROOT = $oldRepoRootEnv
             $env:CLAUDE_PROJECT_DIR = $oldClaudeProjectDir
@@ -539,9 +647,11 @@ exit 0
             New-Item -ItemType Directory -Path $caseHarness -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $caseHarness "progress") -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $caseHarness "rust") -Force | Out-Null
-            foreach ($f in @("harness_check.sh", "harness_status.sh", "init.sh", "commit_guard.sh", "CHECKPOINTS.md")) {
+            foreach ($f in @("harness_check.sh", "harness_status.sh", "init.sh", "commit_guard.sh", "harness_cli", "CHECKPOINTS.md")) {
                 Copy-Item -LiteralPath (Join-Path $repoRoot $f) -Destination (Join-Path $caseHarness $f)
             }
+            Copy-Item -LiteralPath $script:PrebuiltBin -Destination (Join-Path $caseHarness "harness.exe")
+            Copy-Item -LiteralPath $script:PrebuiltBin -Destination (Join-Path $caseHarness "harness")
             Copy-Item -LiteralPath (Join-Path $repoRoot "templates") -Destination $caseHarness -Recurse
             Copy-Item -LiteralPath (Join-Path $repoRoot "roles") -Destination $caseHarness -Recurse
             Copy-Item -LiteralPath (Join-Path $repoRoot "rust/Cargo.toml") -Destination (Join-Path $caseHarness "rust/Cargo.toml")
@@ -563,10 +673,15 @@ exit 0
             $env:HARNESS_REPO_ROOT = $null
             $env:CLAUDE_PROJECT_DIR = $null
             Push-Location $HarnessDir
+            # Mismo motivo que arriba: el check escribe sus [!] a stderr y en 5.1
+            # eso es un error terminante con EAP = Stop.
+            $eapPrevio = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
             try {
                 return ($null | & $bashCmd.Source "harness_check.sh" 2>&1 | Out-String)
             }
             finally {
+                $ErrorActionPreference = $eapPrevio
                 Pop-Location
                 $env:HARNESS_REPO_ROOT = $oldRepoRootEnv
                 $env:CLAUDE_PROJECT_DIR = $oldClaudeProjectDir

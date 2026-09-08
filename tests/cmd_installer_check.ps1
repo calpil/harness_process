@@ -46,9 +46,24 @@ function Invoke-CmdSetup {
         [string[]]$Arguments
     )
     $launcher = Join-Path $Directory "setup_harness.cmd"
-    $output = & $env:ComSpec /d /c $launcher @Arguments 2>&1
+    # Windows PowerShell 5.1 convierte CADA linea de stderr de un proceso nativo
+    # en un ErrorRecord: con $ErrorActionPreference = "Stop" el primer mensaje de
+    # error del delegado ABORTA el smoke antes de comprobar el exit code, y el
+    # unico caso que escribe a stderr es justamente el de "falta el .ps1". Por
+    # eso este check pasaba en CI (que corre con pwsh, donde eso no ocurre) y
+    # moria en la maquina de cualquiera que lo corriera con el PowerShell del
+    # sistema. Se baja la preferencia SOLO alrededor de la invocacion.
+    $previo = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $env:ComSpec /d /c $launcher @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previo
+    }
     return [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
         Output = Text-Of -Value $output
     }
 }
@@ -62,7 +77,9 @@ param(
     [switch]$DryRun,
     [switch]$NoSubagents,
     [switch]$Force,
-    [switch]$Salir3
+    [switch]$Salir3,
+    [string]$Ruta,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Sobrantes
 )
 
 $received = @()
@@ -71,6 +88,8 @@ if ($NoSubagents) { $received += "-NoSubagents" }
 if ($Force) { $received += "-Force" }
 if ($Salir3) { $received += "-Salir3" }
 "ARGS:" + ($received -join " ")
+"RUTA:[" + $Ruta + "]"
+"SOBRANTES:[" + ($Sobrantes -join "|") + "]"
 if ($Salir3) { exit 3 }
 '@ | Set-Content -LiteralPath (Join-Path $path "setup_harness.ps1") -Encoding Ascii
     return $path
@@ -99,6 +118,39 @@ try {
         # AC-4: el error del delegado debe llegar intacto al caller CMD.
         $exitCode = Invoke-CmdSetup -Directory $sandbox -Arguments @("-Salir3")
         Assert-True ($exitCode.ExitCode -eq 3) "CMD devolvio $($exitCode.ExitCode), esperaba el exit code 3 del delegado."
+
+        # Un valor con ESPACIOS tiene que llegar entero. Con `%~1` el wrapper
+        # perdia las comillas y `C:\Program Files\...` llegaba partido en varios
+        # parametros: no fallaba, ligaba el pedazo equivocado al parametro
+        # siguiente, que es peor.
+        $conEspacios = Invoke-CmdSetup -Directory $sandbox -Arguments @("-Ruta", "C:\Program Files\mi log.txt")
+        Assert-True ($conEspacios.ExitCode -eq 0) "El sandbox con ruta con espacios devolvio $($conEspacios.ExitCode): $($conEspacios.Output)"
+        Assert-True ($conEspacios.Output -match [regex]::Escape("RUTA:[C:\Program Files\mi log.txt]")) `
+            "Una ruta con espacios no llego entera al delegado: $($conEspacios.Output)"
+        Assert-True ($conEspacios.Output -match [regex]::Escape("SOBRANTES:[]")) `
+            "Una ruta con espacios dejo argumentos sueltos: $($conEspacios.Output)"
+
+        # Y un valor con `&`, que se prueba desde un .cmd de verdad: PowerShell no
+        # cita ese caracter al invocar un nativo, asi que llamarlo desde aca no
+        # ejercitaria el wrapper. El `&` se partia dos veces (al acumular y al
+        # lanzar) porque una comilla que aparece POR expansion de % no protege.
+        $caller = Join-Path $sandbox "caller.cmd"
+        [IO.File]::WriteAllLines($caller, @(
+            '@echo off',
+            'call "%~dp0setup_harness.cmd" -Ruta "C:\R&D dir\cfg.env"'
+        ))
+        $previo = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $conAmpersand = Text-Of -Value (& $env:ComSpec /d /c $caller 2>&1)
+            $rcAmpersand = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previo
+        }
+        Assert-True ($rcAmpersand -eq 0) "El caller con `&` en la ruta devolvio $rcAmpersand : $conAmpersand"
+        Assert-True ($conAmpersand -match [regex]::Escape("RUTA:[C:\R&D dir\cfg.env]")) `
+            "Una ruta con '&' no llego entera al delegado: $conAmpersand"
     }
     finally {
         if (Test-Path -LiteralPath $sandbox) {

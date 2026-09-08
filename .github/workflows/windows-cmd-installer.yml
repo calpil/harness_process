@@ -1,17 +1,31 @@
-name: Windows CMD installer
+name: Windows installer
 
+# Los dos shells, siempre. `pwsh` (PowerShell 7) esconde los bugs que solo se
+# ven en `powershell` (Windows PowerShell 5.1), que es el que el .cmd usa cuando
+# la maquina no tiene pwsh instalado -- el caso normal en Windows. Tres bugs
+# vivieron ahi sin que nadie los viera: los roles escritos con la codepage ANSI
+# (que dejaba el gate de espejos en rojo tras instalar), el stderr nativo que en
+# 5.1 es error terminante, y el bash de WSL elegido como si fuera Git Bash.
 on:
   pull_request:
     paths:
       - setup_harness.cmd
       - setup_harness.ps1
+      - templates/**
+      - roles/**
+      - rust/**
       - tests/cmd_installer_check.ps1
+      - tests/setup_smoke.ps1
       - .github/workflows/windows-cmd-installer.yml
   push:
     paths:
       - setup_harness.cmd
       - setup_harness.ps1
+      - templates/**
+      - roles/**
+      - rust/**
       - tests/cmd_installer_check.ps1
+      - tests/setup_smoke.ps1
       - .github/workflows/windows-cmd-installer.yml
   workflow_dispatch:
 
@@ -20,11 +34,36 @@ permissions:
 
 jobs:
   cmd-installer-runtime:
-    name: CMD launcher runtime
+    name: CMD launcher runtime (${{ matrix.shell }})
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, powershell]
     steps:
       - uses: actions/checkout@v4
       - name: Exercise setup_harness.cmd with cmd.exe
-        shell: pwsh
+        shell: ${{ matrix.shell }}
         run: .\tests\cmd_installer_check.ps1
+
+  installer-smoke:
+    name: PowerShell installer smoke (${{ matrix.shell }})
+    runs-on: windows-latest
+    # El smoke instala de punta a punta y compila el binario Rust: es lento, y
+    # es lo unico que prueba que el instalador de Windows FUNCIONA (parity_check
+    # solo compara lo que los dos DECLARAN).
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, powershell]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Run the PowerShell installer smoke
+        shell: ${{ matrix.shell }}
+        run: .\tests\setup_smoke.ps1
