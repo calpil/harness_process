@@ -42,11 +42,34 @@ set "HARNESS_ARGS="
 :traducir
 if "%~1"=="" goto lanzar
 set "HARNESS_ARG=%~1"
-if not "!HARNESS_ARG:~0,2!"=="--" goto sumar_arg
+if not "!HARNESS_ARG:~0,2!"=="--" goto sumar_crudo
 call :a_pascal "!HARNESS_ARG:~2!"
-set "HARNESS_ARG=-!HARNESS_PASCAL!"
-:sumar_arg
-set "HARNESS_ARGS=!HARNESS_ARGS! !HARNESS_ARG!"
+set "HARNESS_ARGS=!HARNESS_ARGS! -!HARNESS_PASCAL!"
+shift
+goto traducir
+
+:sumar_crudo
+rem El argumento se re-arma con comillas escritas en ESTE script y se pega con
+rem expansion RETARDADA. Las dos cosas hacen falta:
+rem   - con %~1 se perdian las comillas de quien llamo, y
+rem     `-LogFile "C:\Program Files\mi log.txt"` llegaba al .ps1 partido en tres
+rem     parametros, en silencio y ligando el pedazo equivocado a -Config;
+rem   - con %1 llegan, pero una comilla que aparece POR expansion no protege los
+rem     caracteres especiales, asi que una ruta con `&` seguia partiendo la
+rem     linea de comandos. !VAR! se expande DESPUES del parseo de `&`, `(` y `)`,
+rem     que es justo lo que hace falta.
+set "HARNESS_ARG=%~1"
+if not "!HARNESS_ARG: =!"=="!HARNESS_ARG!" goto sumar_citado
+if not "!HARNESS_ARG:&=!"=="!HARNESS_ARG!" goto sumar_citado
+set HARNESS_ARGS=!HARNESS_ARGS! !HARNESS_ARG!
+shift
+goto traducir
+
+:sumar_citado
+rem Se citan SOLO los valores: un nombre de parametro citado (`"-LogFile"`) deja
+rem de ser parametro para PowerShell y pasa a ser argumento posicional. Ningun
+rem nombre de parametro lleva espacios ni `&`, asi que la condicion alcanza.
+set HARNESS_ARGS=!HARNESS_ARGS! "!HARNESS_ARG!"
 shift
 goto traducir
 
@@ -54,7 +77,10 @@ goto traducir
 rem -ExecutionPolicy Bypass: el .ps1 recien clonado no esta firmado y la politica
 rem por defecto de Windows lo rechaza. Es del alcance de ESTE proceso: no toca la
 rem configuracion de la maquina, que es del usuario.
-"%HARNESS_PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%HARNESS_PS1%"%HARNESS_ARGS%
+rem !HARNESS_ARGS! y no %HARNESS_ARGS%: la expansion con % ocurre ANTES del
+rem parseo de caracteres especiales, asi que un `&` dentro de una ruta partia
+rem esta misma linea aunque el argumento ya viniera entre comillas.
+"%HARNESS_PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%HARNESS_PS1%"!HARNESS_ARGS!
 set "HARNESS_RC=%ERRORLEVEL%"
 endlocal & exit /b %HARNESS_RC%
 
