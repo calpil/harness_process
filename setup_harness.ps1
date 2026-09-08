@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
 Installs Harness Process from Windows PowerShell while keeping setup_harness.sh
@@ -214,7 +214,7 @@ function Import-HarnessEnvFile {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return
     }
-    foreach ($rawLine in Get-Content -LiteralPath $Path) {
+    foreach ($rawLine in Get-Content -LiteralPath $Path -Encoding UTF8) {
         $line = $rawLine.Trim()
         if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
             continue
@@ -298,6 +298,29 @@ function Initialize-HarnessEnvTemplate {
     Write-HarnessLog INFO "Local config seeded: $target (put the Atlassian email and token there; already gitignored)."
 }
 
+# `ConvertFrom-Json` devuelve PSCustomObject anidado y Windows PowerShell 5.1 no
+# tiene `-AsHashtable` para pedir otra cosa. Esto lo convierte a hashtables
+# indexables (`$data["mcpServers"]["atlassian"] = ...`) sin depender de la
+# version, que es la unica razon por la que existe.
+function ConvertTo-HarnessHashtable {
+    param($Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $out = @{}
+        foreach ($key in @($Value.Keys)) { $out[$key] = ConvertTo-HarnessHashtable $Value[$key] }
+        return $out
+    }
+    if ($Value -is [object[]]) {
+        return @(foreach ($item in $Value) { ConvertTo-HarnessHashtable $item })
+    }
+    if ($Value -is [PSCustomObject]) {
+        $out = @{}
+        foreach ($prop in $Value.PSObject.Properties) { $out[$prop.Name] = ConvertTo-HarnessHashtable $prop.Value }
+        return $out
+    }
+    return $Value
+}
+
 function Write-McpAtlassian {
     # Feature #52: MCP de Atlassian por PROYECTO en los backends que lo admiten
     # (Claude, Kimi, Grok). Codex no admite alcance de proyecto y su config
@@ -314,23 +337,33 @@ function Write-McpAtlassian {
 
     foreach ($rel in @(".mcp.json", ".kimi-code/mcp.json")) {
         $target = Join-Path $script:SurfaceDir $rel
-        if ((Test-Path -LiteralPath $target -PathType Leaf) -and ((Get-Content -LiteralPath $target -Raw) -match '"atlassian"')) {
+        if ((Test-Path -LiteralPath $target -PathType Leaf) -and ((Get-Content -LiteralPath $target -Raw -Encoding UTF8) -match '"atlassian"')) {
             Write-HarnessLog INFO "MCP Atlassian: $rel ya lo declara (respetado)."
             continue
         }
         $dir = Split-Path -Parent $target
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        $data = if (Test-Path -LiteralPath $target -PathType Leaf) {
-            try { Get-Content -LiteralPath $target -Raw | ConvertFrom-Json -AsHashtable } catch { @{} }
-        } else { @{} }
-        if (-not $data.ContainsKey("mcpServers")) { $data["mcpServers"] = @{} }
+        # `-AsHashtable` es de PowerShell 7: en Windows PowerShell 5.1 tiraba y
+        # el `catch` devolvia @{}, o sea que un .mcp.json con OTROS servidores se
+        # reescribia con el de Atlassian SOLO. La conversion a mano se comporta
+        # igual en las dos versiones y respeta lo que ya estaba.
+        $data = @{}
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            try {
+                $data = ConvertTo-HarnessHashtable (Get-Content -LiteralPath $target -Raw -Encoding UTF8 | ConvertFrom-Json)
+            } catch { $data = @{} }
+        }
+        if ($data -isnot [System.Collections.IDictionary]) { $data = @{} }
+        if ((-not $data.ContainsKey("mcpServers")) -or ($data["mcpServers"] -isnot [System.Collections.IDictionary])) {
+            $data["mcpServers"] = @{}
+        }
         $data["mcpServers"]["atlassian"] = @{ url = $url }
         Write-HarnessText -Path $target -Content (($data | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
         Write-HarnessLog OK "MCP Atlassian: $rel."
     }
 
     $grok = Join-Path $script:SurfaceDir ".grok/config.toml"
-    $yaEsta = (Test-Path -LiteralPath $grok -PathType Leaf) -and ((Get-Content -LiteralPath $grok -Raw) -match "mcp_servers.atlassian")
+    $yaEsta = (Test-Path -LiteralPath $grok -PathType Leaf) -and ((Get-Content -LiteralPath $grok -Raw -Encoding UTF8) -match "mcp_servers.atlassian")
     if ($yaEsta) {
         Write-HarnessLog INFO "MCP Atlassian: .grok/config.toml ya lo declara (respetado)."
     }
@@ -346,7 +379,7 @@ function Write-McpAtlassian {
 command = "npx"
 args = ["-y", "mcp-remote@latest", "$url"]
 "@
-        Add-Content -LiteralPath $grok -Value $bloque
+        Add-HarnessText -Path $grok -Content $bloque
         Write-HarnessLog OK "MCP Atlassian: .grok/config.toml (via mcp-remote)."
     }
 
@@ -570,6 +603,19 @@ function Write-HarnessText {
     $script:Counters.created++
 }
 
+# Append en UTF-8 SIN BOM. `Add-Content` en Windows PowerShell 5.1 escribe en la
+# codepage ANSI, y `-Encoding UTF8` le mete BOM al crear el archivo: las dos
+# cosas ensucian un .gitignore. Como la lectura ya es UTF-8, escribir distinto
+# haria que un nombre con acento no coincida nunca y el bloque se duplique en
+# cada reinstalacion.
+function Add-HarnessText {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+    [IO.File]::AppendAllText($Path, $Content + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Migrate-HarnessRules {
     # Feature #64: las reglas nuevas tienen que llegar a un proyecto YA
     # instalado. Hasta la #64 el instalador sembraba feature_list.json
@@ -587,8 +633,8 @@ function Migrate-HarnessRules {
     if (-not (Test-Path -LiteralPath $molde)) { return }
 
     try {
-        $data = Get-Content -LiteralPath $Target -Raw | ConvertFrom-Json
-        $ref = Get-Content -LiteralPath $molde -Raw | ConvertFrom-Json
+        $data = Get-Content -LiteralPath $Target -Raw -Encoding UTF8 | ConvertFrom-Json
+        $ref = Get-Content -LiteralPath $molde -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
         # Un feature_list.json corrupto no se toca: no es trabajo del instalador.
@@ -650,7 +696,7 @@ function Ensure-HarnessGitIgnore {
     $gitIgnore = Join-Path $script:RepoRoot ".gitignore"
     $existing = @()
     if (Test-Path -LiteralPath $gitIgnore) {
-        $existing = Get-Content -LiteralPath $gitIgnore
+        $existing = Get-Content -LiteralPath $gitIgnore -Encoding UTF8
     }
     # Feature #15 / Articulo 4: `.harness.env` puede llevar el email y el API
     # token de Atlassian; se ignora SIEMPRE y aparte, para que tambien lo gane
@@ -662,7 +708,7 @@ function Ensure-HarnessGitIgnore {
             "# Local harness config (may hold credentials): never commit",
             ".harness.env"
         ) -join [Environment]::NewLine
-        Add-Content -LiteralPath $gitIgnore -Value $credBlock
+        Add-HarnessText -Path $gitIgnore -Content $credBlock
         Write-HarnessLog INFO ".gitignore updated: .harness.env (credentials) must never be committed."
     }
 
@@ -677,7 +723,7 @@ function Ensure-HarnessGitIgnore {
             "# Finder junk (macOS): never commit",
             ".DS_Store"
         ) -join [Environment]::NewLine
-        Add-Content -LiteralPath $gitIgnore -Value $dsStoreBlock
+        Add-HarnessText -Path $gitIgnore -Content $dsStoreBlock
         Write-HarnessLog INFO ".gitignore updated: .DS_Store (macOS) must never be committed."
     }
     if ($existing -contains $ignoreName) {
@@ -697,7 +743,7 @@ function Ensure-HarnessGitIgnore {
         "# Local Harness backups",
         "bkp/"
     ) -join [Environment]::NewLine
-    Add-Content -LiteralPath $gitIgnore -Value $block
+    Add-HarnessText -Path $gitIgnore -Content $block
     $script:Counters.created++
 }
 
@@ -1143,7 +1189,7 @@ function Inject-PerfilBlock {
         return
     }
     if ([string]::IsNullOrWhiteSpace($bloque)) { return }
-    $lineas = @(Get-Content -LiteralPath $Target)
+    $lineas = @(Get-Content -LiteralPath $Target -Encoding UTF8)
     $limpias = New-Object System.Collections.Generic.List[string]
     $skip = $false
     foreach ($linea in $lineas) {
@@ -1162,8 +1208,17 @@ function Write-AgentDefinitions {
     if (-not $script:WithSubagents) {
         return
     }
+    # `-Encoding UTF8` en TODA lectura de este archivo, y aca sobre todo: en
+    # Windows PowerShell 5.1 `Get-Content` sin encoding decodifica con la codepage
+    # ANSI (Windows-1252). Las plantillas son UTF-8, asi que un guion largo o una
+    # enie volvian como mojibake, se reescribian asi en roles/*.md y de ahi se
+    # propagaban a los cuatro espejos. No era cosmetico: el sub-gate del
+    # Articulo 6 compara roles/<rol>.md con templates/roles/<rol>.md, asi que una
+    # instalacion limpia dejaba harness_check.sh en rojo con cuatro
+    # "Divergencia roles/..." y el hook de cierre bloqueaba cada turno. En
+    # PowerShell 7 el default ya es UTF-8 y por eso no se veia en CI.
     $rolesReadme = Join-Path $script:HarnessDir "roles/README.md"
-    $rolesReadmeBody = (Get-Content -LiteralPath $rolesReadme -Raw).Replace("__HREL__", $script:Hrel)
+    $rolesReadmeBody = (Get-Content -LiteralPath $rolesReadme -Raw -Encoding UTF8).Replace("__HREL__", $script:Hrel)
     Write-HarnessText -Path $rolesReadme -Content $rolesReadmeBody
 
     $descriptions = @{
@@ -1187,7 +1242,7 @@ function Write-AgentDefinitions {
 
     foreach ($role in @("leader", "implementer", "reviewer")) {
         $rolePath = Join-Path $script:HarnessDir "roles/$role.md"
-        $body = (Get-Content -LiteralPath $rolePath -Raw).Replace("__HREL__", $script:Hrel)
+        $body = (Get-Content -LiteralPath $rolePath -Raw -Encoding UTF8).Replace("__HREL__", $script:Hrel)
         Write-HarnessText -Path $rolePath -Content $body
 
         $tools = if ($role -eq "implementer") {
@@ -1285,15 +1340,34 @@ function ConvertTo-BashPath {
     ($Path -replace '\\', '/')
 }
 
+# `C:\Windows\System32\bash.exe` (y su alias en WindowsApps) NO es un bash: es el
+# lanzador de WSL, y su raiz es la del distro. Al pasarle la ruta Windows del
+# gate responde "No such file or directory" y sale 127, asi que el Stop quedaba
+# en rojo SIEMPRE en cualquier maquina con WSL instalado. Es lo primero que
+# devuelve `Get-Command bash.exe` porque System32 va adelante en el PATH.
+function Test-WslBashLauncher {
+    param([string]$Path)
+    $stubDirs = @(
+        (Join-Path $env:SystemRoot "System32"),
+        (Join-Path $env:SystemRoot "Sysnative"),
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps")
+    )
+    foreach ($dir in $stubDirs) {
+        if ($dir -and $Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
 function Get-BashPath {
-    $command = Get-Command bash.exe -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
+    # Git Bash PRIMERO y por ruta, no por PATH: es el unico bash que entiende
+    # `C:/...` y el que corre los gates en la superficie sh.
     $candidates = @()
     $git = Get-Command git.exe -ErrorAction SilentlyContinue
     if ($git) {
         # ...\Git\cmd\git.exe o ...\Git\bin\git.exe -> ...\Git\bin\bash.exe
         $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
         $candidates += (Join-Path $gitRoot "bin/bash.exe")
+        $candidates += (Join-Path $gitRoot "usr/bin/bash.exe")
     }
     $candidates += @(
         (Join-Path $env:ProgramFiles "Git/bin/bash.exe"),
@@ -1304,6 +1378,11 @@ function Get-BashPath {
         if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             return $candidate
         }
+    }
+    # Recien ahora el PATH, saltando el lanzador de WSL: un MSYS2/Cygwin
+    # instalado a mano sirve, el stub de WSL no.
+    foreach ($command in @(Get-Command bash.exe -All -ErrorAction SilentlyContinue)) {
+        if (-not (Test-WslBashLauncher -Path $command.Source)) { return $command.Source }
     }
     return $null
 }
@@ -1849,7 +1928,7 @@ function Install-HarnessDataIfMissing {
     foreach ($c in $candidatos) {
         $hubo = $true
         $cuenta = "(no es un backlog JSON)"
-        try { $j = Get-Content -LiteralPath $c -Raw | ConvertFrom-Json; $cuenta = "{0} feature(s), {1} regla(s)" -f @($j.features).Count, @($j.rules.PSObject.Properties).Count } catch {}
+        try { $j = Get-Content -LiteralPath $c -Raw -Encoding UTF8 | ConvertFrom-Json; $cuenta = "{0} feature(s), {1} regla(s)" -f @($j.features).Count, @($j.rules.PSObject.Properties).Count } catch {}
         Write-HarnessLog WARN "    respaldo: $c  [$cuenta]"
     }
     if ($hubo) { Write-HarnessLog WARN "    para volver: Copy-Item <respaldo> $destination   (y re-corre el instalador)" }

@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # Punto de entrada unico del Harness en Windows (Rust only, post-migracion).
 # Despacha SIEMPRE al binario nativo (harness.exe). Sin binario: error.
 #
