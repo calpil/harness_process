@@ -121,6 +121,14 @@ Cuatro umbrales nuevos en `rules` (todos opcionales; `0` apaga cada uno):
   particion —que secciones cuentan una sola feature y a donde van—. Es duro:
   no hay `--leccion-motivo` para esto. Se parte moviendo el detalle a
   `docs/lecciones/<clase>/referencias/<tema>.md` con un puntero de una linea.
+  Lo mecanico lo hace `leccion partir <clase>` (feature #84): informa que
+  secciones cuentan UNA feature o sesion (titulos con `#N` o fecha, fuera de
+  las canonicas), cuantas lineas quedarian y cuanto falta; `--aplicar`
+  respalda (`lecciones rollback` lo deshace), mueve cada seccion tal cual a
+  `referencias/<slug>.md` con su cabecera y deja el puntero; `--seccion
+  "<titulo>"` suma una elegida (nunca una canonica). Si sigue sobre el tope,
+  lo movido queda y sale 2 con lo que falta. `harness_check.sh` avisa con
+  UNA linea `[i]` por todas las lecciones sobre el tope, con el comando.
 - `leccion_repeticiones` (3): la misma clase K cierres `done` seguidos exige
   `--leccion-motivo "<por que no es otra clase>"`. El motivo queda en
   `history.md` y en la feature. `ninguna` no cuenta ni corta la racha.
@@ -142,7 +150,7 @@ leccion, las dos cuentas del perfil (nuevas desde el corte y total;
 `perfil_pendientes_total`, `perfil_corte` y `perfil_corte_origen` en `--json`)
 y la ultima consolidacion (`--json` los
 lleva en `politica`, `perfil_pendientes`, `ultima_consolidacion`).
-`harness_check.sh` avisa `[i]` por cada leccion activa sobre el tope.
+`harness_check.sh` avisa con UNA linea `[i]` por todas las lecciones activas sobre el tope (desde la #84; antes, una por leccion).
 
 Que cambia para vos: si tu leccion mas usada supera 250 lineas, el proximo
 cierre que la declare se va a negar hasta que la partas. Es a proposito.

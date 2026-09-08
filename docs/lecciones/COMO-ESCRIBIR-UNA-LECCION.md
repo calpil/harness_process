@@ -101,9 +101,15 @@ flag que lo saltee, igual que el limite del perfil.
 Como se parte (es el paso 3 de arriba, aplicado):
 
 1. Las secciones que cuentan UNA feature o UN incidente —las que llevan
-   "(feature #N)" en el titulo, o narran un caso— van a
+   `#N` o una fecha en el titulo (`(feature #N)`, `(#N, fecha)`, `feature #N
+   (fecha)`), o narran un caso— van a
    `docs/lecciones/<clase>/referencias/<tema>.md`. Se MUEVEN, no se
-   reescriben.
+   reescriben. Lo mecanico lo hace `sh harness_cli leccion partir <clase>`
+   (feature #84): informa, `--aplicar` mueve con respaldo, `--seccion
+   "<titulo>"` suma una que el arnes no ve sola. Las secciones de la clase
+   (cuando aplica, procedimiento, pitfalls, verificacion y el indice de
+   referencias, reconocidas por el prefijo del titulo) nunca se mueven: si lo
+   que sobra esta ahi, se parte a mano.
 2. En la leccion queda un puntero de una linea por archivo movido (una
    seccion "Referencias" al final alcanza).
 3. Lo que queda es la clase: cuando aplica, procedimiento, pitfalls,

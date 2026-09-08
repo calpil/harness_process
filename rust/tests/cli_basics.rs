@@ -9299,3 +9299,350 @@ fn close_perfil_sin_corte_cuenta_todo_como_antes() {
             "Perfil: 4 decision(es) sin incorporar, sin corte",
         ));
 }
+
+// ---------------------------------------------------------------------------
+// leccion partir (feature #84)
+// ---------------------------------------------------------------------------
+
+/// Una leccion de clase con sus cuatro secciones canonicas (`procedimiento`
+/// lineas en la segunda) y los `casos` (titulo, lineas) al final, cada uno con
+/// un `###` adentro para probar que el bloque viaja entero.
+fn seed_leccion_partible(root: &Path, nombre: &str, procedimiento: usize, casos: &[(&str, usize)]) -> PathBuf {
+    let dir = root.join("docs/lecciones");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut body = String::from("## Cuando aplica\n\nclase 1\nclase 2\n\n## Procedimiento\n\n");
+    for i in 1..=procedimiento {
+        body.push_str(&format!("paso {i}\n"));
+    }
+    body.push_str("\n## Pitfalls\n\npitfall 1\npitfall 2\n\n## Verificacion\n\ncheck 1\n");
+    for (titulo, lineas) in casos {
+        body.push_str(&format!("\n## {titulo}\n\n"));
+        for i in 1..=*lineas {
+            if i == 3 {
+                body.push_str("### detalle\n");
+            } else {
+                body.push_str(&format!("linea {i} de {titulo}\n"));
+            }
+        }
+    }
+    let file = dir.join(format!("{nombre}.md"));
+    std::fs::write(
+        &file,
+        format!(
+            "---\nnombre: {nombre}\ndescripcion: Leccion de prueba.\ntriggers: [prueba]\nusos: 1\nultimo_uso: 2026-09-01\nultima_actualizacion: 2026-09-01\nestado: activa\n---\n\n{body}"
+        ),
+    )
+    .unwrap();
+    file
+}
+
+fn seccion(texto: &str, titulo: &str) -> String {
+    let inicio = texto.find(&format!("## {titulo}\n")).unwrap_or_else(|| panic!("sin seccion {titulo}"));
+    let resto = &texto[inicio + 3..];
+    let fin = resto.find("\n## ").map(|i| inicio + 3 + i + 1).unwrap_or(texto.len());
+    texto[inicio..fin].to_string()
+}
+
+#[test]
+fn leccion_partir_informa_sin_escribir() {
+    // AC-1: el informe lista las candidatas con sus lineas y el saldo, y no toca nada.
+    let (dir, bin) = sandbox_with_binary();
+    let file = seed_leccion_partible(
+        dir.path(),
+        "larga",
+        200,
+        &[("El caso del martes (feature #12)", 41), ("Otro caso (#15, 2026-09-01)", 30)],
+    );
+    let antes = std::fs::read(&file).unwrap();
+    cmd(&bin)
+        .args(["leccion", "partir", "larga"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Leccion 'larga': 303 lineas"))
+        .stdout(predicate::str::contains("tope 250"))
+        .stdout(predicate::str::contains("Secciones que cuentan UNA feature"))
+        .stdout(predicate::str::contains("44 lineas  El caso del martes (feature #12)"))
+        .stdout(predicate::str::contains("32 lineas  Otro caso (#15, 2026-09-01)"))
+        .stdout(predicate::str::contains("Quedarian"))
+        .stdout(predicate::str::contains("bajo el tope"))
+        .stdout(predicate::str::contains("leccion partir larga --aplicar"));
+    assert_eq!(std::fs::read(&file).unwrap(), antes, "el informe escribio la leccion");
+    assert!(!dir.path().join("docs/lecciones/larga").exists(), "el informe creo referencias/");
+    // Bajo el tope: nada que partir, y lo dice.
+    seed_leccion_partible(dir.path(), "corta", 5, &[("Un caso (feature #3)", 4)]);
+    cmd(&bin)
+        .args(["leccion", "partir", "corta"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bajo el tope, nada que partir"));
+    // En la franja del tope el informe cuenta el indice y los punteros que
+    // --aplicar agrega: dice lo mismo que despues pasa (revision adversarial).
+    seed_leccion_partible(dir.path(), "borde", 221, &[("Un caso (feature #1)", 5)]);
+    cmd(&bin)
+        .args(["leccion", "partir", "borde"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Leccion 'borde': 255 lineas"))
+        .stdout(predicate::str::contains("Quedarian 253 lineas: faltan 3 para el tope"));
+    cmd(&bin)
+        .args(["leccion", "partir", "borde", "--aplicar"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Leccion 'borde': 253 lineas"))
+        .stderr(predicate::str::contains("faltan 3 para el tope"));
+    // Sin candidatas y sobre el tope: informa cuanto falta y que secciones podrian ir con --seccion.
+    seed_leccion_partible(dir.path(), "sin-casos", 260, &[("Un tema mas de la clase", 30)]);
+    cmd(&bin)
+        .args(["leccion", "partir", "sin-casos"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Ninguna seccion cuenta una sola feature"))
+        .stdout(predicate::str::contains("faltan"))
+        .stdout(predicate::str::contains("--seccion"))
+        .stdout(predicate::str::contains("Un tema mas de la clase"));
+}
+
+#[test]
+fn leccion_partir_informa_sin_tope_no_habla_del_tope() {
+    // AC-1 con rules.leccion_max_lineas: 0: parte si se lo piden e informa que
+    // no hay tope, sin "bajo el tope" ni "faltan 0" (revision adversarial).
+    let (dir, bin) = sandbox_with_binary();
+    let harness_dir = dir.path().join("hp");
+    cmd(&bin).args(["add", "--name", "Demo"]).assert().success();
+    set_rule(&harness_dir, "leccion_max_lineas", serde_json::json!(0));
+    seed_leccion_partible(dir.path(), "larga", 200, &[("El caso del martes (feature #12)", 41)]);
+    cmd(&bin)
+        .args(["leccion", "partir", "larga"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sin tope (rules.leccion_max_lineas: 0)"))
+        .stdout(predicate::str::contains("sin tope que exigir"))
+        .stdout(predicate::str::contains("bajo el tope").not())
+        .stdout(predicate::str::contains("faltan 0").not());
+    seed_leccion_partible(dir.path(), "sin-casos", 200, &[("Un tema mas de la clase", 30)]);
+    cmd(&bin)
+        .args(["leccion", "partir", "sin-casos", "--aplicar"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("sin tope no falta nada"))
+        .stderr(predicate::str::contains("faltan 0").not());
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Movida: El caso del martes (feature #12)"))
+        .stdout(predicate::str::contains("sin tope que exigir"));
+}
+
+#[test]
+fn leccion_partir_aplica_conserva_crlf() {
+    // AC-3 con una leccion CRLF (checkout Windows): la leccion y la referencia
+    // salen CRLF enteras, sin mezclar (revision adversarial).
+    let (dir, bin) = sandbox_with_binary();
+    let file = seed_leccion_partible(dir.path(), "larga", 200, &[("El caso del martes (feature #12)", 41)]);
+    let crlf = std::fs::read_to_string(&file).unwrap().replace('\n', "\r\n");
+    std::fs::write(&file, &crlf).unwrap();
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar"])
+        .assert()
+        .success();
+    for p in [
+        file.clone(),
+        dir.path().join("docs/lecciones/larga/referencias/el-caso-del-martes-feature-12.md"),
+    ] {
+        let t = std::fs::read_to_string(&p).unwrap();
+        assert!(!t.replace("\r\n", "").contains('\n'), "fin de linea mezclado en {}", p.display());
+        assert!(t.contains("\r\n"), "perdio el CRLF: {}", p.display());
+    }
+    let despues = std::fs::read_to_string(&file).unwrap();
+    assert!(despues.contains("- [El caso del martes (feature #12)](larga/referencias/el-caso-del-martes-feature-12.md)\r\n"));
+}
+
+#[test]
+fn leccion_partir_aplica_mueve_y_deja_punteros() {
+    // AC-3: respaldo, archivo de referencia con cabecera y texto original,
+    // puntero en el indice, fecha de actualizacion, canonicas intactas.
+    let (dir, bin) = sandbox_with_binary();
+    let file = seed_leccion_partible(
+        dir.path(),
+        "larga",
+        200,
+        &[("El caso del martes (feature #12)", 41), ("Otro caso (#15, 2026-09-01)", 30)],
+    );
+    let original = std::fs::read_to_string(&file).unwrap();
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Respaldo:"))
+        .stdout(predicate::str::contains("lecciones rollback"))
+        .stdout(predicate::str::contains(
+            "Movida: El caso del martes (feature #12) -> docs/lecciones/larga/referencias/el-caso-del-martes-feature-12.md (44 lineas)",
+        ))
+        .stdout(predicate::str::contains("Movida: Otro caso (#15, 2026-09-01) -> docs/lecciones/larga/referencias/otro-caso-15-2026-09-01.md"))
+        .stdout(predicate::str::contains("bajo el tope"));
+    let ref1 = std::fs::read_to_string(dir.path().join("docs/lecciones/larga/referencias/el-caso-del-martes-feature-12.md")).unwrap();
+    assert!(ref1.starts_with("# El caso del martes (feature #12)\n\nReferencia de la leccion `larga`"), "{ref1}");
+    assert!(ref1.contains("`leccion partir`"), "{ref1}");
+    // El cuerpo viaja verbatim, con su ###.
+    let cuerpo = seccion(&original, "El caso del martes (feature #12)");
+    let cuerpo = cuerpo.trim_start_matches("## El caso del martes (feature #12)\n").trim();
+    assert!(ref1.trim_end().ends_with(cuerpo), "el cuerpo no es el original:\n{ref1}");
+    assert!(ref1.contains("### detalle\n"));
+    let despues = std::fs::read_to_string(&file).unwrap();
+    assert!(!despues.contains("## El caso del martes"), "la seccion sigue en la leccion");
+    assert!(!despues.contains("## Otro caso"), "la seccion sigue en la leccion");
+    assert!(despues.contains("## Referencias"), "sin indice de referencias:\n{despues}");
+    assert!(despues.contains("- [El caso del martes (feature #12)](larga/referencias/el-caso-del-martes-feature-12.md)"), "{despues}");
+    assert!(despues.contains("- [Otro caso (#15, 2026-09-01)](larga/referencias/otro-caso-15-2026-09-01.md)"), "{despues}");
+    assert!(despues.contains(&format!("ultima_actualizacion: {}", lecciones_hoy())), "{despues}");
+    assert!(despues.contains("usos: 1\n"), "usos cambio: {despues}");
+    for canonica in ["Cuando aplica", "Procedimiento", "Pitfalls", "Verificacion"] {
+        assert_eq!(seccion(&despues, canonica), seccion(&original, canonica), "cambio {canonica}");
+    }
+    cmd(&bin)
+        .args(["lecciones", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SOBRE EL TOPE").not());
+    // El respaldo es el del curador: rollback lo deshace entero.
+    cmd(&bin).args(["lecciones", "rollback"]).assert().success();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original, "el rollback no restauro la leccion");
+    assert!(!dir.path().join("docs/lecciones/larga/referencias/el-caso-del-martes-feature-12.md").exists(), "el rollback dejo la referencia");
+}
+
+#[test]
+fn leccion_partir_seccion_elige_una_mas_y_se_niega_con_las_canonicas() {
+    // AC-4.
+    let (dir, bin) = sandbox_with_binary();
+    let file = seed_leccion_partible(
+        dir.path(),
+        "larga",
+        200,
+        &[("Un caso extra sin numero", 40), ("Otro caso extra", 10), ("El caso del martes (feature #12)", 20)],
+    );
+    let antes = std::fs::read(&file).unwrap();
+    // Ambigua: dos secciones contienen "caso extra"; no escribe.
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar", "--seccion", "caso extra"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("'caso extra' matchea 2 secciones"))
+        .stderr(predicate::str::contains("Un caso extra sin numero"))
+        .stderr(predicate::str::contains("Otro caso extra"));
+    assert_eq!(std::fs::read(&file).unwrap(), antes);
+    // Canonica: se niega.
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar", "--seccion", "Pitfalls"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("'Pitfalls' es una seccion de la CLASE"));
+    assert_eq!(std::fs::read(&file).unwrap(), antes);
+    // El informe con --seccion lo lista y el remedio lo repite, para que
+    // corrido tal cual mueva lo que el informe muestra (revision adversarial).
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--seccion", "sin numero"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Un caso extra sin numero"))
+        .stdout(predicate::str::contains("leccion partir larga --aplicar --seccion \"sin numero\""));
+    // Unica: se mueve junto con la candidata automatica.
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar", "--seccion", "sin numero"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Movida: Un caso extra sin numero -> docs/lecciones/larga/referencias/un-caso-extra-sin-numero.md"))
+        .stdout(predicate::str::contains("Movida: El caso del martes (feature #12)"));
+    let despues = std::fs::read_to_string(&file).unwrap();
+    assert!(despues.contains("## Otro caso extra"), "movio una seccion que nadie pidio");
+    assert!(!despues.contains("## Un caso extra sin numero"));
+}
+
+#[test]
+fn leccion_partir_sigue_sobre_el_tope_deja_lo_movido_y_sale_2() {
+    // AC-5: lo mecanico se mueve, el comando dice cuanto falta y sale 2.
+    let (dir, bin) = sandbox_with_binary();
+    let file = seed_leccion_partible(
+        dir.path(),
+        "gigante",
+        300,
+        &[("Un tema grande de la clase", 60), ("El caso del martes (feature #12)", 20)],
+    );
+    cmd(&bin)
+        .args(["leccion", "partir", "gigante", "--aplicar"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("Movida: El caso del martes (feature #12)"))
+        .stderr(predicate::str::contains("faltan"))
+        .stderr(predicate::str::contains("--seccion"))
+        .stderr(predicate::str::contains("63 lineas  Un tema grande de la clase"));
+    assert!(dir.path().join("docs/lecciones/gigante/referencias/el-caso-del-martes-feature-12.md").exists());
+    let despues = std::fs::read_to_string(&file).unwrap();
+    assert!(!despues.contains("## El caso del martes"));
+    assert!(despues.contains("## Un tema grande de la clase"));
+    // Sin candidatas: no escribe nada y sale 2 con la misma lista.
+    let f2 = seed_leccion_partible(dir.path(), "sin-casos", 300, &[("Un tema grande de la clase", 60)]);
+    let antes = std::fs::read(&f2).unwrap();
+    cmd(&bin)
+        .args(["leccion", "partir", "sin-casos", "--aplicar"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Ninguna seccion cuenta una sola feature"))
+        .stderr(predicate::str::contains("62 lineas  Un tema grande de la clase"));
+    assert_eq!(std::fs::read(&f2).unwrap(), antes, "escribio sin candidatas");
+    assert!(!dir.path().join("docs/lecciones/sin-casos").exists());
+}
+
+#[test]
+fn leccion_partir_dos_veces_no_duplica_y_los_slugs_no_chocan() {
+    // AC-6.
+    let (dir, bin) = sandbox_with_binary();
+    let file = seed_leccion_partible(
+        dir.path(),
+        "larga",
+        200,
+        &[("Caso repetido (feature #1)", 30), ("Caso repetido (feature #1)", 20)],
+    );
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("referencias/caso-repetido-feature-1.md (33 lineas)"))
+        .stdout(predicate::str::contains("referencias/caso-repetido-feature-1-2.md (22 lineas)"));
+    let una = std::fs::read_to_string(&file).unwrap();
+    cmd(&bin)
+        .args(["leccion", "partir", "larga", "--aplicar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nada que partir"));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), una, "la segunda corrida cambio la leccion");
+    let refs = std::fs::read_dir(dir.path().join("docs/lecciones/larga/referencias")).unwrap().count();
+    assert_eq!(refs, 2);
+    assert_eq!(una.matches("- [Caso repetido (feature #1)]").count(), 2);
+}
+
+#[test]
+fn contrato_de_particion_nombra_el_comando_y_ve_las_formas_reales() {
+    // AC-8: `usar` sobre el tope nombra `leccion partir` y lista las secciones
+    // con el criterio nuevo; `lecciones status` sugiere el comando.
+    let (dir, bin) = sandbox_with_binary();
+    seed_leccion_partible(
+        dir.path(),
+        "larga",
+        200,
+        &[("Otro caso (#15, 2026-09-01)", 30), ("Patch #100: el dueno perdio BYPASSRLS", 20)],
+    );
+    cmd(&bin)
+        .args(["leccion", "usar", "larga"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("sh harness_cli leccion partir larga"))
+        .stderr(predicate::str::contains("Otro caso (#15, 2026-09-01)"))
+        .stderr(predicate::str::contains("Patch #100: el dueno perdio BYPASSRLS"));
+    cmd(&bin)
+        .args(["lecciones", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SOBRE EL TOPE"))
+        .stdout(predicate::str::contains("leccion partir <clase>"));
+}

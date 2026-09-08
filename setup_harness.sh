@@ -1258,7 +1258,8 @@ Archivos principales:
   Y lo aprendido tiene ciclo de vida (feature #80): la leccion de CLASE tiene
   tope de lineas (`rules.leccion_max_lineas`, 250) —sobre el tope, `close
   --leccion` y `leccion usar` se niegan hasta que muevas el detalle por feature
-  a `docs/lecciones/<clase>/referencias/<tema>.md` y dejes un puntero—;
+  a `docs/lecciones/<clase>/referencias/<tema>.md` y dejes un puntero; lo
+  mecanico lo hace `leccion partir <clase>` (informa; `--aplicar` mueve)—;
   declarar la misma clase `rules.leccion_repeticiones` (3) cierres seguidos
   exige `--leccion-motivo`; y el cierre avisa cuando el perfil junta mas de
   `rules.perfil_pendientes_max` (25) decisiones sin incorporar (`perfil

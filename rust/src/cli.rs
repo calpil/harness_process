@@ -418,6 +418,16 @@ pub enum LeccionCommand {
     Nueva { nombre: String },
     /// Deja rastro de que una leccion sirvio (+1 uso)
     Usar { nombre: String },
+    /// Parte una leccion sobre el tope: mueve a referencias/ las secciones que cuentan UNA feature (informa; --aplicar mueve)
+    Partir {
+        nombre: String,
+        /// Mueve de verdad; sin esto solo informa
+        #[arg(long)]
+        aplicar: bool,
+        /// Mueve tambien esta seccion (titulo exacto o subcadena unica). Repetible
+        #[arg(long)]
+        seccion: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -670,6 +680,11 @@ pub fn run() -> anyhow::Result<()> {
                 LeccionCommand::Show { nombre } => commands::leccion::show(&paths, &nombre),
                 LeccionCommand::Nueva { nombre } => commands::leccion::nueva(&paths, &nombre),
                 LeccionCommand::Usar { nombre } => commands::leccion::usar(&paths, &nombre),
+                LeccionCommand::Partir {
+                    nombre,
+                    aplicar,
+                    seccion,
+                } => commands::leccion::partir(&paths, &nombre, aplicar, &seccion),
             }
         }
         Command::Buscar {

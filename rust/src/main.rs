@@ -25,6 +25,7 @@ mod lecciones;
 mod markdown;
 mod memories;
 mod paths;
+mod particion;
 mod perfil;
 mod plan;
 mod prd;

@@ -683,6 +683,7 @@ sh harness_cli leccion list             # el catalogo, ordenado por uso
 sh harness_cli leccion show <clase>
 sh harness_cli leccion nueva <clase>    # crear es el ULTIMO recurso
 sh harness_cli leccion usar <clase>     # +1 uso: distingue lo vivo de lo muerto
+sh harness_cli leccion partir <clase>   # sobre el tope: informa que secciones cuentan UNA feature; --aplicar las mueve a referencias/
 ```
 
 Cada leccion es `docs/lecciones/<clase>.md` con frontmatter (`nombre`,
@@ -730,8 +731,20 @@ todos con default y `0` para apagar:
 `lecciones status` muestra lineas/tope por leccion, las dos cuentas del perfil
 (nuevas desde el corte y total; en `--json`: `perfil_pendientes`,
 `perfil_pendientes_total`, `perfil_corte` y `perfil_corte_origen`) y la ultima
-consolidacion; `harness_check.sh` avisa `[i]` por cada leccion sobre
-el tope.
+consolidacion; `harness_check.sh` avisa con UNA linea `[i]` que nombra todas
+las lecciones sobre el tope y el comando (feature #84).
+
+Partir es mecanico hasta donde puede serlo: `leccion partir <clase>` informa
+que secciones cuentan UNA feature o sesion (titulos con `#N` o una fecha,
+fuera de cuando aplica / procedimiento / pitfalls / verificacion / referencias),
+cuantas lineas quedarian y cuanto falta; `--aplicar` respalda en
+`bkp/lecciones/` (lo deshace `lecciones rollback`), mueve cada seccion tal cual a
+`docs/lecciones/<clase>/referencias/<slug>.md` con su cabecera y deja un puntero
+de una linea en el indice `## Referencias`. Si con eso no alcanza, lo movido
+queda, el comando sale 2 y dice cuanto falta y que secciones podrian ir con
+`--seccion "<titulo>"` (nunca una canonica: esas son la clase y se parten a mano).
+Medido sobre las cuatro lecciones de realestate del 2026-09-08: ninguna baja
+del tope solo con lo mecanico; el resto es editorial.
 
 `harness_check.sh` valida el arbol: frontmatter ilegible o un `nombre:` que no
 coincide con el archivo **bloquean** nombrando el archivo; una leccion sin

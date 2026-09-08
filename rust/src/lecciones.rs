@@ -185,6 +185,12 @@ impl Frontmatter {
 
     /// Reemplaza el valor de una clave existente; si no existe, la agrega al
     /// final (nunca reordena lo que ya estaba).
+    /// Fin de linea del archivo original (`\n` o `\r\n`), para que lo que
+    /// se escriba alrededor del cuerpo salga con el mismo (feature #84).
+    pub fn eol(&self) -> &str {
+        self.eol
+    }
+
     pub fn set(&mut self, key: &str, value: &str) {
         for line in &mut self.lines {
             if let Some((k, _)) = Self::split_line(line)
@@ -516,13 +522,14 @@ impl Leccion {
         (politica.max_lineas > 0 && n > politica.max_lineas as usize).then_some(n)
     }
 
-    /// Titulos `## ...` que llevan `(feature #N)`: secciones que cuentan UNA
-    /// feature, es decir, candidatas a `referencias/`.
+    /// Titulos `## ...` que cuentan UNA feature o sesion (con `#N` o una
+    /// fecha, fuera de las canonicas; feature #84): candidatas a
+    /// `referencias/`. El mismo criterio que usa `leccion partir`.
     pub fn secciones_por_feature(&self) -> Vec<String> {
-        self.body
-            .lines()
-            .filter(|l| l.starts_with("## ") && l.contains("(feature #"))
-            .map(|l| l.trim_start_matches("## ").trim().to_string())
+        crate::particion::secciones(&self.body)
+            .into_iter()
+            .filter(crate::particion::Seccion::cuenta_una_feature)
+            .map(|s| s.titulo)
             .collect()
     }
 }
@@ -539,6 +546,10 @@ pub fn contrato_de_particion(leccion: &Leccion, politica: &Politica) -> String {
          Partila antes de declararla (el tope es duro; no hay --leccion-motivo para esto):\n",
         leccion.nombre, politica.max_lineas
     );
+    msg.push_str(&format!(
+        "      Lo mecanico lo hace el arnes: sh harness_cli leccion partir {}   (informa; --aplicar mueve)\n",
+        leccion.nombre
+    ));
     let secciones = leccion.secciones_por_feature();
     if secciones.is_empty() {
         msg.push_str("      1. Las secciones que cuentan UNA sesion (una feature, un incidente) van a\n");
