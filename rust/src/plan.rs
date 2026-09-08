@@ -1,6 +1,9 @@
 //! Planes por feature y firmas anti-conflicto multi-LLM (paridad con
-//! harness.py lineas 72-195). Los mensajes son VERBATIM: los agentes y los
-//! scripts de hook los leen tal cual.
+//! harness.py lineas 72-195). Los ENCABEZADOS de los mensajes son VERBATIM: los
+//! agentes y los scripts de hook los leen tal cual (CHECKPOINTS.md y
+//! setup_harness.sh buscan "PLAN ACTUALIZADO POR OTRO LLM"). Los REMEDIOS que
+//! van adentro no: nombran el entrypoint vigente, que desde la feature #2 es
+//! `sh harness_cli`, no el harness.py que ya no existe.
 
 use std::path::{Path, PathBuf};
 
@@ -90,13 +93,13 @@ pub fn plan_staleness_message(paths: &HarnessPaths, feature: &Map<String, Value>
         return format!("[!] No se pudo leer el plan actual: {}", path.display());
     };
     if last.is_none() {
-        return "[!] Plan sin firma previa. Ejecuta harness.py check-plan despues de start/advance."
+        return "[!] Plan sin firma previa. Ejecuta sh harness_cli check-plan despues de start/advance."
             .to_string();
     }
     if is_plan_stale(paths, feature) {
         let last = last.unwrap_or(&current);
         return format!(
-            "[!] PLAN ACTUALIZADO POR OTRO LLM (Claude/Gemini/Antigravity/Grok/Codex/etc.)\n    Plan en disco: {} (mtime={:.0}, hash={})\n    Ultima firma conocida: mtime={:.0}, hash={}\n    Accion requerida: Re-lee COMPLETAMENTE el plan actualizado en docs/.\n    Luego confirma con: python3 harness.py check-plan  (debe salir limpio)\n    Registra la re-sincronizacion: python3 harness.py advance --nota \"Re-sincronizado con plan actualizado por otro agente\"",
+            "[!] PLAN ACTUALIZADO POR OTRO LLM (Claude/Gemini/Antigravity/Grok/Codex/etc.)\n    Plan en disco: {} (mtime={:.0}, hash={})\n    Ultima firma conocida: mtime={:.0}, hash={}\n    Accion requerida: Re-lee COMPLETAMENTE el plan actualizado en docs/.\n    Luego confirma con: sh harness_cli check-plan  (debe salir limpio)\n    Registra la re-sincronizacion: sh harness_cli advance --nota \"Re-sincronizado con plan actualizado por otro agente\"",
             py_str(current.get("path")),
             sig_mtime(&current),
             py_str(current.get("hash")),

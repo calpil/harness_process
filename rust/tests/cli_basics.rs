@@ -237,7 +237,7 @@ fn check_plan_should_exit_one_without_active_feature() {
         .arg("check-plan")
         .assert()
         .code(1)
-        .stderr("No hay feature in_progress. Inicia una: harness.py start --feature <id>\n");
+        .stderr("No hay feature in_progress. Inicia una: sh harness_cli start --feature <id>\n");
 }
 
 #[test]
@@ -437,7 +437,7 @@ fn check_spec_should_exit_one_without_active_feature() {
         .arg("check-spec")
         .assert()
         .code(1)
-        .stderr("No hay feature in_progress. Inicia una: harness.py start --feature <id>\n");
+        .stderr("No hay feature in_progress. Inicia una: sh harness_cli start --feature <id>\n");
 }
 
 #[test]

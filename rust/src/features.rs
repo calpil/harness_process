@@ -116,7 +116,7 @@ pub fn active_feature_index(data: &Value, fid: Option<&str>) -> Result<usize, Ex
     let active = active_indices(data);
     match active.as_slice() {
         [] => Err(Exit::msg(
-            "No hay feature in_progress. Inicia una: harness.py start --feature <id>",
+            "No hay feature in_progress. Inicia una: sh harness_cli start --feature <id>",
         )),
         [single] => Ok(*single),
         many => {

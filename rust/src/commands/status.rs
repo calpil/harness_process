@@ -141,7 +141,7 @@ pub fn run(paths: &HarnessPaths) -> anyhow::Result<()> {
         if get_plan_sig(f).is_some() {
             if is_plan_stale(&paths_feature, f) {
                 println!(
-                    "  [!] #{} PLAN STALE - actualizado por otro agente/LLM. Ejecuta: harness.py check-plan",
+                    "  [!] #{} PLAN STALE - actualizado por otro agente/LLM. Ejecuta: sh harness_cli check-plan",
                     py_str(f.get("id"))
                 );
             } else {
