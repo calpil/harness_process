@@ -124,6 +124,20 @@ impl State {
             .issue = Some(key.to_string());
     }
 
+    /// Las subtasks de AC ya creadas para una feature: (AC-n, clave de Jira).
+    /// Vacio si la feature no tiene issue o si sus AC nunca se subieron.
+    pub fn feature_acs(&self, fid: &str) -> Vec<(String, String)> {
+        self.features
+            .get(fid)
+            .map(|f| {
+                f.acs
+                    .iter()
+                    .map(|(ac, key)| (ac.clone(), key.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn set_ac_issue(&mut self, fid: &str, ac: &str, key: &str) {
         self.features
             .entry(fid.to_string())

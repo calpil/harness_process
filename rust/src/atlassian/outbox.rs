@@ -62,6 +62,11 @@ pub enum IntentKind {
     Comment { fid: String, body: String },
     /// `blocked` -> flag Impediment (decision OBS-7).
     BlockedFlag { fid: String, on: bool },
+    /// Cerrar la feature cierra TAMBIEN sus AC: sin esto la historia queda
+    /// `Done` con sus subtasks abiertas y el tablero miente sobre lo que
+    /// falta. Las claves de las subtasks salen del estado, no del intent,
+    /// porque al emitirlo todavia pueden no existir.
+    TransitionAcs { fid: String, to: String },
 }
 
 impl IntentKind {
@@ -73,8 +78,11 @@ impl IntentKind {
             IntentKind::FeatureCreate { .. } => 1,
             IntentKind::AcSubtask { .. } => 2,
             IntentKind::Transition { .. } => 3,
-            IntentKind::BlockedFlag { .. } => 4,
-            IntentKind::Comment { .. } => 5,
+            // Despues de la transicion de la historia: si la historia no
+            // llego a `Done`, cerrar sus AC no tendria sentido.
+            IntentKind::TransitionAcs { .. } => 4,
+            IntentKind::BlockedFlag { .. } => 5,
+            IntentKind::Comment { .. } => 6,
         }
     }
 
@@ -87,6 +95,9 @@ impl IntentKind {
             }
             IntentKind::AcSubtask { fid, ac, .. } => format!("subtask {ac} de la feature #{fid}"),
             IntentKind::Transition { fid, to } => format!("feature #{fid} -> {to}"),
+            IntentKind::TransitionAcs { fid, to } => {
+                format!("AC de la feature #{fid} -> {to}")
+            }
             IntentKind::Comment { fid, .. } => format!("comentario en la feature #{fid}"),
             IntentKind::BlockedFlag { fid, on } => {
                 let verbo = if *on { "marca" } else { "quita" };
@@ -278,8 +289,31 @@ mod tests {
         )
         .unwrap();
 
+        // Y el cierre de los AC: va DESPUES de la transicion de la historia
+        // y ANTES del comentario.
+        emit(
+            &paths,
+            "feature:15:acs:status:Done",
+            "close",
+            IntentKind::TransitionAcs {
+                fid: "15".to_string(),
+                to: "Done".to_string(),
+            },
+        )
+        .unwrap();
+        emit(
+            &paths,
+            "feature:15:status:Done",
+            "close",
+            IntentKind::Transition {
+                fid: "15".to_string(),
+                to: "Done".to_string(),
+            },
+        )
+        .unwrap();
+
         let order: Vec<u8> = pending(&paths).iter().map(|i| i.kind.rank()).collect();
-        assert_eq!(order, vec![0, 1, 2, 5]);
+        assert_eq!(order, vec![0, 1, 2, 3, 4, 6]);
     }
 
     #[test]

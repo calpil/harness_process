@@ -403,6 +403,18 @@ fn mcp_call(binding: &Binding, state: &State, intent: &Intent) -> Value {
                 "needs": key.is_none().then(|| format!("la feature #{fid} todavia no tiene issue")),
             })
         }
+        IntentKind::TransitionAcs { fid, to } => {
+            let acs = state.feature_acs(fid);
+            json!({
+                "tool": "transitionJiraIssue",
+                "args": {"issueIdOrKey": acs.iter().map(|(_, k)| k.clone()).collect::<Vec<_>>(),
+                         "targetStatusName": to},
+                "note": "una llamada POR SUBTASK; la que ya este en el destino se saltea",
+                "needs": acs.is_empty().then(|| {
+                    format!("la feature #{fid} no tiene subtasks de AC en el estado")
+                }),
+            })
+        }
         IntentKind::Comment { fid, body } => {
             let key = state.feature_issue(fid).map(str::to_string);
             json!({
@@ -673,6 +685,35 @@ fn execute(
             jira::transition(client, &key, to)?;
             Ok(None)
         }
+        IntentKind::TransitionAcs { fid, to } => {
+            let acs = state.feature_acs(fid);
+            if acs.is_empty() {
+                // Sin AC subidos no hay nada que cerrar, y no es un error:
+                // hay features cuyo spec no declara criterios.
+                return Ok(None);
+            }
+            let mut movidas = 0usize;
+            let mut fallidas: Vec<String> = Vec::new();
+            for (ac, key) in &acs {
+                match jira::transition_lenient(client, key, to) {
+                    Ok(true) => movidas += 1,
+                    // Ya estaba en el destino: no es trabajo ni es falla.
+                    Ok(false) => {}
+                    Err(err) => fallidas.push(format!("{ac} ({key}): {err}")),
+                }
+            }
+            if !fallidas.is_empty() {
+                // Se informa lo que NO se pudo mover y se sigue: cerrar la
+                // mitad y callar la otra es el modo de falla que este arnes
+                // ya pago en otras superficies.
+                anyhow::bail!(
+                    "feature #{fid}: {movidas} AC movidos a '{to}', {} sin mover -> {}",
+                    fallidas.len(),
+                    fallidas.join("; ")
+                );
+            }
+            Ok(None)
+        }
         IntentKind::Comment { fid, body } => {
             let key = require_issue(state, fid)?;
             jira::add_comment(client, &key, body)?;
@@ -917,6 +958,9 @@ pub fn publish(paths: &HarnessPaths) -> anyhow::Result<()> {
     // 1. PRDs: el maestro primero; `scan` ya devuelve los padres antes que los
     //    hijos (orden alfabetico de la cadena de slugs).
     let mut prd_pages: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    // Lo que ya subio en los pasos 1-3, para que el barrido del paso 4 no lo
+    // publique dos veces (la clave es la ruta relativa, la misma de `state`).
+    let mut ya: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for prd in crate::prd::scan(paths) {
         let slug = emit::prd_key_slug(&prd.slug);
         let parent = prd
@@ -937,6 +981,7 @@ pub fn publish(paths: &HarnessPaths) -> anyhow::Result<()> {
             let (id, _) = split_id_url(&value);
             prd_pages.insert(slug, id);
         }
+        ya.insert(doc_key(paths, &prd.file));
         state.save(paths)?;
     }
 
@@ -944,6 +989,7 @@ pub fn publish(paths: &HarnessPaths) -> anyhow::Result<()> {
     let sdd = crate::prd::prd_dir(paths).join("SDD-master.md");
     if sdd.is_file() {
         publish_doc(&ctx, &mut state, &sdd, None, None)?;
+        ya.insert(doc_key(paths, &sdd));
         state.save(paths)?;
     }
 
@@ -971,6 +1017,7 @@ pub fn publish(paths: &HarnessPaths) -> anyhow::Result<()> {
             parent.as_deref(),
             header.as_deref(),
         )?;
+        ya.insert(doc_key(paths, &file));
         state.save(paths)?;
 
         // AC-24: el issue tambien queda con el enlace a su pagina.
@@ -986,6 +1033,42 @@ pub fn publish(paths: &HarnessPaths) -> anyhow::Result<()> {
                 }
             }
         }
+    }
+
+    // 4. El RESTO de la documentacion rectora. Los pasos 1-3 solo cubren el
+    //    arbol de PRD que el arnes tiene registrado (`prd::scan`), el
+    //    SDD maestro y los specs: los PRD planos, los SDD por capacidad y la
+    //    cola quedaban sin publicar aunque son los documentos que el equipo
+    //    lee. Se barren aca, saltando lo ya subido en esta corrida.
+    let mut extra: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(entradas) = std::fs::read_dir(crate::prd::prd_dir(paths)) {
+        for entrada in entradas.flatten() {
+            let ruta = entrada.path();
+            if ruta.extension().and_then(|e| e.to_str()) == Some("md") {
+                extra.push(ruta);
+            }
+        }
+    }
+    if let Ok(entradas) = std::fs::read_dir(&paths.plans) {
+        for entrada in entradas.flatten() {
+            let ruta = entrada.path();
+            let nombre = ruta
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if nombre.starts_with("orden-cola-") && nombre.ends_with(".md") {
+                extra.push(ruta);
+            }
+        }
+    }
+    extra.sort();
+    for ruta in extra {
+        if !ya.insert(doc_key(paths, &ruta)) {
+            continue;
+        }
+        publish_doc(&ctx, &mut state, &ruta, None, None)?;
+        state.save(paths)?;
     }
 
     println!("[Atlassian] publicacion terminada.");

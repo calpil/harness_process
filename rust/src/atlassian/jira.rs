@@ -107,6 +107,40 @@ pub fn transition(client: &Client, key: &str, target: &str) -> anyhow::Result<()
     Ok(())
 }
 
+/// Como `transition`, pero un issue que YA esta en el estado destino no es
+/// un error: se informa y se sigue. Lo usa el cierre de los AC, donde una
+/// subtask ya cerrada a mano es lo normal y abortar por eso dejaria a las
+/// demas sin cerrar.
+pub fn transition_lenient(client: &Client, key: &str, target: &str) -> anyhow::Result<bool> {
+    if current_status(client, key)?.eq_ignore_ascii_case(target) {
+        return Ok(false);
+    }
+    match find_transition(client, key, target)? {
+        Some(id) => {
+            client.post(
+                &format!("/rest/api/3/issue/{key}/transitions"),
+                &json!({"transition": {"id": id}}),
+            )?;
+            Ok(true)
+        }
+        // Sin transicion ofrecida y sin estar en destino: es del flujo del
+        // board, no del arnes. Se reporta y no se aborta el lote.
+        None => anyhow::bail!("el issue {key} no ofrece una transicion a '{target}'"),
+    }
+}
+
+/// Nombre del estado actual del issue.
+pub fn current_status(client: &Client, key: &str) -> anyhow::Result<String> {
+    let res = client.get(&format!("/rest/api/3/issue/{key}?fields=status"))?;
+    Ok(res
+        .get("fields")
+        .and_then(|f| f.get("status"))
+        .and_then(|s| s.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string())
+}
+
 /// Comentario en el issue (la bitacora del arnes del otro lado).
 pub fn add_comment(client: &Client, key: &str, body: &str) -> anyhow::Result<()> {
     client.post(

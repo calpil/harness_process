@@ -42,6 +42,11 @@ pub fn key_status(fid: &str, to: &str) -> String {
     format!("feature:{fid}:status:{to}")
 }
 
+/// Clave de dedupe del cierre de los AC de una feature.
+pub fn key_status_acs(fid: &str, to: &str) -> String {
+    format!("feature:{fid}:acs:status:{to}")
+}
+
 /// Clave de dedupe de un comentario: el hash del cuerpo evita que la misma
 /// nota se publique dos veces y deja pasar dos notas distintas.
 pub fn key_comment(fid: &str, body: &str) -> String {
@@ -306,6 +311,17 @@ pub fn on_close(paths: &HarnessPaths, feature: &Map<String, Value>, status: &str
                 &key_status(&fid, &statuses.done),
                 "close",
                 IntentKind::Transition {
+                    fid: fid.clone(),
+                    to: statuses.done.clone(),
+                },
+            );
+            // Y sus AC: una historia `Done` con subtasks abiertas deja el
+            // tablero afirmando que queda trabajo que el repo ya cerro.
+            emit_best_effort(
+                paths,
+                &key_status_acs(&fid, &statuses.done),
+                "close",
+                IntentKind::TransitionAcs {
                     fid: fid.clone(),
                     to: statuses.done.clone(),
                 },
