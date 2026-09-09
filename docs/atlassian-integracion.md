@@ -49,13 +49,19 @@ Los cuatro valores tambien se pueden dejar en el config file (`.harness.env`,
 | `start` | Transicion a **In Progress** (y entra al sprint vigente, si hay) |
 | `advance --nota` | Comentario con la nota |
 | `approve-spec --yes` | Comentario con el sello de la aprobacion |
-| `close --status done` | Transicion a **Done** + comentario con la nota |
+| `close --status done` | Transicion a **Done** de la historia **Y DE SUS SUBTASKS DE AC** + comentario con la nota |
 | `close --status blocked` | Flag **Impediment** (la historia no cambia de columna) |
 
 Y en Confluence, con `atlassian publish`: el PRD maestro, cada PRD anidado (como
 pagina hija, respetando el arbol de `prd tree`), el SDD maestro y cada spec
 (colgado del PRD que lo origina). Cada pagina enlaza a su issue y cada issue a
 su pagina.
+
+Ademas publica **toda la documentacion rectora que el arbol del arnes no
+alcanza**: cada `.md` de `docs/prd/` (los PRD y SDD de producto, no solo los
+maestros) y cada `docs/orden-cola-*.md`. El titulo sale del `# ` del documento,
+recortado a los 255 caracteres que admite Confluence; si el documento no tiene
+`# `, cae al nombre del archivo.
 
 ## El MCP en tus agentes (feature #52)
 
