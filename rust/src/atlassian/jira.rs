@@ -346,6 +346,35 @@ pub fn sprint_issues(client: &Client, sprint_id: i64) -> anyhow::Result<Vec<(Str
         .collect())
 }
 
+/// Las subtasks que Jira YA tiene colgando de la historia, como
+/// `(resumen, clave)`.
+///
+/// Existe porque el mapa local de AC puede estar vacio aunque el tablero si
+/// las tenga: las subio un backfill cuya escritura de estado se perdio. Para
+/// cerrar los AC de una feature manda el tablero, no `state.json`.
+pub fn subtasks(client: &Client, key: &str) -> anyhow::Result<Vec<(String, String)>> {
+    let res = client.get(&format!("/rest/api/3/issue/{key}?fields=subtasks"))?;
+    let Some(list) = res
+        .get("fields")
+        .and_then(|f| f.get("subtasks"))
+        .and_then(Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(list
+        .iter()
+        .filter_map(|s| {
+            let clave = s.get("key").and_then(Value::as_str)?;
+            let resumen = s
+                .get("fields")
+                .and_then(|f| f.get("summary"))
+                .and_then(Value::as_str)
+                .unwrap_or(clave);
+            Some((resumen.to_string(), clave.to_string()))
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

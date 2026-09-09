@@ -686,10 +686,20 @@ fn execute(
             Ok(None)
         }
         IntentKind::TransitionAcs { fid, to } => {
-            let acs = state.feature_acs(fid);
+            let mut acs = state.feature_acs(fid);
             if acs.is_empty() {
-                // Sin AC subidos no hay nada que cerrar, y no es un error:
-                // hay features cuyo spec no declara criterios.
+                // El mapa local puede estar vacio aunque el tablero SI tenga
+                // las subtasks: las subio un backfill cuya escritura de
+                // estado se perdio. Sin preguntarle a Jira, este intent se
+                // aplicaba "con exito" sin mover nada y dejaba la historia
+                // en Done con sus AC en To Do. Medido en la feature #136.
+                if let Some(historia) = state.feature_issue(fid).map(str::to_string) {
+                    acs = jira::subtasks(client, &historia)?;
+                }
+            }
+            if acs.is_empty() {
+                // Ahora si: no hay AC que cerrar. Hay features cuyo spec no
+                // declara criterios.
                 return Ok(None);
             }
             let mut movidas = 0usize;
