@@ -108,6 +108,25 @@ pub fn create_space(client: &Client, key: &str, name: &str) -> anyhow::Result<St
         .context("Confluence creo el space pero no devolvio su id")
 }
 
+/// Confluence corta los titulos de pagina en 255 caracteres y RECHAZA la
+/// peticion entera con HTTP 400 si se pasa (no recorta solo). Un H1 largo de
+/// un spec bastaba para abortar el `publish` COMPLETO: el bucle publica en
+/// orden y muere en el primer documento pasado de largo, dejando sin subir
+/// todo lo que venia despues. Es el mismo criterio que `jira::truncate_summary`
+/// aplica a los resumenes, y por la misma razon.
+///
+/// El recorte deja 252 caracteres mas los tres puntos, de modo que el
+/// resultado mide exactamente 255 y sigue siendo un titulo unico por
+/// documento (el prefijo lleva el numero de feature).
+pub fn truncate_title(title: &str) -> String {
+    let clean = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.chars().count() <= 255 {
+        return clean;
+    }
+    let short: String = clean.chars().take(252).collect();
+    format!("{short}...")
+}
+
 /// Crea la pagina (publicada) y devuelve su id y version.
 pub fn create_page(
     client: &Client,
@@ -249,5 +268,15 @@ mod tests {
             webui: None,
         };
         assert!(page_url("https://x.cl", &sin_link).contains("pageId=9"));
+    }
+
+    #[test]
+    fn truncate_title_should_respect_confluence_limit() {
+        let long = "x".repeat(400);
+        let out = truncate_title(&long);
+        assert_eq!(out.chars().count(), 255);
+        assert!(out.ends_with("..."));
+        // Corto: intacto salvo la normalizacion de espacios.
+        assert_eq!(truncate_title(" hola\nmundo "), "hola mundo");
     }
 }

@@ -779,7 +779,9 @@ fn doc_title(file: &std::path::Path, text: &str) -> String {
         if let Some(rest) = line.strip_prefix("# ") {
             let t = rest.trim();
             if !t.is_empty() {
-                return t.to_string();
+                // El H1 va RECORTADO: Confluence rechaza con 400 todo titulo
+                // de mas de 255 caracteres y aborta el publish entero.
+                return confluence::truncate_title(t);
             }
         }
     }
