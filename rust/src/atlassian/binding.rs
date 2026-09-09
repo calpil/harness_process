@@ -44,7 +44,12 @@ fn default_feature() -> String {
 }
 
 fn default_ac() -> String {
-    "Subtask".to_string()
+    // "Sub-task" CON GUION: es el nombre por defecto del tipo de subtarea
+    // en Jira. Con "Subtask" el API rechaza cada creacion con
+    // `HTTP 400 issuetype: Specify a valid issue type` y los intents se
+    // acumulan en la outbox sin que nada lo grite. Medido contra el proyecto
+    // SCRUM el 2026-09-08: 41 subtasks de AC rebotadas.
+    "Sub-task".to_string()
 }
 
 fn default_bug() -> String {
@@ -268,7 +273,7 @@ mod tests {
         // Decision OBS-6: `Story` por default.
         assert_eq!(back.jira.issue_types.feature, "Story");
         assert_eq!(back.jira.issue_types.epic, "Epic");
-        assert_eq!(back.jira.issue_types.ac, "Subtask");
+        assert_eq!(back.jira.issue_types.ac, "Sub-task");
         // Decision OBS-7: blocked se marca con el flag Impediment.
         assert_eq!(back.jira.statuses.blocked_flag, "Impediment");
         assert!(back.is_active());
