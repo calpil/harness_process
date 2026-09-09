@@ -210,8 +210,17 @@ pub fn to_storage(markdown: &str, source_note: Option<&str>) -> String {
         }
 
         // Parrafo: junta lineas contiguas.
+        //
+        // La PRIMERA linea entra SIEMPRE, sin pasar por los cortes de abajo.
+        // Si no, el bucle se cuelga para siempre con las lineas que llegan
+        // hasta aca sin ser parrafo de verdad: un `|` que no abre tabla
+        // (una fila de tabla partida a mano, sin separador en la siguiente)
+        // o un `#` que no es titulo (nivel > 6, o sin texto). Cortaban en la
+        // primera vuelta, `para` quedaba vacio e `i` no avanzaba nunca.
         close_list(&mut out, &mut list);
         let mut para = String::new();
+        para.push_str(trimmed);
+        i += 1;
         while i < lines.len() {
             let l = lines[i].trim();
             if l.is_empty()
@@ -310,6 +319,23 @@ mod tests {
         let html = to_storage("# T\n", Some("Fuente: docs/prd/PRD-master.md"));
         assert!(html.contains("<hr/>"));
         assert!(html.contains("Fuente: docs/prd/PRD-master.md"));
+    }
+
+    #[test]
+    fn should_not_hang_on_a_pipe_row_without_separator() {
+        // Una fila de tabla partida a mano deja el resto de las filas sin
+        // cabecera: `|` que no abre tabla. Antes esto colgaba el proceso.
+        let md = "| a | b |\n| c | d |\n\nfin\n";
+        let html = to_storage(md, None);
+        assert!(html.contains("fin"), "el texto posterior tiene que salir");
+        assert!(!html.contains("<table>"), "sin separador no hay tabla");
+    }
+
+    #[test]
+    fn should_not_hang_on_a_hash_that_is_not_a_heading() {
+        // Nivel > 6 y titulo vacio: ninguna de las dos es un `<h*>` valido.
+        let html = to_storage("#######\n#\n# \nfin\n", None);
+        assert!(html.contains("fin"));
     }
 
     #[test]
