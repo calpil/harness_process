@@ -569,6 +569,48 @@ mod tests {
     }
 
     #[test]
+    fn close_done_should_emit_the_transition_of_the_feature_and_of_its_acs() {
+        // El tablero no puede quedar afirmando trabajo pendiente que el repo
+        // ya cerro: al pasar la historia a Done van tambien sus subtasks.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = HarnessPaths::from_root(dir.path().to_path_buf());
+        crate::atlassian::binding::Binding {
+            site: "calpil.atlassian.net".to_string(),
+            cloud_id: None,
+            enabled: true,
+            auto: false,
+            jira: crate::atlassian::binding::JiraBinding {
+                project_key: "SCRUM".to_string(),
+                ..Default::default()
+            },
+            confluence: crate::atlassian::binding::ConfluenceBinding {
+                space_key: "SD".to_string(),
+                space_id: None,
+            },
+        }
+        .save(&paths)
+        .unwrap();
+
+        let mut feature = Map::new();
+        feature.insert("id".to_string(), Value::from(15));
+        feature.insert("name".to_string(), Value::from("demo"));
+        on_close(&paths, &feature, "done", None);
+
+        let kinds: Vec<String> = crate::atlassian::outbox::pending(&paths)
+            .iter()
+            .map(|i| format!("{:?}", i.kind))
+            .collect();
+        assert!(
+            kinds.iter().any(|k| k.starts_with("Transition {")),
+            "falta la transicion de la historia: {kinds:?}"
+        );
+        assert!(
+            kinds.iter().any(|k| k.starts_with("TransitionAcs {")),
+            "falta la transicion de los AC: {kinds:?}"
+        );
+    }
+
+    #[test]
     fn hooks_should_do_nothing_without_binding() {
         // AC-4: sin binding no se crea ni la carpeta de la outbox.
         let dir = tempfile::tempdir().unwrap();
