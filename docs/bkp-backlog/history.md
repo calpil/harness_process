@@ -23,3 +23,9 @@
 - 2026-09-07T23:40:53Z prd apply feature #81 documentos=3 escritos=3
 - 2026-09-07T23:41:02Z revision feature #81 veredicto=approved
 - 2026-09-07T23:41:11Z close feature #81 status=done leccion=probar-contra-datos-reales note=
+- 2026-09-08T23:09:54Z add feature #84 leccion partir: parte una leccion sobre el tope a referencias/ con informe y --aplicar, reconoce las secciones por feature en sus formas reales, y el check resume en una linea las lecciones sobre el tope
+- 2026-09-08T23:09:54Z start feature #84 leccion partir: parte una leccion sobre el tope a referencias/ con informe y --aplicar, reconoce las secciones por feature en sus formas reales, y el check resume en una linea las lecciones sobre el tope
+- 2026-09-08T23:13:22Z approve-spec feature #84 estado=approved nota=Alan: 'Aprobado' a los diez AC; OBS-1 titulo con #N o fecha salvo canonicas; OBS-2 lo movido queda y exit 2; OBS-3 --seccion se niega sobre canonicas
+- 2026-09-08T23:58:54Z revision feature #84 veredicto=approved
+- 2026-09-08T23:59:58Z prd apply feature #84 documentos=3 escritos=2
+- 2026-09-09T00:00:01Z close feature #84 status=done leccion=probar-contra-datos-reales note=

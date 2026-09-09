@@ -2254,6 +2254,33 @@
       "closed_at": "2026-09-07T01:49:56Z",
       "leccion": "ninguna",
       "leccion_motivo": "la leccion criterios-de-cierre (referencia #78, el rojo por precondicion) sirvio tal cual y quedo registrada con leccion usar; el fix es un cambio de severidad sin tecnica nueva"
+    },
+    {
+      "id": 84,
+      "name": "leccion partir: parte una leccion sobre el tope a referencias/ con informe y --aplicar, reconoce las secciones por feature en sus formas reales, y el check resume en una linea las lecciones sobre el tope",
+      "microservicios": [],
+      "acceptance": [
+        "Given una leccion de clase sobre rules.leccion_max_lineas, When se corre leccion partir <clase>, Then informa que secciones cuentan UNA feature o sesion (titulos con (feature #N), (#N, fecha), feature #N, o #N con fecha) y cuantas lineas quedarian; con --aplicar las MUEVE sin reescribir a docs/lecciones/<clase>/referencias/<slug>.md con la cabecera de referencia, deja un puntero de una linea en el indice de referencias de la leccion, y si aun asi no baja del tope lo dice con cuanto falta y acepta --seccion <titulo> para mover una seccion elegida; harness_check.sh resume las lecciones sobre el tope en UNA linea [i] con el comando. Disparador: 2026-09-08, cuatro lecciones de realestate sobre el tope (una de 2361 lineas) cuyos titulos el arnes no reconoce como secciones por feature"
+      ],
+      "status": "done",
+      "started_at": "2026-09-08T23:09:54Z",
+      "branch": "feature/84-leccion-partir-parte-una-leccion-sobre-el-tope-a",
+      "worktree": "/Users/alan/harness_process-wt/84-leccion-partir-parte-una-leccion-sobre-el-tope-a",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/84-leccion-partir-parte-una-leccion-sobre-el-tope-a/docs/plan-feature-84-leccion-partir-parte-una-leccion-sobre-el-tope-a.md",
+        "mtime": 1788908994.3157587,
+        "size": 829,
+        "hash": "e5b6e1d9535ab9d4"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/84-leccion-partir-parte-una-leccion-sobre-el-tope-a/docs/spec-feature-84-leccion-partir-parte-una-leccion-sobre-el-tope-a.md",
+        "mtime": 1788909202.4136508,
+        "size": 10877,
+        "hash": "af0bd69caf57734a"
+      },
+      "closed_at": "2026-09-08T23:59:58Z",
+      "leccion": "probar-contra-datos-reales"
     }
   ]
 }
