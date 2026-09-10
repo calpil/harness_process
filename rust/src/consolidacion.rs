@@ -33,7 +33,18 @@ use serde_json::Value;
 
 /// Backends conocidos, en orden. Ninguno esta pinneado: el primero que exista
 /// gana, y `HARNESS_CONSOLIDAR_CMD` los sobreescribe a todos.
-pub const CLIS: [(&str, &[&str]); 2] = [("claude", &["-p"]), ("kimi", &["-p"])];
+pub const CLIS: [(&str, &[&str]); 3] = [
+    ("claude", &["-p"]),
+    ("kimi", &["-p"]),
+    // Feature #85: `-s` imprime solo la respuesta del agente (sin stats), `-p`
+    // toma el prompt como argumento, igual que claude/kimi. Ultimo de la tabla.
+    ("copilot", &["-s", "-p"]),
+];
+
+/// Como se autentica Copilot CLI (medido en 1.0.83): sin esto sale 1 con
+/// "No authentication information found", y el skip tiene que decirlo.
+pub const COPILOT_AUTH: &str =
+    "Copilot CLI se autentica con `copilot` + /login, o con COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN.";
 
 /// Segundos antes de cortar al backend. Un modelo colgado no cuelga el comando.
 pub const TIMEOUT_DEFAULT: u64 = 120;
@@ -82,12 +93,12 @@ impl Backend {
             Backend::SinNinguno { hay_api_key: true } => Some(format!(
                 "Sin backend: hay una API key en el entorno, pero este arnes NO habla HTTP.\n    \
                  Declara un CLI: HARNESS_CONSOLIDAR_CMD=\"<comando>\"\n    \
-                 CLIs que detecta solo: {}",
+                 CLIs que detecta solo: {}\n    {COPILOT_AUTH}",
                 CLIS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
             )),
             Backend::SinNinguno { hay_api_key: false } => Some(format!(
                 "Sin backend: no se encontro ninguno de {} en el PATH.\n    \
-                 Declara uno con HARNESS_CONSOLIDAR_CMD=\"<comando>\".",
+                 Declara uno con HARNESS_CONSOLIDAR_CMD=\"<comando>\".\n    {COPILOT_AUTH}",
                 CLIS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
             )),
             _ => None,
@@ -550,9 +561,24 @@ pub fn preguntar(
         if let Some(mut e) = hijo.stderr.take() {
             let _ = e.read_to_string(&mut err);
         }
-        return Err(format!("el backend fallo: {}", err.trim()));
+        return Err(con_pista_de_auth(exe, format!("el backend fallo: {}", err.trim())));
     }
     Ok(salida)
+}
+
+/// Feature #85: Copilot sin sesion sale 1 con "No authentication information
+/// found"; el error del arnes tiene que decir como autenticarse, no solo
+/// repetir el del CLI.
+pub fn con_pista_de_auth(exe: &str, msg: String) -> String {
+    let es_copilot = Path::new(exe)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.eq_ignore_ascii_case("copilot"));
+    if es_copilot && msg.to_lowercase().contains("authentication") {
+        format!("{msg}\n    {COPILOT_AUTH}")
+    } else {
+        msg
+    }
 }
 
 /// Por que un paraguas no puede recibir todavia lo que las miembros ensenaban.
@@ -696,7 +722,41 @@ mod tests {
         assert!(matches!(b, Backend::SinNinguno { .. }));
         assert!(b.argv().is_none());
         let msg = b.motivo_del_skip().unwrap();
-        assert!(msg.contains("claude") && msg.contains("kimi"), "{msg}");
+        assert!(msg.contains("claude") && msg.contains("kimi") && msg.contains("copilot"), "{msg}");
+    }
+
+    #[test]
+    fn backend_copilot_should_be_detected_after_claude_and_kimi() {
+        // Feature #85: `copilot -s -p <prompt>`; claude y kimi siguen ganando.
+        let b = resolver_backend(&encendida(), None, |n| n == "copilot");
+        assert_eq!(
+            b,
+            Backend::Cli {
+                nombre: "copilot".into(),
+                argv: vec!["copilot".into(), "-s".into(), "-p".into()]
+            }
+        );
+        let b = resolver_backend(&encendida(), None, |n| n == "copilot" || n == "kimi");
+        assert!(matches!(&b, Backend::Cli { nombre, .. } if nombre == "kimi"), "{b:?}");
+    }
+
+    #[test]
+    fn backend_copilot_should_add_the_auth_hint_when_the_cli_is_not_logged_in() {
+        let m = con_pista_de_auth("/usr/local/bin/copilot", "el backend fallo: Error: No authentication information found.".into());
+        assert!(m.contains("/login") && m.contains("GH_TOKEN"), "{m}");
+        let m = con_pista_de_auth("copilot", "el backend fallo: timeout".into());
+        assert!(!m.contains("/login"), "{m}");
+        let m = con_pista_de_auth("claude", "el backend fallo: authentication".into());
+        assert!(!m.contains("/login"), "{m}");
+    }
+
+    #[test]
+    fn backend_copilot_should_be_named_in_the_skip_with_its_auth() {
+        for hay in [false, true] {
+            let msg = Backend::SinNinguno { hay_api_key: hay }.motivo_del_skip().unwrap();
+            assert!(msg.contains("copilot"), "{msg}");
+            assert!(msg.contains("/login") && msg.contains("GH_TOKEN"), "{msg}");
+        }
     }
 
     #[test]

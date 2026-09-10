@@ -122,6 +122,10 @@ Este arnes usa un mapa progresivo: lee solo lo necesario para la tarea actual.
 - `docs/kimi-cli-uso-eficiente.md` (RAIZ): guia de uso eficiente de Kimi Code
   CLI (exclusiones de contexto, `.kimirules`, acotamiento por archivo, `/new`
   entre tareas).
+- `.github/copilot.json` y `.github/copilot-instructions.md` (RAIZ de un proyecto
+  instalado): hooks y bloque del arnes para GitHub Copilot CLI (feature #85). Son
+  del usuario: el instalador los mezcla y `--reset` quita solo lo del arnes; el
+  formato vive en `rust/src/copilot.rs` (`harness copilot instalar|quitar`).
 - `docs/atlassian-integracion.md` (RAIZ): como el flujo se refleja en Jira y
   Confluence. Si el proyecto tiene `atlassian.json`, cada transicion deja un
   intent en `progress/atlassian/outbox/`; drenalo con

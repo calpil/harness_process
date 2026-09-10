@@ -126,6 +126,9 @@ exit 0
         Set-TextUtf8NoBom -Path $cargoPath -Value $fakeCargo
         & chmod +x $cargoPath
     }
+    # Feature #85: un `copilot` falso en el PATH hace que el instalador escriba
+    # los hooks de Copilot en .github/ (sin el, no toca .github/).
+    Set-TextUtf8NoBom -Path (Join-Path $fakeBin "copilot.cmd") -Value "@echo GitHub Copilot CLI 1.0.83."
     $oldPath = $env:PATH
     $oldCargoTarget = $env:CARGO_TARGET_DIR
     $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $env:PATH
@@ -140,6 +143,11 @@ exit 0
     }
 
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "harness_cli.ps1")) "PowerShell CLI shim was not installed."
+    # Feature #85: Copilot detectado -> hooks del arnes en .github/copilot.json y bloque en copilot-instructions.md.
+    $copilotJson = Join-Path $fixture ".github/copilot.json"
+    Assert-True (Test-Path -LiteralPath $copilotJson) "Copilot detected but .github/copilot.json was not written."
+    Assert-True ((Get-Content -LiteralPath $copilotJson -Raw) -match "copilot-json agentStop") "copilot.json has no agentStop hook of the harness."
+    Assert-True ((Get-Content -LiteralPath (Join-Path $fixture ".github/copilot-instructions.md") -Raw) -match "harness:copilot:inicio") "copilot-instructions.md has no harness block."
     Assert-True (Test-Path -LiteralPath (Join-Path $fixture "harness.exe")) "Cargo output harness.exe was not installed."
     $cargoArgs = Get-Content -LiteralPath (Join-Path $fixture "rust/cargo-args.txt") -Raw
     Assert-True ($cargoArgs -match "build --release --locked") "Cargo was not invoked with build --release --locked."

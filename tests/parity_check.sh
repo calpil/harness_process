@@ -154,7 +154,7 @@ modo_asimetrias_declaradas() {
 
 modo_superficies() {
     faltantes=""
-    for sup in "CLAUDE.md" "AGENTS.md" "GEMINI.md" "LLM.md"; do
+    for sup in "CLAUDE.md" "AGENTS.md" "GEMINI.md" "LLM.md" "copilot.json" "copilot-instructions.md"; do
         en_sh=0; en_ps1=0
         grep -q "$sup" "$REPO_ROOT/setup_harness.sh" && en_sh=1
         grep -q "$sup" "$REPO_ROOT/setup_harness.ps1" && en_ps1=1
@@ -168,7 +168,7 @@ modo_superficies() {
 # y el .ps1 usa 132 `Assert-True` sin secciones nombradas—, asi que contar
 # bloques no compara nada. Lo que si compara es la COBERTURA: cada tema que el
 # .sh declara tiene que aparecer, por su palabra clave, en el .ps1.
-TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian migrate-rules|MigrateRules"
+TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian migrate-rules|MigrateRules copilot|Copilot"
 
 modo_smokes() {
     [ -f "$REPO_ROOT/tests/setup_smoke.ps1" ] || { ok "smokes: no hay smoke ps1, nada que comparar"; return; }

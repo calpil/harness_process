@@ -1712,4 +1712,9 @@ echo "[Ok] Lecciones #80: el check avisa por la leccion sobre el tope."
 # Feature #83: graphify-out/.graphify_stale avisa con [i] y no hace fallar el check.
 HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/graphify_stale_check.sh" \
     || { echo "[FALLO] graphify_stale_check: ver arriba"; exit 1; }
+# Feature #85: Copilot CLI como backend (deteccion, --copilot/--no-copilot,
+# mezcla sobre lo ajeno, reset, y el runtime copilot-json).
+HARNESS_PREBUILT_BIN="$PREBUILT_BIN" bash "$REPO_ROOT/tests/copilot_hook_check.sh" \
+    || { echo "[FALLO] copilot_hook_check: ver arriba"; exit 1; }
+echo "[Ok] copilot: instalador y runtime copilot-json (tests/copilot_hook_check.sh)."
 echo "[Ok] Graphify #83: el marcador stale avisa y no bloquea el Stop."
