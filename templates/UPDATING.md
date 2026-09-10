@@ -854,6 +854,45 @@ Qué tienes que hacer: **nada**. Tu instalación se repara sola al actualizar. S
 quieres que el aviso `[i]` desaparezca, re-corre el instalador: es lo único que
 escribe el marker (los scripts son de solo lectura y nunca lo regeneran).
 
+## GitHub Copilot CLI como backend (feature #85)
+
+Copilot CLI lee `AGENTS.md` nativamente. El instalador, solo si `copilot` esta
+en el PATH o se pasa `--copilot` / `-Copilot` (`--no-copilot` / `-NoCopilot`
+lo omite), llama a `harness copilot instalar` y deja:
+
+- `.github/copilot.json` con los hooks `sessionStart`, `agentStop` y
+  `sessionEnd` del arnes, MEZCLADOS sobre lo que ya hubiera (claves y hooks
+  ajenos intactos; un hook ajeno en uno de esos eventos se deja y se avisa).
+- `.github/copilot-instructions.md` con un bloque entre marcadores
+  `harness:copilot:inicio/fin` que apunta a `AGENTS.md`; el texto ajeno queda.
+
+`bin/harness-hook copilot-json <evento>` (y `harness-hook.ps1`, que manda todo
+lo legible a stderr porque Copilot parsea stdout) responde el JSON que Copilot
+espera: `agentStop` corre el gate de Stop y emite `{"block":true,"reason":...}`
+o `{"block":false}` (lee `stopHookActive` como corte); `sessionStart` y
+`sessionEnd` emiten `{}` (`sessionEnd` corre el check solo para informar). Cada
+hook lleva `timeout: 120000` (milisegundos, la unidad del ejemplo de la
+documentacion). `--reset` / `-Reset` respalda los dos archivos en `bkp/` y
+corre `harness copilot quitar`: saca lo del arnes y borra el archivo que quede
+sin nada POR ESO (un `hooks` vacio o no-objeto del usuario no se toca). Nunca
+se tocan, con aviso: un archivo ilegible (JSON con comentarios o BOM +
+comentarios, texto no UTF-8), un enlace simbolico, un marcador del arnes sin
+su pareja. El `copilot.json` se re-serializa (sangria de dos, orden de claves
+del usuario, BOM conservado); el `.md` ajeno vuelve byte a byte. En Windows
+el prefijo del hook viaja por `HARNESS_COPILOT_HOOK` (PowerShell 5.1 no pasa
+comillas por argv) y `harness copilot instalar` lo acepta como alternativa a
+`--hook`. `doctor` mira que `hooks.agentStop` apunte al runtime (un
+`agentStop` ajeno que el arnes dejo cuenta como no enganchado) y su remedio
+dice `--copilot`. Si `consolidar` elige `copilot` y sale sin sesion, el error
+agrega como autenticarse. `harness doctor` incluye
+`copilot` (huella `.github/copilot.json`) y `consolidar` detecta `copilot -s -p`
+despues de `claude` y `kimi`; el skip nombra la autenticacion
+(`copilot` + `/login`, o `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`). Fuera de alcance:
+agentes en `.github/agents/` (formato sin verificar en vivo) y la API de
+Copilot. Medido con Copilot CLI 1.0.83 (`--help` y documentacion); la semantica
+exacta de `agentStop` (al parar vs. por cada tool call) queda por medir con una
+sesion autenticada.
+
 ## Kimi Code CLI: hooks globales (única excepción de escritura en `$HOME`)
 
 Desde esta versión (feature #8) Kimi Code CLI (v0.29.x) es backend de primera

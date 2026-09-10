@@ -1,7 +1,7 @@
 # Harness Process
 
 Instalador de un arnes multi-repo para Claude Code, Codex, Gemini, Grok,
-Kimi Code, Antigravity y otros agentes CLI. Genera superficies de
+Kimi Code, GitHub Copilot CLI, Antigravity y otros agentes CLI. Genera superficies de
 instrucciones, hooks, launchers, memoria compartida y una capa opcional de
 subagentes.
 
@@ -1141,6 +1141,43 @@ mapa de agentes. Desde la feature #7 incluye ademas:
   padre, con un aviso `[i]` que recuerda que re-correr el instalador regenera el
   marker (los scripts nunca lo escriben). Sin huella no se infiere nada, y un
   marker presente con otro valor (`root`) se respeta al pie de la letra.
+
+## GitHub Copilot CLI: hooks y guia en `.github/` (feature #85)
+
+Copilot CLI lee `AGENTS.md` nativamente, asi que el flujo, los roles y el
+perfil le llegan sin mas. Lo que el arnes agrega vive en dos archivos que son
+del usuario y que el instalador MEZCLA en vez de pisar:
+
+- `.github/copilot.json`: los tres hooks del arnes (`sessionStart`, `agentStop`,
+  `sessionEnd`) apuntando a `bin/harness-hook copilot-json <evento>`. Las
+  claves ajenas y los hooks ajenos de otros eventos quedan; un hook ajeno en
+  uno de esos tres eventos no se pisa (se avisa y se deja).
+- `.github/copilot-instructions.md`: un bloque corto entre marcadores
+  `<!-- harness:copilot:inicio -->` / `fin` que apunta a `AGENTS.md` y explica
+  los hooks; el texto de afuera queda intacto.
+
+`agentStop` se engancha como el Stop: el runtime corre el commit guard y
+responde `{"block":true,"reason":"..."}` si falla (con `stopHookActive` como
+corte, igual que `stop_hook_active` en Claude) y `{"block":false}` si pasa;
+`sessionEnd` corre el check solo para informar. Ojo: la documentacion de
+Copilot describe `agentStop` de forma ambigua (al parar vs. tras cada tool
+call) y no se pudo medir sin sesion; si dispara por cada tool call, pasa a
+informativo (decision registrada en el SDD, D14). Cada hook lleva
+`timeout: 120000` (milisegundos, la unidad del ejemplo de la documentacion). Se genera solo si `copilot`
+esta en el PATH o se pasa `--copilot` (`-Copilot` en Windows); `--no-copilot`
+lo omite; `--reset` respalda los dos archivos en `bkp/` y quita SOLO lo del
+arnes. Lo que no se toca nunca, con aviso: un archivo que no se puede leer
+(JSON con comentarios, texto que no es UTF-8), un enlace simbolico y un
+marcador del arnes sin su pareja. El `copilot.json` se re-serializa con sangria
+de dos y el orden de claves del usuario; el `.md` ajeno vuelve byte a byte
+(un archivo sin salto final gana uno). El formato
+vive en el binario (`harness copilot instalar|quitar`), asi los dos
+instaladores no pueden divergir. `harness doctor` lista `copilot` con los
+demas backends y revisa que su hook apunte al runtime, y `lecciones consolidar`
+lo usa como `copilot -s -p` cuando no hay `claude` ni `kimi` (sin sesion de
+GitHub el skip dice como autenticarlo). Los agentes de `.github/agents/` quedan
+fuera hasta verificar el formato con el CLI autenticado: Copilot aplica los
+roles como fases, igual que Antigravity.
 
 ## Kimi Code CLI: backend con hooks globales (unica excepcion de `$HOME`)
 

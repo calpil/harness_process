@@ -39,6 +39,8 @@ WITH_SUBAGENTS=1
 # --no-kimi lo excluye explicitamente. Los artefactos DE PROYECTO
 # (.kimi-code/agents/, launcher) se generan siempre, como los demas backends.
 INSTALL_KIMI_HOOKS=1
+# Feature #85: Copilot CLI. auto = solo si `copilot` esta en el PATH; 1 = --copilot; 0 = --no-copilot.
+INSTALL_COPILOT=auto
 FORCE=0
 # Layout: 'subdir' (DEFAULT) = el arnes vive en una subcarpeta y orquesta el
 # directorio PADRE; las superficies LLM se escriben en el padre y los scripts
@@ -483,6 +485,8 @@ while [ "$#" -gt 0 ]; do
         --no-graphify-skills) INSTALL_GRAPHIFY_SKILLS=0 ;;
         --no-antigravity) INSTALL_ANTIGRAVITY=0 ;;
         --no-kimi) INSTALL_KIMI_HOOKS=0 ;;
+        --copilot) INSTALL_COPILOT=1 ;;
+        --no-copilot) INSTALL_COPILOT=0 ;;
         --with-postgres) ;;
         --subdir) LAYOUT=subdir ;;
         --root) LAYOUT=root ;;
@@ -764,6 +768,24 @@ if [ "$RESET" -eq 1 ]; then
     SURFACE_DIR="$REPO_ROOT"
     BKP_DIR="${HARNESS_BKP_DIR:-$HARNESS_DIR/bkp}"
     backup_datos   # feature #78: con BKP_DIR ya resuelto, y antes de borrar ninguna superficie
+
+    # Feature #85: Copilot. .github/copilot.json y copilot-instructions.md son
+    # del usuario: se respaldan, se quita SOLO lo del arnes (el binario sabe
+    # que es suyo), y antes de que el reset borre nada. HARNESS_BIN_NAME se
+    # define mas abajo: aca se prueban los dos nombres (Git Bash usa .exe).
+    if [ "$DRY_RUN" -eq 0 ]; then
+        reset_copilot_bin=""
+        for reset_cand in harness harness.exe; do
+            [ -x "$HARNESS_DIR/$reset_cand" ] && { reset_copilot_bin="$HARNESS_DIR/$reset_cand"; break; }
+        done
+        if [ -n "$reset_copilot_bin" ]; then
+            [ -f "$SURFACE_DIR/.github/copilot.json" ] && backup_file "$SURFACE_DIR/.github/copilot.json"
+            [ -f "$SURFACE_DIR/.github/copilot-instructions.md" ] && backup_file "$SURFACE_DIR/.github/copilot-instructions.md"
+            "$reset_copilot_bin" copilot quitar --raiz "$SURFACE_DIR" 2>&1 | sed 's/^/   -> copilot: /' || true
+        elif [ -f "$SURFACE_DIR/.github/copilot.json" ] || [ -f "$SURFACE_DIR/.github/copilot-instructions.md" ]; then
+            log_warn "   -> Copilot: sin el binario del arnes no se puede quitar lo suyo de .github/ (re-corre el instalador y despues --reset, o borra los hooks con 'copilot-json' y el bloque harness:copilot a mano)."
+        fi
+    fi
 
     # Asegurar .gitignore también en reset (por si alguien lo borró)
     ensure_harness_not_committed
@@ -1200,6 +1222,10 @@ Orquestacion (mismos roles, formato nativo por herramienta):
 - **Grok Build**: lee `.claude/agents/` por compatibilidad con Claude Code.
 - **Kimi Code CLI**: subagentes nativos en `.kimi-code/agents/*.md` (lee este
   `AGENTS.md` nativamente).
+- **GitHub Copilot CLI**: lee este `AGENTS.md` nativamente; hooks del arnes en
+  `.github/copilot.json` y bloque en `.github/copilot-instructions.md` (solo con
+  `copilot` en la maquina o `--copilot`; `--no-copilot` lo omite). Sin
+  subagentes del arnes: aplica los roles como fases.
 - **Antigravity y otros**: aplica `__HREL__roles/*.md` como fases secuenciales.
 
 Detalle por herramienta (formatos, modelos, effort): `__HREL__roles/README.md`.
@@ -1384,7 +1410,7 @@ write_harness_hook_runtime() {
 #!/bin/bash
 set -Eeuo pipefail
 
-MODE="${1:-plain}"   # plain | gemini-json | codex-json
+MODE="${1:-plain}"   # plain | gemini-json | codex-json | copilot-json (feature #85)
 EVENT="${2:-${GROK_HOOK_EVENT:-unknown}}"
 WITH_SUBAGENTS="__WITH_SUBAGENTS__"
 ROOT="${HARNESS_REPO_ROOT:-${GROK_WORKSPACE_ROOT:-}}"
@@ -1486,7 +1512,8 @@ run_stop() {
     # El `|| true` NO es decorativo: `bin/harness-hook` corre con
     # `set -Eeuo pipefail`, y cuando el payload no trae la clave —el caso NORMAL
     # de la primera vuelta— `grep` sale 1 y mataba el hook antes de decidir nada.
-    ultimo_valor="$(grep -oE '"stop_hook_active"[[:space:]]*:[[:space:]]*[A-Za-z]+' <<<"$stop_input" | tail -1 || true)"
+    # Copilot manda la misma senal en camelCase (`stopHookActive`, feature #85).
+    ultimo_valor="$(grep -oE '"(stop_hook_active|stopHookActive)"[[:space:]]*:[[:space:]]*[A-Za-z]+' <<<"$stop_input" | tail -1 || true)"
     case "$ultimo_valor" in
         *[Tt]rue) HARNESS_STOP_HOOK_ACTIVE=1 ;;
         *) HARNESS_STOP_HOOK_ACTIVE=0 ;;
@@ -1510,7 +1537,7 @@ run_stop() {
 
 run_event() {
     case "$EVENT" in
-        session-start|SessionStart|InstructionsLoaded|BeforeAgent)
+        session-start|SessionStart|InstructionsLoaded|BeforeAgent|sessionStart)
             run_session_start
             ;;
         pre-tool|PreToolUse|BeforeTool)
@@ -1519,7 +1546,7 @@ run_event() {
         post-tool|PostToolUse|AfterTool|Tool)
             run_post_tool
             ;;
-        stop|Stop|AfterAgent|SessionEnd|SessionStop)
+        stop|Stop|AfterAgent|SessionEnd|SessionStop|agentStop|sessionEnd)
             run_stop
             ;;
         *)
@@ -1568,6 +1595,27 @@ elif [ "$MODE" = "codex-json" ]; then
                 exit 0
                 ;;
         esac
+    fi
+elif [ "$MODE" = "copilot-json" ]; then
+    # Copilot CLI parsea el stdout como JSON (feature #85): lo legible va a
+    # stderr. agentStop es el Stop: {"block":true,"reason":...} corta el turno
+    # con el motivo, y {"block":false} lo deja seguir; sessionStart y
+    # sessionEnd nunca bloquean (sessionEnd corre el check solo para informar).
+    if run_event >&2; then
+        case "$EVENT" in
+            agentStop) printf '{"block":false}\n' ;;
+            *) printf '{}\n' ;;
+        esac
+        exit 0
+    else
+        case "$EVENT" in
+            agentStop) printf '{"block":true,"reason":"Harness check fallo; corrige el estado del repo antes de cerrar (el detalle esta en la salida del hook)."}\n' ;;
+            *)
+                echo "Harness hook fallo; revisa la salida del hook." >&2
+                printf '{}\n'
+                ;;
+        esac
+        exit 0
     fi
 else
     run_event
@@ -1864,6 +1912,41 @@ KIMI_HOOKS_EOF
     [ -n "$kimi_rollback" ] && rm -f "$kimi_rollback"
     KIMI_HOOKS_WRITTEN=1
     write_file_notice "config.toml global de Kimi Code ($kimi_cfg, bloque delimitado)"
+}
+
+# Feature #85: Copilot CLI. Sus dos archivos viven en .github/ y son del
+# usuario: el binario MEZCLA los hooks y deja un bloque entre marcadores
+# (`copilot instalar`), y solo si Copilot esta en la maquina o se pidio
+# --copilot (decision usuario 2026-09-09, el mismo criterio que Kimi).
+write_copilot_hooks() {
+    if [ "$INSTALL_COPILOT" = "0" ]; then
+        log_info "   -> Copilot CLI: hooks e instrucciones omitidos (--no-copilot)."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    if [ "$INSTALL_COPILOT" != "1" ] && ! command -v copilot >/dev/null 2>&1; then
+        log_info "   -> Copilot CLI no detectado; no se toca .github/ (para forzarlo: --copilot)."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Escribiria: .github/copilot.json y .github/copilot-instructions.md ($SURFACE_DIR)"
+        COUNT_CREATED=$((COUNT_CREATED + 2))
+        return 0
+    fi
+    if [ ! -x "$HARNESS_DIR/$HARNESS_BIN_NAME" ]; then
+        log_warn "   -> Copilot CLI: sin el binario del arnes no se pueden escribir sus hooks (re-corre el instalador)."
+        COUNT_SKIPPED=$((COUNT_SKIPPED + 1))
+        return 0
+    fi
+    [ -f "$SURFACE_DIR/.github/copilot.json" ] && backup_file "$SURFACE_DIR/.github/copilot.json"
+    [ -f "$SURFACE_DIR/.github/copilot-instructions.md" ] && backup_file "$SURFACE_DIR/.github/copilot-instructions.md"
+    copilot_hook="bash \"$SURFACE_DIR/bin/harness-hook\""
+    if "$HARNESS_DIR/$HARNESS_BIN_NAME" copilot instalar --raiz "$SURFACE_DIR" --hook "$copilot_hook" --arnes "$(harness_rel_without_slash)" 2>&1 | sed 's/^/   -> copilot: /'; then
+        write_file_notice ".github/copilot.json + .github/copilot-instructions.md ($SURFACE_DIR)"
+    else
+        log_warn "   -> Copilot CLI: fallo 'copilot instalar'; revisa .github/copilot.json a mano."
+    fi
 }
 
 write_launchers() {
@@ -3048,6 +3131,7 @@ write_codex_hooks
 write_gemini_hooks
 write_grok_hooks
 write_kimi_hooks
+write_copilot_hooks
 write_launchers
 
 chmod +x init.sh validate_ui.sh commit_guard.sh harness_status.sh harness_check.sh harness_cli

@@ -278,11 +278,14 @@ fn revisar_marker(paths: &HarnessPaths) -> Hallazgo {
 /// Un backend "esta instalado" si su huella esta en la raiz. Solo entonces se le
 /// exige su hook: pedirle hooks de Gemini a quien no usa Gemini es ruido, y el
 /// ruido hunde la herramienta (leccion `probar-contra-datos-reales`).
-const BACKENDS: [(&str, &str, &str); 4] = [
+const BACKENDS: [(&str, &str, &str); 5] = [
     ("claude", ".claude/settings.json", "CLAUDE.md"),
     ("codex", ".codex/hooks.json", "AGENTS.md"),
     ("gemini", ".gemini/settings.json", "GEMINI.md"),
     ("grok", ".grok/hooks/harness.sh", ".grok/GROK.md"),
+    // Feature #85: Copilot CLI; su config de proyecto es del usuario y el
+    // arnes solo MEZCLA sus hooks ahi.
+    ("copilot", ".github/copilot.json", ".github/copilot-instructions.md"),
 ];
 
 fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
@@ -306,18 +309,34 @@ fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
     let mal_apuntados: Vec<String> = BACKENDS
         .iter()
         .filter(|(nombre, huella, _)| {
-            instalados.contains(nombre) && !apunta_al_runtime(&paths.repo_root.join(huella))
+            let ruta = paths.repo_root.join(huella);
+            // Feature #85: el arnes MEZCLA y deja un hook ajeno en copilot; el
+            // que importa es el Stop (agentStop), no que el texto mencione el
+            // runtime en algun otro evento.
+            let bien = if *nombre == "copilot" {
+                copilot_agent_stop_apunta_al_runtime(&ruta)
+            } else {
+                apunta_al_runtime(&ruta)
+            };
+            instalados.contains(nombre) && !bien
         })
         .map(|(nombre, huella, _)| format!("{nombre} ({huella})"))
         .collect();
     if !mal_apuntados.is_empty() {
+        let remedio = if mal_apuntados.iter().any(|m| m.starts_with("copilot")) {
+            format!(
+                "{REINSTALAR} --copilot   (si agentStop es un hook tuyo, el arnes no lo pisa: enganchalo a bin/harness-hook a mano)"
+            )
+        } else {
+            REINSTALAR.to_string()
+        };
         return Hallazgo::falla(
             Area::Hooks,
             format!(
                 "hook(s) que no apuntan a bin/harness-hook: {}",
                 mal_apuntados.join(", ")
             ),
-            REINSTALAR,
+            remedio,
         );
     }
     // El runtime al que todos los hooks apuntan.
@@ -349,6 +368,22 @@ fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
 /// Un archivo de configuracion de hooks "apunta bien" si menciona el runtime
 /// del arnes. Se mira el texto y no se parsea JSON/TOML: los cinco backends
 /// usan formatos distintos y lo unico que importa es si el arnes esta cableado.
+/// `.github/copilot.json`: `true` solo si `hooks.agentStop.command` invoca el
+/// runtime. Un JSON ilegible (BOM, comentarios) cuenta como no enganchado.
+fn copilot_agent_stop_apunta_al_runtime(ruta: &Path) -> bool {
+    let Ok(texto) = std::fs::read_to_string(ruta) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(texto.trim_start_matches('\u{feff}')) else {
+        return false;
+    };
+    json.get("hooks")
+        .and_then(|h| h.get("agentStop"))
+        .and_then(|h| h.get("command"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|c| c.contains("harness-hook"))
+}
+
 fn apunta_al_runtime(config: &Path) -> bool {
     let Ok(texto) = std::fs::read_to_string(config) else {
         return false;
@@ -683,6 +718,52 @@ mod tests {
         assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
         assert!(h.detalle.contains("no apuntan"), "{}", h.detalle);
         assert!(h.detalle.contains("claude"), "{}", h.detalle);
+    }
+
+    #[test]
+    fn doctor_copilot_should_list_the_backend_and_check_where_its_hook_points() {
+        // Feature #85: .github/copilot.json es la huella; el hook tiene que
+        // apuntar al runtime como los demas.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_en(dir.path());
+        std::fs::create_dir_all(paths.repo_root.join(".github")).unwrap();
+        std::fs::create_dir_all(paths.repo_root.join("bin")).unwrap();
+        std::fs::write(paths.repo_root.join("bin/harness-hook"), "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                paths.repo_root.join("bin/harness-hook"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            paths.repo_root.join(".github/copilot.json"),
+            r#"{"hooks":{"agentStop":{"command":"bash /r/bin/harness-hook copilot-json agentStop","shell":"bash"}}}"#,
+        )
+        .unwrap();
+        let h = revisar_hooks(&paths, false);
+        assert_eq!(h.estado, Estado::Ok, "{}", h.detalle);
+        assert!(h.detalle.contains("copilot"), "{}", h.detalle);
+        std::fs::write(
+            paths.repo_root.join(".github/copilot.json"),
+            r#"{"hooks":{"agentStop":{"command":"./mio.sh","shell":"bash"}}}"#,
+        )
+        .unwrap();
+        let h = revisar_hooks(&paths, false);
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
+        assert!(h.detalle.contains("copilot (.github/copilot.json)"), "{}", h.detalle);
+        assert!(h.remedio.as_deref().unwrap_or("").contains("--copilot"), "{:?}", h.remedio);
+        // Cableado parcial (hallazgo de la revision): sessionStart del arnes
+        // pero agentStop ajeno = el commit guard no esta enganchado.
+        std::fs::write(
+            paths.repo_root.join(".github/copilot.json"),
+            r#"{"hooks":{"sessionStart":{"command":"bash /r/bin/harness-hook copilot-json sessionStart"},"agentStop":{"command":"./mio.sh","shell":"bash"}}}"#,
+        )
+        .unwrap();
+        let h = revisar_hooks(&paths, false);
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
     }
 
     #[test]

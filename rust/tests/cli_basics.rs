@@ -9646,3 +9646,174 @@ fn contrato_de_particion_nombra_el_comando_y_ve_las_formas_reales() {
         .stdout(predicate::str::contains("SOBRE EL TOPE"))
         .stdout(predicate::str::contains("leccion partir <clase>"));
 }
+
+// ---------------------------------------------------------------------------
+// Copilot CLI como backend (feature #85)
+// ---------------------------------------------------------------------------
+
+fn leer_json(p: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+#[test]
+fn copilot_instalar_mezcla_sobre_lo_ajeno_y_es_idempotente() {
+    // AC-1: claves ajenas y hooks ajenos de otros eventos quedan; un hook
+    // ajeno en uno de los tres eventos del arnes no se pisa (se avisa); dos
+    // corridas dejan los mismos bytes.
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path().join("proyecto");
+    std::fs::create_dir_all(raiz.join(".github")).unwrap();
+    let cfg = raiz.join(".github/copilot.json");
+    std::fs::write(
+        &cfg,
+        r#"{"model":"gpt-5","hooks":{"toolCall":{"command":"echo x","shell":"bash"},"sessionStart":{"command":"./mio.sh","shell":"bash"}}}"#,
+    )
+    .unwrap();
+    let hook = "bash \"/repo/bin/harness-hook\"";
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz.to_str().unwrap(), "--hook", hook])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Escrito: .github/copilot.json"))
+        .stderr(predicate::str::contains("[i] hook ajeno en sessionStart (se deja): ./mio.sh"));
+    let j = leer_json(&cfg);
+    assert_eq!(j["model"], "gpt-5", "{j}");
+    assert_eq!(j["hooks"]["toolCall"]["command"], "echo x", "{j}");
+    assert_eq!(j["hooks"]["sessionStart"]["command"], "./mio.sh", "el hook ajeno se piso: {j}");
+    assert_eq!(
+        j["hooks"]["agentStop"]["command"],
+        "bash \"/repo/bin/harness-hook\" copilot-json agentStop",
+        "{j}"
+    );
+    assert_eq!(j["hooks"]["agentStop"]["shell"], "bash");
+    assert_eq!(
+        j["hooks"]["sessionEnd"]["command"],
+        "bash \"/repo/bin/harness-hook\" copilot-json sessionEnd",
+        "{j}"
+    );
+    let una = std::fs::read(&cfg).unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz.to_str().unwrap(), "--hook", hook])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sin cambios: .github/copilot.json"));
+    assert_eq!(std::fs::read(&cfg).unwrap(), una, "la segunda corrida cambio el JSON");
+    // Sin archivo previo: se crea con los tres hooks y el shell pedido.
+    let raiz2 = dir.path().join("vacio");
+    std::fs::create_dir_all(&raiz2).unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz2.to_str().unwrap(), "--hook", "pwsh -File hook.ps1", "--shell", "powershell"])
+        .assert()
+        .success();
+    let j2 = leer_json(&raiz2.join(".github/copilot.json"));
+    for ev in ["sessionStart", "agentStop", "sessionEnd"] {
+        assert_eq!(j2["hooks"][ev]["command"], format!("pwsh -File hook.ps1 copilot-json {ev}"), "{j2}");
+        assert_eq!(j2["hooks"][ev]["shell"], "powershell", "{j2}");
+    }
+    // El prefijo puede venir por HARNESS_COPILOT_HOOK (el instalador de Windows
+    // no puede pasar comillas por argv); sin ninguno de los dos, exit 2.
+    let raiz3 = dir.path().join("env");
+    std::fs::create_dir_all(&raiz3).unwrap();
+    cmd(&bin)
+        .env("HARNESS_COPILOT_HOOK", "powershell.exe -File \"C:\\Users\\Alan C\\bin\\harness-hook.ps1\"")
+        .args(["copilot", "instalar", "--raiz", raiz3.to_str().unwrap()])
+        .assert()
+        .success();
+    let j3 = leer_json(&raiz3.join(".github/copilot.json"));
+    assert_eq!(
+        j3["hooks"]["agentStop"]["command"],
+        "powershell.exe -File \"C:\\Users\\Alan C\\bin\\harness-hook.ps1\" copilot-json agentStop",
+        "{j3}"
+    );
+    cmd(&bin)
+        .env_remove("HARNESS_COPILOT_HOOK")
+        .args(["copilot", "instalar", "--raiz", raiz3.to_str().unwrap()])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("HARNESS_COPILOT_HOOK"));
+}
+
+#[test]
+fn copilot_instrucciones_bloque_con_marcadores_sin_pisar_lo_ajeno() {
+    // AC-2.
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path().join("proyecto");
+    std::fs::create_dir_all(raiz.join(".github")).unwrap();
+    let md = raiz.join(".github/copilot-instructions.md");
+    std::fs::write(&md, "# Mis reglas\n\nUsar tabs.\n").unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz.to_str().unwrap(), "--hook", "bash hook", "--arnes", "harness_process"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Escrito: .github/copilot-instructions.md"));
+    let t = std::fs::read_to_string(&md).unwrap();
+    assert!(t.starts_with("# Mis reglas\n\nUsar tabs.\n"), "{t}");
+    assert_eq!(t.matches("<!-- harness:copilot:inicio -->").count(), 1, "{t}");
+    assert_eq!(t.matches("<!-- harness:copilot:fin -->").count(), 1, "{t}");
+    assert!(t.contains("AGENTS.md"), "{t}");
+    assert!(t.contains("agentStop"), "{t}");
+    assert!(t.contains("sh harness_process/harness_cli status"), "la ruta del arnes no respeta --arnes: {t}");
+    let una = std::fs::read(&md).unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz.to_str().unwrap(), "--hook", "bash hook", "--arnes", "harness_process"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sin cambios: .github/copilot-instructions.md"));
+    assert_eq!(std::fs::read(&md).unwrap(), una, "el bloque se duplico");
+    // Sin archivo previo: se crea solo con el bloque.
+    let raiz2 = dir.path().join("vacio");
+    std::fs::create_dir_all(&raiz2).unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz2.to_str().unwrap(), "--hook", "bash hook"])
+        .assert()
+        .success();
+    let t2 = std::fs::read_to_string(raiz2.join(".github/copilot-instructions.md")).unwrap();
+    assert!(t2.starts_with("<!-- harness:copilot:inicio -->"), "{t2}");
+    assert!(t2.contains("sh harness_cli status"), "sin --arnes la ruta es la raiz: {t2}");
+}
+
+#[test]
+fn copilot_quitar_deja_solo_lo_ajeno_y_borra_lo_que_era_solo_del_arnes() {
+    // AC-3.
+    let (dir, bin) = sandbox_with_binary();
+    let raiz = dir.path().join("proyecto");
+    std::fs::create_dir_all(raiz.join(".github")).unwrap();
+    let cfg = raiz.join(".github/copilot.json");
+    let md = raiz.join(".github/copilot-instructions.md");
+    let ajeno_json = r#"{"model":"gpt-5","hooks":{"toolCall":{"command":"echo x","shell":"bash"}}}"#;
+    std::fs::write(&cfg, ajeno_json).unwrap();
+    std::fs::write(&md, "# Mis reglas\n\nUsar tabs.\n").unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz.to_str().unwrap(), "--hook", "bash hook"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["copilot", "quitar", "--raiz", raiz.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Quitado: .github/copilot.json"))
+        .stdout(predicate::str::contains("Quitado: .github/copilot-instructions.md"));
+    let esperado: serde_json::Value = serde_json::from_str(ajeno_json).unwrap();
+    assert_eq!(leer_json(&cfg), esperado, "quedaron restos del arnes o se perdio lo ajeno");
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), "# Mis reglas\n\nUsar tabs.\n");
+    // Archivos que solo tenian lo del arnes: se borran. Y sin archivos no falla.
+    let raiz2 = dir.path().join("vacio");
+    std::fs::create_dir_all(&raiz2).unwrap();
+    cmd(&bin)
+        .args(["copilot", "instalar", "--raiz", raiz2.to_str().unwrap(), "--hook", "bash hook"])
+        .assert()
+        .success();
+    cmd(&bin)
+        .args(["copilot", "quitar", "--raiz", raiz2.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Borrado: .github/copilot.json"))
+        .stdout(predicate::str::contains("Borrado: .github/copilot-instructions.md"));
+    assert!(!raiz2.join(".github/copilot.json").exists());
+    assert!(!raiz2.join(".github/copilot-instructions.md").exists());
+    cmd(&bin)
+        .args(["copilot", "quitar", "--raiz", raiz2.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nada que quitar"));
+}

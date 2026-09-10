@@ -18,6 +18,8 @@ param(
     [switch]$NoGraphifySkills,
     [switch]$NoAntigravity,
     [switch]$NoKimi,
+    [switch]$Copilot,
+    [switch]$NoCopilot,
     [switch]$Force,
     [Alias("Preview")]
     [switch]$DryRun,
@@ -69,6 +71,8 @@ if ($Help) {
 
 $script:HarnessDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:HarnessDir = [IO.Path]::GetFullPath($script:HarnessDir)
+# Feature #85: el binario nativo, para `copilot quitar` en el reset.
+$script:HarnessExe = Join-Path $script:HarnessDir "harness.exe"
 if ($script:Layout -eq "subdir") {
     $script:RepoRoot = Split-Path -Parent $script:HarnessDir
     $script:HarnessSubdir = Split-Path -Leaf $script:HarnessDir
@@ -1009,7 +1013,7 @@ function Write-AgentSurface {
 # Harness Process
 
 This repository uses the Harness Process with Claude Code, Codex, Gemini,
-Grok, Kimi Code, Antigravity, and other agent CLIs.
+Grok, Kimi Code, Copilot CLI, Antigravity, and other agent CLIs.
 
 Before changing code:
 
@@ -1108,6 +1112,11 @@ limit of 1500 characters and no secrets: the file is versioned.
 Efficient Kimi Code CLI usage: see `docs/kimi-cli-uso-eficiente.md` (context
 exclusions, fixed project rules in `.kimirules`, file-scoped prompts, `/new`
 between tasks).
+
+GitHub Copilot CLI reads this `AGENTS.md` natively; the harness puts its hooks
+in `.github/copilot.json` and a block in `.github/copilot-instructions.md`
+(only with `copilot` on the machine or `-Copilot`; `-NoCopilot` skips it). No
+harness subagents for Copilot: apply the roles as sequential phases.
 
 How to write the PRD: see `docs/prd/COMO-ESCRIBIR-UN-PRD.md` (the story first,
 the size the change decides, nested PRDs, and the hard rule: pseudo-code and
@@ -1314,7 +1323,7 @@ function Write-PowerShellHookRuntime {
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet("plain", "gemini-json", "codex-json")]
+    [ValidateSet("plain", "gemini-json", "codex-json", "copilot-json")]
     [string]$Mode = "plain",
     [string]$Event = "unknown"
 )
@@ -1390,7 +1399,7 @@ function Get-BashPath {
 
 function Invoke-HarnessEvent {
     switch -Regex ($Event) {
-        "^(session-start|SessionStart|InstructionsLoaded|BeforeAgent)$" {
+        "^(session-start|SessionStart|InstructionsLoaded|BeforeAgent|sessionStart)$" {
             & $cli graph mapa
             & $cli status
         }
@@ -1400,14 +1409,14 @@ function Invoke-HarnessEvent {
             }
             & $cli status
         }
-        "^(stop|Stop|AfterAgent|SessionEnd|SessionStop)$" {
+        "^(stop|Stop|AfterAgent|SessionEnd|SessionStop|agentStop|sessionEnd)$" {
             # `stop_hook_active` se lee UNA vez y viaja por entorno, igual que en
             # run_stop del hook POSIX: es lo que evita que el commit_guard vuelva
             # a bloquear un turno que ya es consecuencia de un bloqueo suyo. Con
             # la entrada sin redirigir no hay JSON que esperar (feature #52).
             $stopInput = ""
             if ([Console]::IsInputRedirected) { $stopInput = [Console]::In.ReadToEnd() }
-            $env:HARNESS_STOP_HOOK_ACTIVE = if ($stopInput -match '"stop_hook_active"\s*:\s*true') { "1" } else { "0" }
+            $env:HARNESS_STOP_HOOK_ACTIVE = if ($stopInput -match '"(stop_hook_active|stopHookActive)"\s*:\s*true') { "1" } else { "0" }
             if (__WITH_SUBAGENTS__ -eq 1) {
                 & $cli autocheck
             }
@@ -1448,12 +1457,31 @@ function Invoke-HarnessEvent {
 }
 
 try {
-    Invoke-HarnessEvent
-    if ($Mode -eq "gemini-json") {
-        @{ suppressOutput = $true } | ConvertTo-Json -Compress
+    if ($Mode -eq "copilot-json") {
+        # Feature #85: Copilot parsea el stdout como JSON, asi que TODO lo
+        # legible del evento (status, mapa, el gate) va a stderr, como hace el
+        # runtime bash con `run_event >&2`. agentStop es el Stop.
+        Invoke-HarnessEvent *>&1 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+        if ($Event -eq "agentStop") { @{ block = $false } | ConvertTo-Json -Compress } else { "{}" }
+    }
+    else {
+        Invoke-HarnessEvent
+        if ($Mode -eq "gemini-json") {
+            @{ suppressOutput = $true } | ConvertTo-Json -Compress
+        }
     }
 }
 catch {
+    if ($Mode -eq "copilot-json") {
+        if ($Event -eq "agentStop") {
+            @{ block = $true; reason = ("Harness check fallo; corrige el estado del repo antes de cerrar: " + $_.Exception.Message) } | ConvertTo-Json -Compress
+        }
+        else {
+            [Console]::Error.WriteLine([string]$_)
+            "{}"
+        }
+        exit 0
+    }
     if ($Mode -eq "codex-json" -and $Event -match "stop|Stop|AfterAgent|SessionEnd|SessionStop") {
         @{ decision = "block"; reason = $_.Exception.Message } | ConvertTo-Json -Compress
         exit 0
@@ -1749,6 +1777,68 @@ timeout = 120
     $script:Counters.created++
 }
 
+# Feature #85: Copilot CLI. The two files live in .github/ and belong to the
+# user: the binary MERGES the hooks and leaves a block between markers
+# (`copilot instalar`), only when Copilot is on the machine or -Copilot was
+# passed (same rule as Kimi); -NoCopilot skips it.
+function Write-CopilotHooks {
+    if ($NoCopilot) {
+        Write-HarnessLog INFO "Copilot CLI: hooks and instructions skipped (-NoCopilot)."
+        $script:Counters.skipped++
+        return
+    }
+    $copilotCommand = Get-Command copilot -ErrorAction SilentlyContinue
+    if (-not $Copilot -and -not $copilotCommand) {
+        Write-HarnessLog INFO "Copilot CLI not detected; leaving .github/ untouched (force it with -Copilot)."
+        $script:Counters.skipped++
+        return
+    }
+    if ($DryRun) {
+        Write-HarnessLog INFO "[DRY-RUN] Would write .github/copilot.json and .github/copilot-instructions.md"
+        $script:Counters.created += 2
+        return
+    }
+    $bin = Join-Path $script:HarnessDir "harness.exe"
+    if (-not (Test-Path -LiteralPath $bin)) {
+        Write-HarnessLog WARN "Copilot CLI: harness.exe is missing, so its hooks were not written (re-run the installer)."
+        $script:Counters.skipped++
+        return
+    }
+    foreach ($rel in @(".github/copilot.json", ".github/copilot-instructions.md")) {
+        $existing = Join-Path $script:SurfaceDir $rel
+        if (Test-Path -LiteralPath $existing) { Backup-HarnessPath $existing }
+    }
+    $hook = Join-Path $script:SurfaceDir "bin/harness-hook.ps1"
+    $prefix = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File {0}" -f (ConvertTo-PowerShellCommandPath $hook)
+    $arnes = $script:Hrel.TrimEnd("/")
+    # El prefijo lleva comillas (la ruta del runtime) y Windows PowerShell 5.1
+    # no sabe pasarlas a un ejecutable por argv: va por variable de entorno.
+    # Un argumento vacio tampoco llega, asi que --arnes solo se pasa con valor.
+    # Y bajo $ErrorActionPreference = Stop cada linea de stderr del binario
+    # (el aviso de hook ajeno, que AC-1 exige) seria un error terminal: se
+    # baja a Continue solo alrededor de la llamada.
+    $argumentos = @("copilot", "instalar", "--raiz", $script:SurfaceDir, "--shell", "powershell")
+    if ($arnes) { $argumentos += @("--arnes", $arnes) }
+    $previoEap = $ErrorActionPreference
+    $env:HARNESS_COPILOT_HOOK = $prefix
+    try {
+        $ErrorActionPreference = "Continue"
+        $salida = & $bin @argumentos 2>&1 | Out-String -Stream
+        $codigo = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previoEap
+        Remove-Item Env:HARNESS_COPILOT_HOOK -ErrorAction SilentlyContinue
+    }
+    foreach ($linea in @($salida)) { if ("$linea".Trim()) { Write-HarnessLog INFO ("copilot: " + "$linea".Trim()) } }
+    if ($codigo -ne 0) {
+        Write-HarnessLog WARN "Copilot CLI: 'copilot instalar' failed; review .github/copilot.json by hand."
+        return
+    }
+    Write-HarnessLog OK "   -> .github/copilot.json + .github/copilot-instructions.md ($($script:SurfaceDir))"
+    $script:Counters.created += 2
+}
+
 function Write-AgentLaunchers {
     foreach ($agent in @("claude", "codex", "gemini", "grok", "kimi", "antigravity")) {
         $content = @'
@@ -1937,7 +2027,33 @@ function Install-HarnessDataIfMissing {
     Install-HarnessAsset -Asset $Asset -Destination $destination
 }
 
+# Feature #85: Copilot's files belong to the user: back them up, remove only
+# the harness parts, and do it before the reset removes anything else. Lives
+# outside Invoke-HarnessReset on purpose: tests/parity_check.sh reads that
+# function's string literals as reset targets, and these files are not targets.
+function Remove-CopilotParts {
+    $copilotFiles = @(".github/copilot.json", ".github/copilot-instructions.md") | ForEach-Object { Join-Path $script:SurfaceDir $_ } | Where-Object { Test-Path -LiteralPath $_ }
+    if ($DryRun) { return }
+    if (Test-Path -LiteralPath $script:HarnessExe) {
+        foreach ($existing in $copilotFiles) { Backup-HarnessPath $existing }
+        $previoEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $quitado = & $script:HarnessExe copilot quitar --raiz $script:SurfaceDir 2>&1 | Out-String -Stream
+            foreach ($linea in @($quitado)) { if ("$linea".Trim()) { Write-HarnessLog INFO ("copilot: " + "$linea".Trim()) } }
+        } catch {
+            Write-HarnessLog WARN "Copilot CLI: 'copilot quitar' failed: $_"
+        } finally {
+            $ErrorActionPreference = $previoEap
+        }
+    }
+    elseif ($copilotFiles.Count -gt 0) {
+        Write-HarnessLog WARN "Copilot: harness.exe is missing, so its parts in .github/ were not removed (re-run the installer and then -Reset, or remove the 'copilot-json' hooks and the harness:copilot block by hand)."
+    }
+}
+
 function Invoke-HarnessReset {
+    Remove-CopilotParts
     Backup-HarnessData   # feature #78: antes de borrar ninguna superficie
     Ensure-HarnessGitIgnore
     $targets = @(
@@ -2248,6 +2364,7 @@ try {
     Write-PowerShellHookRuntime
     Write-AgentHooks
     Write-KimiGlobalHooks
+    Write-CopilotHooks
     Write-AgentLaunchers
 
     Ensure-Graphify

@@ -3,9 +3,9 @@ nombre: remedios-que-la-herramienta-sugiere
 descripcion: Un comando que le sugeris al usuario lo va a correr sin mirar. Que sea cierto.
 triggers: [remedio, sugerencia, comando, doctor, diagnostico, aviso, destructivo, git checkout, rm, restaurar]
 relacionadas: [probar-contra-datos-reales, criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina]
-origen: [26]
-usos: 0
-ultimo_uso:
+origen: [26, 85]
+usos: 1
+ultimo_uso: 2026-09-10
 ultima_actualizacion: 2026-08-17
 estado: activa
 ---
@@ -74,6 +74,18 @@ agente": revierte el archivo entero a HEAD. En un repo con trabajo sin commitear
 - **Confundir "el comando salio 0" con "el problema se resolvio".** Es la version
   del remedio del mismo error que [[criterios-de-cierre-que-se-pueden-fallar]]
   describe para las verificaciones.
+
+## El backend que no se pudo probar: se dice lo medido y lo que no (feature #85)
+
+Copilot CLI entro al arnes sin sesion de GitHub en la maquina: los flags
+(`-p`, `-s`, `--output-format json`, que lee `AGENTS.md`) salieron de
+`copilot --help` de la version instalada, que es autoritativo; la semantica
+de `agentStop` salio de la documentacion, que se contradice. Lo que se hizo:
+el mensaje de skip nombra la autenticacion real (`/login`, `GH_TOKEN`), el
+spec tiene una seccion "Hechos medidos" con la fuente de cada afirmacion, lo
+no verificado (agentes de `.github/agents/`) quedo FUERA en vez de escribirse
+a ciegas, y el AC manual dice como medirlo cuando haya login. Un remedio que
+no se pudo probar se declara como hipotesis; no se documenta como hecho.
 
 ## Verificacion
 
