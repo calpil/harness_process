@@ -70,11 +70,12 @@ secuenciales lider -> implementer -> reviewer en una sola sesion):
 
 - **Antigravity**: crea sus subagentes dinamicamente en runtime; lee tambien
   `AGENTS.md` / `.agents/rules/`.
-- **GitHub Copilot CLI** (feature #85): lee `AGENTS.md` nativamente y tiene
-  `.github/agents/` para agentes propios, pero el formato no se pudo verificar
-  con el CLI autenticado: hasta entonces aplica los roles como fases. Sus hooks
-  van en `.github/copilot.json` (`agentStop` se engancha como el Stop del arnes;
-  su semantica exacta queda por medir con sesion, ver el SDD D14).
+- **GitHub Copilot CLI** (feature #86): lee `AGENTS.md` nativamente y los hooks
+  de `.claude/settings.json` (formato Claude; medido con 1.0.83), solo en
+  carpetas confiadas (`trustedFolders`). Su `Stop` es el `agentStop` oficial:
+  dispara una vez al terminar el turno y bloquea con `decision: block`. Tiene
+  `.github/agents/` para agentes propios, pero el formato no se verifico:
+  aplica los roles como fases.
 - **Cualquier otro CLI** sin subagentes nativos.
 
 Claude Code no permite subagentes anidados: delega el hilo principal, no el

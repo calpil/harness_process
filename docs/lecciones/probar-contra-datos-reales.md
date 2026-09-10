@@ -3,10 +3,10 @@ nombre: probar-contra-datos-reales
 descripcion: Verde no dice que este bien: dice que midio lo que sabias medir.
 triggers: [fixtures, ranking, umbral, reporte, falso positivo, calibracion, datos reales, diagnostico, ok falso, alcance, health check]
 relacionadas: [criterios-de-cierre-que-se-pueden-fallar, promesas-estructurales-vs-disciplina, reglas-que-se-aplican-a-si-mismas]
-origen: [22, 25, 30, 36, 29, 28, 47, 81, 84]
-usos: 3
-ultimo_uso: 2026-09-08
-ultima_actualizacion: 2026-09-07
+origen: [22, 25, 30, 36, 29, 28, 47, 81, 84, 86]
+usos: 4
+ultimo_uso: 2026-09-10
+ultima_actualizacion: 2026-09-10
 estado: activa
 ---
 
@@ -167,34 +167,16 @@ Y el detector que solo ve la forma que vos escribiste (#84): el contrato del
 tope buscaba `(feature #N)`; las cuatro lecciones reales traian `(#115, fecha)`,
 `feature #100 (fecha)` y `Patch #100:`. Los unitarios usan esos titulos, no ejemplos.
 
-## Cuando la herramienta que medis es un modelo
+## La documentacion tambien es un fixture: se mide contra la herramienta (feature #86)
 
-Un LLM no es un chequeo: es una opinion con formato. Todo lo de arriba sigue
-valiendo, y ademas:
-
-1. **Comparalo contra una metrica tonta.** Antes de creerle, medi lo mismo con
-   algo deterministico (Jaccard, conteo, diff). No para reemplazarlo: para saber
-   **donde discrepan**, que es lo unico interesante.
-
-   En la #28, sobre 9 lecciones: el modelo y el Jaccard coincidieron en el par
-   real (0.400 / 0.85) y discreparon en otro (0.048 / 0.60). El segundo era una
-   vecindad semantica que la metrica lexica no podia ver — y aun asi se decidio
-   NO fusionarlo. Las dos senales juntas dijeron mas que cualquiera sola.
-
-2. **Un umbral que no podes calibrar es un numero inventado.** Con 9 items y un
-   solo caso positivo, cualquier corte entre 0.1 y 0.4 da identico resultado: no
-   hay nada en la zona gris. Reportá el numero y dejá decidir a quien lee, en vez
-   de fingir una precision que el corpus no soporta.
-
-3. **Verificá de punta a punta con el backend de verdad, no con uno falso.** Un
-   mock prueba tu parser; no prueba que puedas hablar con un modelo. Y capturá
-   la salida REAL como fixture: `claude -p` devuelve JSON pelado y `kimi -p` lo
-   envuelve en vinnetas con banner y linea de sesion. Ninguna de las dos formas
-   se te habria ocurrido inventarla.
-
-4. **Recortá lo que ve.** Si el modelo no necesita el dato para su tarea, no se
-   lo mandes. En la #28 ve nombre, descripcion y triggers, y **nunca** el cuerpo
-   de la leccion: asi lo peor que puede hacer es equivocarse, no filtrar.
+La #85 se escribio desde la documentacion del repo del CLI de Copilot (via
+Context7): archivo de config, eventos, protocolo de bloqueo. Nada de eso
+coincidia con el CLI 1.0.83 real: el archivo no existia, el bloqueo era otro
+JSON y los hooks solo cargan en carpetas confiadas. La #86 tiro todo eso y
+quedo con lo medido en una sesion logueada. Regla: cuando el "hecho" viene de
+una doc que no se puede ejecutar, el spec lo marca como hipotesis y el AC
+manual se corre ANTES de cerrar, no despues; si la herramienta esta en la
+maquina pero sin sesion, se pide la sesion antes de escribir formato.
 
 ## Pitfalls
 
@@ -248,3 +230,9 @@ sh harness_cli <comando> | head -20
 
 Si la unica evidencia de que algo funciona es que los tests pasan, todavia no
 sabes si funciona: sabes que no rompiste lo que ya habias previsto.
+
+## Referencias (el detalle, caso por caso)
+
+Movidas a `probar-contra-datos-reales/referencias/` (`leccion partir`). Cada una es el caso que sostiene una regla de arriba: se leen cuando hace falta el detalle, no para entender la clase.
+
+- [Cuando la herramienta que medis es un modelo](probar-contra-datos-reales/referencias/cuando-la-herramienta-que-medis-es-un-modelo.md)

@@ -1142,42 +1142,34 @@ mapa de agentes. Desde la feature #7 incluye ademas:
   marker (los scripts nunca lo escriben). Sin huella no se infiere nada, y un
   marker presente con otro valor (`root`) se respeta al pie de la letra.
 
-## GitHub Copilot CLI: hooks y guia en `.github/` (feature #85)
+## GitHub Copilot CLI: los hooks de Claude, con la carpeta confiada (feature #86)
 
-Copilot CLI lee `AGENTS.md` nativamente, asi que el flujo, los roles y el
-perfil le llegan sin mas. Lo que el arnes agrega vive en dos archivos que son
-del usuario y que el instalador MEZCLA en vez de pisar:
+Medido con Copilot CLI 1.0.83 logueado: lee `AGENTS.md` nativamente y lee los
+hooks del `.claude/settings.json` que el arnes ya genera (formato Claude, con
+los mismos eventos y campos: `Stop`, `stop_hook_active`, `PreToolUse` con la
+negacion anidada). No hay que escribir nada mas para Copilot. Dos condiciones:
 
-- `.github/copilot.json`: los tres hooks del arnes (`sessionStart`, `agentStop`,
-  `sessionEnd`) apuntando a `bin/harness-hook copilot-json <evento>`. Las
-  claves ajenas y los hooks ajenos de otros eventos quedan; un hook ajeno en
-  uno de esos tres eventos no se pisa (se avisa y se deja).
-- `.github/copilot-instructions.md`: un bloque corto entre marcadores
-  `<!-- harness:copilot:inicio -->` / `fin` que apunta a `AGENTS.md` y explica
-  los hooks; el texto de afuera queda intacto.
+- **La carpeta tiene que estar confiada**: Copilot solo carga hooks de repos
+  que esten en `trustedFolders` de `~/.copilot/config.json` (o de
+  `$COPILOT_HOME/config.json`). Se confia abriendo `copilot` en la carpeta y
+  aceptando; `--add-dir` no alcanza. `harness doctor` lo revisa (area
+  `copilot`) y dice como confiarla; sin `copilot` en el PATH no dice nada.
+- **El Stop bloquea solo con JSON**: `{"decision":"block","reason":"..."}` por
+  stdout con exit 0. El exit 2 con stderr solo lo entiende Claude Code. Por eso
+  el Stop de `.claude/settings.json` invoca `bin/harness-hook claude-json stop`
+  (`harness-hook.ps1 claude-json stop` en Windows): con el gate en rojo emite
+  esa linea, con el detalle del check en `reason` (las ultimas lineas) y lo
+  legible por stderr; con el gate verde o con `stop_hook_active` no imprime
+  nada. Claude Code honra el mismo JSON, asi que su bloqueo no cambia. `plain`
+  sigue para Grok, Gemini (`/harness:check`) y Kimi.
 
-`agentStop` se engancha como el Stop: el runtime corre el commit guard y
-responde `{"block":true,"reason":"..."}` si falla (con `stopHookActive` como
-corte, igual que `stop_hook_active` en Claude) y `{"block":false}` si pasa;
-`sessionEnd` corre el check solo para informar. Ojo: la documentacion de
-Copilot describe `agentStop` de forma ambigua (al parar vs. tras cada tool
-call) y no se pudo medir sin sesion; si dispara por cada tool call, pasa a
-informativo (decision registrada en el SDD, D14). Cada hook lleva
-`timeout: 120000` (milisegundos, la unidad del ejemplo de la documentacion). Se genera solo si `copilot`
-esta en el PATH o se pasa `--copilot` (`-Copilot` en Windows); `--no-copilot`
-lo omite; `--reset` respalda los dos archivos en `bkp/` y quita SOLO lo del
-arnes. Lo que no se toca nunca, con aviso: un archivo que no se puede leer
-(JSON con comentarios, texto que no es UTF-8), un enlace simbolico y un
-marcador del arnes sin su pareja. El `copilot.json` se re-serializa con sangria
-de dos y el orden de claves del usuario; el `.md` ajeno vuelve byte a byte
-(un archivo sin salto final gana uno). El formato
-vive en el binario (`harness copilot instalar|quitar`), asi los dos
-instaladores no pueden divergir. `harness doctor` lista `copilot` con los
-demas backends y revisa que su hook apunte al runtime, y `lecciones consolidar`
-lo usa como `copilot -s -p` cuando no hay `claude` ni `kimi` (sin sesion de
-GitHub el skip dice como autenticarlo). Los agentes de `.github/agents/` quedan
-fuera hasta verificar el formato con el CLI autenticado: Copilot aplica los
-roles como fases, igual que Antigravity.
+`lecciones consolidar` usa `copilot -s -p` cuando no hay `claude` ni `kimi` (sin
+sesion, el error dice como autenticarse). Lo que NO existe, y la #85 escribio
+por confiar en documentacion equivocada: un JSON de proyecto en `.github/`
+con los hooks del arnes. Copilot corre
+ademas los hooks de `.github/hooks/*.json` (formato oficial), pero escribirlos
+duplicaria los de `.claude/settings.json`. Los agentes de `.github/agents/`
+quedan fuera: Copilot aplica los roles como fases.
 
 ## Kimi Code CLI: backend con hooks globales (unica excepcion de `$HOME`)
 

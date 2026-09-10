@@ -214,11 +214,6 @@ pub enum Command {
         #[command(subcommand)]
         command: PerfilCommand,
     },
-    /// Copilot CLI como backend (feature #85): hooks en .github/copilot.json y bloque en .github/copilot-instructions.md
-    Copilot {
-        #[command(subcommand)]
-        command: CopilotCommand,
-    },
     /// Paquete de contexto para EMPEZAR a implementar (solo lectura)
     Contexto {
         #[arg(long)]
@@ -404,30 +399,6 @@ pub enum PrdCommand {
         /// Escribe los arreglos. Sin este flag NO toca ningun archivo
         #[arg(long)]
         reparar: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum CopilotCommand {
-    /// Escribe (mezclando) los hooks del arnes y el bloque de instrucciones. Lo llama el instalador
-    Instalar {
-        /// Raiz del proyecto: donde vive .github/
-        #[arg(long)]
-        raiz: PathBuf,
-        /// Prefijo del comando del hook; el arnes le agrega `copilot-json <evento>`. Sin el, se lee HARNESS_COPILOT_HOOK
-        #[arg(long)]
-        hook: Option<String>,
-        /// `shell` de los hooks en copilot.json
-        #[arg(long, default_value = "bash")]
-        shell: String,
-        /// Carpeta del arnes relativa a la raiz (vacia en layout root), para las rutas del bloque
-        #[arg(long, default_value = "")]
-        arnes: String,
-    },
-    /// Quita lo del arnes de los dos archivos y borra el que quede sin nada
-    Quitar {
-        #[arg(long)]
-        raiz: PathBuf,
     },
 }
 
@@ -774,15 +745,6 @@ pub fn run() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::Copilot { command } => match command {
-            CopilotCommand::Instalar {
-                raiz,
-                hook,
-                shell,
-                arnes,
-            } => commands::copilot::instalar(&raiz, hook.as_deref(), &shell, &arnes),
-            CopilotCommand::Quitar { raiz } => commands::copilot::quitar(&raiz),
-        },
         Command::Perfil { command } => {
             let paths = HarnessPaths::resolve()?;
             match command {

@@ -7,7 +7,6 @@ pub mod autocheck;
 pub mod check_plan;
 pub mod check_spec;
 pub mod close;
-pub mod copilot;
 pub mod depende;
 pub mod doctor;
 pub mod journey;
