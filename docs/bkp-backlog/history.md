@@ -35,3 +35,10 @@
 - 2026-09-10T01:41:36Z revision feature #85 veredicto=approved
 - 2026-09-10T01:55:31Z prd apply feature #85 documentos=3 escritos=2
 - 2026-09-10T01:55:37Z close feature #85 status=done leccion=remedios-que-la-herramienta-sugiere note=
+- 2026-09-10T02:11:31Z add feature #86 Copilot medido en vivo: los hooks van por el .claude/settings.json que el arnes ya genera (sin .github/copilot.json), el Stop de los dos runtimes emite decision:block, y doctor revisa la confianza de la carpeta
+- 2026-09-10T02:11:32Z start feature #86 Copilot medido en vivo: los hooks van por el .claude/settings.json que el arnes ya genera (sin .github/copilot.json), el Stop de los dos runtimes emite decision:block, y doctor revisa la confianza de la carpeta
+- 2026-09-10T02:15:40Z approve-spec feature #86 estado=approved nota=Alan: 'Aprobado' a los ocho AC; OBS-1 modo nuevo claude-json; OBS-2 reason con la frase y las ultimas lineas del check
+- 2026-09-10T02:29:41Z leccion partir probar-contra-datos-reales: 1 seccion(es) a referencias/, quedan 227 lineas
+- 2026-09-10T02:31:32Z revision feature #86 veredicto=approved
+- 2026-09-10T02:34:12Z prd apply feature #86 documentos=3 escritos=2
+- 2026-09-10T02:34:17Z close feature #86 status=done leccion=probar-contra-datos-reales note=

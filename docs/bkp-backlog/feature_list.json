@@ -2308,6 +2308,34 @@
       },
       "closed_at": "2026-09-10T01:55:32Z",
       "leccion": "remedios-que-la-herramienta-sugiere"
+    },
+    {
+      "id": 86,
+      "name": "Copilot medido en vivo: los hooks van por el .claude/settings.json que el arnes ya genera (sin .github/copilot.json), el Stop de los dos runtimes emite decision:block, y doctor revisa la confianza de la carpeta",
+      "microservicios": [],
+      "acceptance": [
+        "Given un proyecto instalado con el arnes y Copilot CLI con la carpeta confiada, When el agente termina el turno con el repo sucio, Then el Stop de .claude/settings.json (bin/harness-hook plain stop y harness-hook.ps1) emite {\"decision\":\"block\",\"reason\":...} por stdout con exit 0 y Copilot y Claude Code continuan con el motivo; se quitan .github/copilot.json, harness copilot instalar|quitar, el modo copilot-json y --copilot/--no-copilot; doctor revisa para copilot que exista .claude/settings.json y que la raiz este en trustedFolders de ~/.copilot/config.json y dice como confiarla; consolidar sigue con copilot -s -p; docs corregidas. Disparador: 2026-09-10, medido con el CLI 1.0.83 logueado: .github/copilot.json no dispara nada, Copilot lee .claude/settings.json y solo bloquea con decision:block (#85)"
+      ],
+      "status": "done",
+      "kind": "bug",
+      "started_at": "2026-09-10T02:11:32Z",
+      "branch": "bugfix/86-copilot-medido-en-vivo-los-hooks-van-por-el-clau",
+      "worktree": "/Users/alan/harness_process-wt/86-copilot-medido-en-vivo-los-hooks-van-por-el-clau",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/86-copilot-medido-en-vivo-los-hooks-van-por-el-clau/docs/plan-feature-86-copilot-medido-en-vivo-los-hooks-van-por-el-clau.md",
+        "mtime": 1789006292.0165942,
+        "size": 836,
+        "hash": "93c6bc2973f47ece"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/86-copilot-medido-en-vivo-los-hooks-van-por-el-clau/docs/spec-feature-86-copilot-medido-en-vivo-los-hooks-van-por-el-clau.md",
+        "mtime": 1789006540.7658217,
+        "size": 11255,
+        "hash": "e80d521bb75fd05b"
+      },
+      "closed_at": "2026-09-10T02:34:12Z",
+      "leccion": "probar-contra-datos-reales"
     }
   ]
 }
