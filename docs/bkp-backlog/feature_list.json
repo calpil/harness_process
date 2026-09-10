@@ -2281,6 +2281,33 @@
       },
       "closed_at": "2026-09-08T23:59:58Z",
       "leccion": "probar-contra-datos-reales"
+    },
+    {
+      "id": 85,
+      "name": "Copilot CLI como backend de primera clase: superficie .github/copilot-instructions.md, hooks en .github/copilot.json, agentes en .github/agents, fila en doctor y backend LLM en la tabla de CLIs",
+      "microservicios": [],
+      "acceptance": [
+        "Given un proyecto donde se corre el instalador, When Copilot CLI esta en la maquina (copilot en PATH) o el usuario lo pide, Then el instalador genera .github/copilot-instructions.md (mismo contenido que AGENTS.md), .github/copilot.json con los hooks del arnes (sessionStart, agentStop bloqueante con block/reason y stopHookActive, sessionEnd) mergeados sobre un copilot.json existente, y los roles como agentes en .github/agents/; --no-copilot lo omite; el .ps1 hace lo mismo (paridad); --reset los limpia; harness doctor detecta el backend por su huella y revisa sus hooks; consolidar detecta copilot en la tabla de CLIs (copilot -s -p <prompt>) y el mensaje de sin-backend nombra la autenticacion de Copilot (COPILOT_GITHUB_TOKEN/GH_TOKEN o /login). Disparador: 2026-09-09, el usuario pregunto si el arnes estaba configurado para Copilot y no lo estaba en ningun punto"
+      ],
+      "status": "done",
+      "started_at": "2026-09-10T00:35:18Z",
+      "branch": "feature/85-copilot-cli-como-backend-de-primera-clase-superf",
+      "worktree": "/Users/alan/harness_process-wt/85-copilot-cli-como-backend-de-primera-clase-superf",
+      "aislada": true,
+      "last_plan_sig": {
+        "path": "../harness_process-wt/85-copilot-cli-como-backend-de-primera-clase-superf/docs/plan-feature-85-copilot-cli-como-backend-de-primera-clase-superf.md",
+        "mtime": 1789000518.4722855,
+        "size": 819,
+        "hash": "6092659eb4931629"
+      },
+      "last_spec_sig": {
+        "path": "../harness_process-wt/85-copilot-cli-como-backend-de-primera-clase-superf/docs/spec-feature-85-copilot-cli-como-backend-de-primera-clase-superf.md",
+        "mtime": 1789000914.5828445,
+        "size": 13038,
+        "hash": "09b03ce72b4c470f"
+      },
+      "closed_at": "2026-09-10T01:55:32Z",
+      "leccion": "remedios-que-la-herramienta-sugiere"
     }
   ]
 }

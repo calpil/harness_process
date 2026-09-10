@@ -29,3 +29,9 @@
 - 2026-09-08T23:58:54Z revision feature #84 veredicto=approved
 - 2026-09-08T23:59:58Z prd apply feature #84 documentos=3 escritos=2
 - 2026-09-09T00:00:01Z close feature #84 status=done leccion=probar-contra-datos-reales note=
+- 2026-09-10T00:35:18Z add feature #85 Copilot CLI como backend de primera clase: superficie .github/copilot-instructions.md, hooks en .github/copilot.json, agentes en .github/agents, fila en doctor y backend LLM en la tabla de CLIs
+- 2026-09-10T00:35:18Z start feature #85 Copilot CLI como backend de primera clase: superficie .github/copilot-instructions.md, hooks en .github/copilot.json, agentes en .github/agents, fila en doctor y backend LLM en la tabla de CLIs
+- 2026-09-10T00:41:54Z approve-spec feature #85 estado=approved nota=Alan: 'Aprobado' a los nueve AC; OBS-1 bloque corto con marcadores; OBS-2 solo con copilot detectado o --copilot; OBS-3 agentes fuera de alcance; OBS-4 agentStop bloqueante, verificable con login
+- 2026-09-10T01:41:36Z revision feature #85 veredicto=approved
+- 2026-09-10T01:55:31Z prd apply feature #85 documentos=3 escritos=2
+- 2026-09-10T01:55:37Z close feature #85 status=done leccion=remedios-que-la-herramienta-sugiere note=
