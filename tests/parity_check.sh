@@ -154,7 +154,7 @@ modo_asimetrias_declaradas() {
 
 modo_superficies() {
     faltantes=""
-    for sup in "CLAUDE.md" "AGENTS.md" "GEMINI.md" "LLM.md" "copilot.json" "copilot-instructions.md"; do
+    for sup in "CLAUDE.md" "AGENTS.md" "GEMINI.md" "LLM.md"; do
         en_sh=0; en_ps1=0
         grep -q "$sup" "$REPO_ROOT/setup_harness.sh" && en_sh=1
         grep -q "$sup" "$REPO_ROOT/setup_harness.ps1" && en_ps1=1
@@ -168,7 +168,7 @@ modo_superficies() {
 # y el .ps1 usa 132 `Assert-True` sin secciones nombradas—, asi que contar
 # bloques no compara nada. Lo que si compara es la COBERTURA: cada tema que el
 # .sh declara tiene que aparecer, por su palabra clave, en el .ps1.
-TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian migrate-rules|MigrateRules copilot|Copilot"
+TEMAS="dry-run|DryRun reset|Reset version|Version subdir|Subdir root|Root graphify|Graphify kimi|Kimi atlassian|Atlassian migrate-rules|MigrateRules"
 
 modo_smokes() {
     [ -f "$REPO_ROOT/tests/setup_smoke.ps1" ] || { ok "smokes: no hay smoke ps1, nada que comparar"; return; }
@@ -232,7 +232,9 @@ modo_cableado_hooks() {
     # cualquier `plain stop` del archivo: el de Kimi (TOML, `exec ... plain stop`)
     # hacia pasar este chequeo aunque los dos Stops de Claude estuvieran rotos.
     # Y se cuentan: son DOS bloques de settings.json (con y sin subagentes).
-    stops_claude="$(grep -cF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain stop"' "$sh_file" || true)"
+    # Feature #86: el Stop de Claude va en modo claude-json (JSON decision:block,
+    # que Claude Code y Copilot CLI honran); `plain` queda para las otras superficies.
+    stops_claude="$(grep -cF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" claude-json stop"' "$sh_file" || true)"
     [ "$stops_claude" -eq 2 ] \
         || falta="$falta Stop:esperaba-2-hooks-al-runtime-y-hay-$stops_claude"
     grep -qF '"command": "bash \"$SURFACE_BASE/bin/harness-hook\" plain PreToolUse"' "$sh_file" \
@@ -251,15 +253,18 @@ modo_cableado_hooks() {
     grep -qF 'HOOK_BASE/bin/harness-hook' "$sh_file" \
         && falta="$falta runtime-con-HOOK_BASE-en-vez-de-SURFACE_BASE"
     # Cada Stop declara su timeout, como las otras cuatro superficies (AC-12).
-    stops="$(grep -cF 'bin/harness-hook\" plain stop' "$sh_file" || true)"
+    stops="$(grep -cF 'bin/harness-hook\" claude-json stop' "$sh_file" || true)"
     # JSON usa `"timeout":`, TOML (Kimi) usa `timeout =`: se aceptan los dos.
-    timeouts="$(grep -A1 -F 'bin/harness-hook\" plain stop' "$sh_file" | grep -cE '"timeout"|timeout *=' || true)"
+    timeouts="$(grep -A1 -F 'bin/harness-hook\" claude-json stop' "$sh_file" | grep -cE '"timeout"|timeout *=' || true)"
     if [ "$stops" -eq 0 ] || [ "$timeouts" -ne "$stops" ]; then
         falta="$falta Stop-sin-timeout-declarado[$timeouts-de-$stops]"
     fi
     # Los DOS instaladores, para el MISMO backend, despachan al runtime.
     if [ -f "$REPO_ROOT/setup_harness.ps1" ]; then
-        grep -qF 'harness-hook.ps1" plain stop' "$REPO_ROOT/setup_harness.ps1" \
+        # El .ps1 arma el comando con Get-HookCommand: se exige el modo y el
+        # evento del Stop de Claude, no un literal (el literal `plain stop` que
+        # antes satisfacia este chequeo era el de un comando de Gemini).
+        grep -qF 'Get-HookCommand -Mode "claude-json" -Event "stop"' "$REPO_ROOT/setup_harness.ps1" \
             || falta="$falta ps1:Stop-no-despacha-al-runtime"
     fi
     [ -z "$falta" ] \

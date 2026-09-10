@@ -158,15 +158,6 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   id de feature) y por eso todo el ranking se testea sin tocar el filesystem.
   `corpus()` excluye `bkp/` y los directorios ocultos. No hay indice, no hay
   modelo y no se consulta el hub; es de solo lectura.
-- `copilot.rs`: Copilot CLI como backend (feature #85). `mezclar_config`
-  mezcla los tres hooks del arnes (`sessionStart`, `agentStop`, `sessionEnd`;
-  reconocidos por el token `copilot-json`) sobre el `.github/copilot.json` del
-  usuario sin pisar claves ni hooks ajenos, `sin_hooks_del_arnes` los saca,
-  `bloque_de_instrucciones`/`con_bloque`/`sin_bloque` manejan el bloque entre
-  marcadores de `.github/copilot-instructions.md` (round trip byte a byte del
-  texto ajeno), e `instalar`/`quitar` son la capa con I/O que llaman los dos
-  instaladores (`harness copilot instalar|quitar`). `doctor` lo lista por su
-  huella y `consolidacion::CLIS` lo detecta como `copilot -s -p`.
 - `particion.rs`: `leccion partir` (feature #84), la parte mecanica del paso 3
   de la guia. `secciones` corta el cuerpo en bloques `## ` (los `###` viajan
   adentro), `cuenta_una_feature` reconoce los titulos con `#N` o fecha fuera
@@ -245,6 +236,10 @@ Python desde la feature #2. Version actual: `rust/Cargo.toml` = 0.3.0.
   solo `Falla` cambia el exit code, asi que un hub caido no puede hacerlo mentir.
   En el checkout fuente del arnes, superficies y hooks dan `NoAplica`: su ausencia
   ahi es lo correcto.
+  Feature #86: area `copilot`: con `copilot` en el PATH revisa que la raiz este
+  en `trustedFolders` de `$COPILOT_HOME/config.json` (Copilot solo carga los
+  hooks de `.claude/settings.json` en carpetas confiadas) y que el Stop este en
+  modo `claude-json`; sin `copilot`, no aplica. `revisar_copilot_con` es puro.
 - `rutas.rs`: rutas protegidas (feature #26). `esta_protegida()` es un matcher
   **puro** de globs (`*` un segmento, `**` cualquier profundidad) sobre
   `rules.rutas_protegidas`. Las escrituras del propio binario quedan exentas por
@@ -294,7 +289,6 @@ merge: queda sin commitear en la raiz, y el cierre lo dice),
 `autocheck`, `nudge`, `check_plan`, `check_spec`,
 `prd` (`add` / `tree` / `doctor`), `leccion` (`list` / `show` / `nueva` / `usar`),
 `perfil` (`show` / `add` / `replace` / `remove` / `sugerir` / `check`),
-`copilot` (`instalar` / `quitar`, feature #85),
 `buscar` (solo lectura, `--json` / `--todos`),
 `lecciones` (`status` / `curar` / `pin` / `unpin` / `archivar` / `restaurar` /
 `rollback`), `journey` (solo lectura, `--json`),

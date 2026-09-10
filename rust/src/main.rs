@@ -9,7 +9,6 @@ mod cli;
 mod commands;
 mod consolidacion;
 mod contexto;
-mod copilot;
 mod dependencias;
 mod duplicados;
 mod espejo;

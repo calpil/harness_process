@@ -854,44 +854,37 @@ Qué tienes que hacer: **nada**. Tu instalación se repara sola al actualizar. S
 quieres que el aviso `[i]` desaparezca, re-corre el instalador: es lo único que
 escribe el marker (los scripts son de solo lectura y nunca lo regeneran).
 
-## GitHub Copilot CLI como backend (feature #85)
+## GitHub Copilot CLI: hooks por `.claude/settings.json` y Stop en JSON (feature #86)
 
-Copilot CLI lee `AGENTS.md` nativamente. El instalador, solo si `copilot` esta
-en el PATH o se pasa `--copilot` / `-Copilot` (`--no-copilot` / `-NoCopilot`
-lo omite), llama a `harness copilot instalar` y deja:
+La #85 escribio en `.github/` un JSON con los hooks del arnes y un bloque en el
+`.md` de instrucciones de Copilot, siguiendo documentacion que no coincide con
+el CLI: medido con Copilot CLI 1.0.83 logueado, ese JSON no dispara nada. Lo que Copilot hace: lee
+`AGENTS.md` nativamente y lee los hooks del `.claude/settings.json` del repo
+(formato Claude), SOLO en carpetas de `trustedFolders` (`~/.copilot/config.json`
+o `$COPILOT_HOME/config.json`; se confia abriendo `copilot` en la carpeta), y
+bloquea SOLO con `{"decision":"block","reason":...}` por stdout (ni
+`{"block":true}` ni exit 2 + stderr).
 
-- `.github/copilot.json` con los hooks `sessionStart`, `agentStop` y
-  `sessionEnd` del arnes, MEZCLADOS sobre lo que ya hubiera (claves y hooks
-  ajenos intactos; un hook ajeno en uno de esos eventos se deja y se avisa).
-- `.github/copilot-instructions.md` con un bloque entre marcadores
-  `harness:copilot:inicio/fin` que apunta a `AGENTS.md`; el texto ajeno queda.
+Que cambia:
 
-`bin/harness-hook copilot-json <evento>` (y `harness-hook.ps1`, que manda todo
-lo legible a stderr porque Copilot parsea stdout) responde el JSON que Copilot
-espera: `agentStop` corre el gate de Stop y emite `{"block":true,"reason":...}`
-o `{"block":false}` (lee `stopHookActive` como corte); `sessionStart` y
-`sessionEnd` emiten `{}` (`sessionEnd` corre el check solo para informar). Cada
-hook lleva `timeout: 120000` (milisegundos, la unidad del ejemplo de la
-documentacion). `--reset` / `-Reset` respalda los dos archivos en `bkp/` y
-corre `harness copilot quitar`: saca lo del arnes y borra el archivo que quede
-sin nada POR ESO (un `hooks` vacio o no-objeto del usuario no se toca). Nunca
-se tocan, con aviso: un archivo ilegible (JSON con comentarios o BOM +
-comentarios, texto no UTF-8), un enlace simbolico, un marcador del arnes sin
-su pareja. El `copilot.json` se re-serializa (sangria de dos, orden de claves
-del usuario, BOM conservado); el `.md` ajeno vuelve byte a byte. En Windows
-el prefijo del hook viaja por `HARNESS_COPILOT_HOOK` (PowerShell 5.1 no pasa
-comillas por argv) y `harness copilot instalar` lo acepta como alternativa a
-`--hook`. `doctor` mira que `hooks.agentStop` apunte al runtime (un
-`agentStop` ajeno que el arnes dejo cuenta como no enganchado) y su remedio
-dice `--copilot`. Si `consolidar` elige `copilot` y sale sin sesion, el error
-agrega como autenticarse. `harness doctor` incluye
-`copilot` (huella `.github/copilot.json`) y `consolidar` detecta `copilot -s -p`
-despues de `claude` y `kimi`; el skip nombra la autenticacion
-(`copilot` + `/login`, o `COPILOT_GITHUB_TOKEN`/`GH_TOKEN`). Fuera de alcance:
-agentes en `.github/agents/` (formato sin verificar en vivo) y la API de
-Copilot. Medido con Copilot CLI 1.0.83 (`--help` y documentacion); la semantica
-exacta de `agentStop` (al parar vs. por cada tool call) queda por medir con una
-sesion autenticada.
+- `bin/harness-hook` y `harness-hook.ps1` ganan el modo `claude-json`, y el
+  Stop de `.claude/settings.json` lo invoca (`claude-json stop`) en los dos
+  instaladores. Con el gate en rojo emite UNA linea `decision: block` con exit
+  0 y el `reason` lleva la frase y las ultimas lineas del check; lo legible va a
+  stderr; con el gate verde o `stop_hook_active` no imprime nada. Claude Code
+  honra el mismo JSON: su bloqueo no cambia de fondo, solo de forma.
+  `plain`, `codex-json` y `gemini-json` no cambian.
+- `harness doctor` gana el area `copilot`: con `copilot` en el PATH, falla si
+  la raiz no esta en `trustedFolders` (remedio: confiar la carpeta) o si el
+  Stop no esta en modo `claude-json` (remedio: reinstalar); sin `copilot`, no
+  aplica.
+- Se van: ese JSON de `.github/`, el bloque `harness:copilot` del `.md` de
+  instrucciones, `harness copilot instalar|quitar`, el modo de hook de la #85,
+  `--copilot` / `--no-copilot` (`-Copilot` / `-NoCopilot`) y
+  `tests/copilot_hook_check.sh`. Si instalaste con la #85 y `copilot` estaba
+  en el PATH, borra a mano en `.github/` los hooks cuyo comando invoca
+  `bin/harness-hook` y el bloque entre los marcadores `harness:copilot` (o los
+  archivos, si solo tenian eso). `consolidar` sigue detectando `copilot -s -p`.
 
 ## Kimi Code CLI: hooks globales (única excepción de escritura en `$HOME`)
 

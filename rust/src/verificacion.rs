@@ -1268,6 +1268,7 @@ mod tests {
                 "82-el-aviso-de-perfil-del-cierre-cuenta-solo-las-de.md:AC-6",
                 "84-leccion-partir-parte-una-leccion-sobre-el-tope-a.md:AC-9",
                 "85-copilot-cli-como-backend-de-primera-clase-superf.md:AC-8",
+                "86-copilot-medido-en-vivo-los-hooks-van-por-el-clau.md:AC-7",
             ],
             "el arreglo trae AC distintos de los medidos en el corpus real"
         );

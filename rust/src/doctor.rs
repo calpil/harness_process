@@ -71,6 +71,9 @@ pub enum Area {
     /// Feature #26: si la proteccion de rutas esta activa y cuantas cubre.
     /// **No** revisa violaciones: eso es de `harness_check.sh` (AC-14 de la #25).
     RutasProtegidas,
+    /// Feature #86: Copilot CLI lee los hooks de `.claude/settings.json`, pero
+    /// solo en carpetas confiadas; y el Stop tiene que ir en modo `claude-json`.
+    Copilot,
 }
 
 impl Area {
@@ -84,6 +87,7 @@ impl Area {
             Area::Herramientas => "herramientas",
             Area::Graphify => "graphify",
             Area::RutasProtegidas => "rutas_protegidas",
+            Area::Copilot => "copilot",
         }
     }
 }
@@ -141,7 +145,108 @@ pub fn diagnosticar(paths: &HarnessPaths) -> Vec<Hallazgo> {
         revisar_herramientas(paths),
         revisar_graphify(),
         revisar_rutas_protegidas(paths),
+        revisar_copilot(paths, fuente),
     ]
+}
+
+/// Feature #86, medido con Copilot CLI 1.0.83: Copilot lee los hooks del
+/// `.claude/settings.json` del repo, pero SOLO en carpetas de `trustedFolders`
+/// (`$COPILOT_HOME/config.json`, default `~/.copilot/config.json`), y bloquea
+/// solo con el JSON `decision: block`, que emite el modo `claude-json`. Sin
+/// `copilot` en el PATH no aplica y no dice nada; en el checkout fuente del
+/// arnes tampoco (ahi no hay hooks instalados, como en `revisar_hooks`).
+fn revisar_copilot(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
+    if fuente {
+        return Hallazgo::no_aplica(Area::Copilot, "checkout fuente del arnes: aca no hay hooks");
+    }
+    if !en_path("copilot") {
+        return Hallazgo::no_aplica(Area::Copilot, "copilot no esta en el PATH");
+    }
+    let home = std::env::var("COPILOT_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|h| PathBuf::from(h).join(".copilot"))
+        });
+    let config = home.map(|h| h.join("config.json"));
+    let config_texto = config.as_ref().and_then(|c| std::fs::read_to_string(c).ok());
+    let config_ruta = config
+        .as_ref()
+        .map_or("~/.copilot/config.json".to_string(), |c| c.display().to_string());
+    let settings = std::fs::read_to_string(paths.repo_root.join(".claude/settings.json")).ok();
+    revisar_copilot_con(&paths.repo_root, config_texto.as_deref(), &config_ruta, settings.as_deref())
+}
+
+/// La decision, sin PATH ni entorno: `config` es el texto de `config.json` de
+/// Copilot (o `None` si no se pudo leer) y `settings` el de `.claude/settings.json`.
+fn revisar_copilot_con(raiz: &Path, config: Option<&str>, config_ruta: &str, settings: Option<&str>) -> Hallazgo {
+    let confiar = format!(
+        "abri `copilot` en {} y acepta la confianza de la carpeta (o agrega esa ruta a trustedFolders en {config_ruta}); sin eso Copilot no carga ningun hook",
+        raiz.display()
+    );
+    match config.map(|c| carpeta_confiada(c, raiz)) {
+        None => {
+            return Hallazgo::falla(
+                Area::Copilot,
+                format!("no se pudo leer {config_ruta}: no consta que {} este confiada", raiz.display()),
+                confiar,
+            );
+        }
+        Some(false) => {
+            return Hallazgo::falla(
+                Area::Copilot,
+                format!(
+                    "{} no esta en trustedFolders de {config_ruta}: Copilot no carga los hooks del arnes ahi",
+                    raiz.display()
+                ),
+                confiar,
+            );
+        }
+        Some(true) => {}
+    }
+    match settings {
+        Some(s) if s.contains("claude-json stop") => Hallazgo::ok(
+            Area::Copilot,
+            "copilot en el PATH, carpeta confiada y Stop de .claude/settings.json en modo claude-json",
+        ),
+        Some(_) => Hallazgo::falla(
+            Area::Copilot,
+            ".claude/settings.json no invoca el Stop en modo claude-json: Copilot no va a bloquear",
+            REINSTALAR,
+        ),
+        None => Hallazgo::falla(
+            Area::Copilot,
+            "falta .claude/settings.json: Copilot lee los hooks de ahi",
+            REINSTALAR,
+        ),
+    }
+}
+
+/// `trustedFolders` de `config.json` (que arranca con lineas de comentario
+/// `//`): la raiz esta confiada si ella o un ancestro esta en la lista.
+fn carpeta_confiada(config: &str, raiz: &Path) -> bool {
+    let cuerpo: String = config
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&cuerpo) else {
+        return false;
+    };
+    let raiz = raiz.canonicalize().unwrap_or_else(|_| raiz.to_path_buf());
+    json.get("trustedFolders")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|lista| {
+            lista.iter().filter_map(serde_json::Value::as_str).any(|t| {
+                let t = Path::new(t);
+                let t = t.canonicalize().unwrap_or_else(|_| t.to_path_buf());
+                raiz.starts_with(&t)
+            })
+        })
 }
 
 /// Informa el ESTADO de la proteccion, no sus violaciones: cuantas rutas cubre
@@ -278,14 +383,11 @@ fn revisar_marker(paths: &HarnessPaths) -> Hallazgo {
 /// Un backend "esta instalado" si su huella esta en la raiz. Solo entonces se le
 /// exige su hook: pedirle hooks de Gemini a quien no usa Gemini es ruido, y el
 /// ruido hunde la herramienta (leccion `probar-contra-datos-reales`).
-const BACKENDS: [(&str, &str, &str); 5] = [
+const BACKENDS: [(&str, &str, &str); 4] = [
     ("claude", ".claude/settings.json", "CLAUDE.md"),
     ("codex", ".codex/hooks.json", "AGENTS.md"),
     ("gemini", ".gemini/settings.json", "GEMINI.md"),
     ("grok", ".grok/hooks/harness.sh", ".grok/GROK.md"),
-    // Feature #85: Copilot CLI; su config de proyecto es del usuario y el
-    // arnes solo MEZCLA sus hooks ahi.
-    ("copilot", ".github/copilot.json", ".github/copilot-instructions.md"),
 ];
 
 fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
@@ -309,34 +411,18 @@ fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
     let mal_apuntados: Vec<String> = BACKENDS
         .iter()
         .filter(|(nombre, huella, _)| {
-            let ruta = paths.repo_root.join(huella);
-            // Feature #85: el arnes MEZCLA y deja un hook ajeno en copilot; el
-            // que importa es el Stop (agentStop), no que el texto mencione el
-            // runtime en algun otro evento.
-            let bien = if *nombre == "copilot" {
-                copilot_agent_stop_apunta_al_runtime(&ruta)
-            } else {
-                apunta_al_runtime(&ruta)
-            };
-            instalados.contains(nombre) && !bien
+            instalados.contains(nombre) && !apunta_al_runtime(&paths.repo_root.join(huella))
         })
         .map(|(nombre, huella, _)| format!("{nombre} ({huella})"))
         .collect();
     if !mal_apuntados.is_empty() {
-        let remedio = if mal_apuntados.iter().any(|m| m.starts_with("copilot")) {
-            format!(
-                "{REINSTALAR} --copilot   (si agentStop es un hook tuyo, el arnes no lo pisa: enganchalo a bin/harness-hook a mano)"
-            )
-        } else {
-            REINSTALAR.to_string()
-        };
         return Hallazgo::falla(
             Area::Hooks,
             format!(
                 "hook(s) que no apuntan a bin/harness-hook: {}",
                 mal_apuntados.join(", ")
             ),
-            remedio,
+            REINSTALAR,
         );
     }
     // El runtime al que todos los hooks apuntan.
@@ -368,22 +454,6 @@ fn revisar_hooks(paths: &HarnessPaths, fuente: bool) -> Hallazgo {
 /// Un archivo de configuracion de hooks "apunta bien" si menciona el runtime
 /// del arnes. Se mira el texto y no se parsea JSON/TOML: los cinco backends
 /// usan formatos distintos y lo unico que importa es si el arnes esta cableado.
-/// `.github/copilot.json`: `true` solo si `hooks.agentStop.command` invoca el
-/// runtime. Un JSON ilegible (BOM, comentarios) cuenta como no enganchado.
-fn copilot_agent_stop_apunta_al_runtime(ruta: &Path) -> bool {
-    let Ok(texto) = std::fs::read_to_string(ruta) else {
-        return false;
-    };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(texto.trim_start_matches('\u{feff}')) else {
-        return false;
-    };
-    json.get("hooks")
-        .and_then(|h| h.get("agentStop"))
-        .and_then(|h| h.get("command"))
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|c| c.contains("harness-hook"))
-}
-
 fn apunta_al_runtime(config: &Path) -> bool {
     let Ok(texto) = std::fs::read_to_string(config) else {
         return false;
@@ -721,52 +791,6 @@ mod tests {
     }
 
     #[test]
-    fn doctor_copilot_should_list_the_backend_and_check_where_its_hook_points() {
-        // Feature #85: .github/copilot.json es la huella; el hook tiene que
-        // apuntar al runtime como los demas.
-        let dir = tempfile::tempdir().unwrap();
-        let paths = paths_en(dir.path());
-        std::fs::create_dir_all(paths.repo_root.join(".github")).unwrap();
-        std::fs::create_dir_all(paths.repo_root.join("bin")).unwrap();
-        std::fs::write(paths.repo_root.join("bin/harness-hook"), "#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                paths.repo_root.join("bin/harness-hook"),
-                std::fs::Permissions::from_mode(0o755),
-            )
-            .unwrap();
-        }
-        std::fs::write(
-            paths.repo_root.join(".github/copilot.json"),
-            r#"{"hooks":{"agentStop":{"command":"bash /r/bin/harness-hook copilot-json agentStop","shell":"bash"}}}"#,
-        )
-        .unwrap();
-        let h = revisar_hooks(&paths, false);
-        assert_eq!(h.estado, Estado::Ok, "{}", h.detalle);
-        assert!(h.detalle.contains("copilot"), "{}", h.detalle);
-        std::fs::write(
-            paths.repo_root.join(".github/copilot.json"),
-            r#"{"hooks":{"agentStop":{"command":"./mio.sh","shell":"bash"}}}"#,
-        )
-        .unwrap();
-        let h = revisar_hooks(&paths, false);
-        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
-        assert!(h.detalle.contains("copilot (.github/copilot.json)"), "{}", h.detalle);
-        assert!(h.remedio.as_deref().unwrap_or("").contains("--copilot"), "{:?}", h.remedio);
-        // Cableado parcial (hallazgo de la revision): sessionStart del arnes
-        // pero agentStop ajeno = el commit guard no esta enganchado.
-        std::fs::write(
-            paths.repo_root.join(".github/copilot.json"),
-            r#"{"hooks":{"sessionStart":{"command":"bash /r/bin/harness-hook copilot-json sessionStart"},"agentStop":{"command":"./mio.sh","shell":"bash"}}}"#,
-        )
-        .unwrap();
-        let h = revisar_hooks(&paths, false);
-        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
-    }
-
-    #[test]
     fn doctor_should_stay_quiet_with_well_wired_hooks() {
         // El chequeo mas fino no puede volverse ruidoso.
         let dir = tempfile::tempdir().unwrap();
@@ -860,5 +884,55 @@ mod tests {
     #[test]
     fn graphify_should_never_block() {
         assert!(!revisar_graphify().estado.bloquea());
+    }
+
+    // -- feature #86: Copilot lee .claude/settings.json en carpetas confiadas --
+
+    const CONFIG_COPILOT: &str = "// User settings belong in settings.json.\n// This file is managed automatically.\n{\n  \"trustedFolders\": [\"__RAIZ__\"],\n  \"loggedInUsers\": []\n}\n";
+
+    #[test]
+    fn doctor_copilot_should_fail_when_the_folder_is_not_trusted_and_say_how_to_trust_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path().join("proyecto");
+        std::fs::create_dir_all(&raiz).unwrap();
+        let config = CONFIG_COPILOT.replace("__RAIZ__", "/otro/lado");
+        let h = revisar_copilot_con(&raiz, Some(&config), "/home/x/.copilot/config.json", Some("claude-json stop"));
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
+        assert!(h.detalle.contains("trustedFolders"), "{}", h.detalle);
+        let remedio = h.remedio.clone().unwrap_or_default();
+        assert!(remedio.contains("acepta la confianza") && remedio.contains("/home/x/.copilot/config.json"), "{remedio}");
+        // Sin config legible tampoco consta la confianza.
+        let h = revisar_copilot_con(&raiz, None, "/home/x/.copilot/config.json", Some("claude-json stop"));
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
+    }
+
+    #[test]
+    fn doctor_copilot_should_pass_with_trust_and_the_claude_json_stop_and_fail_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path().join("proyecto");
+        std::fs::create_dir_all(&raiz).unwrap();
+        let config = CONFIG_COPILOT.replace("__RAIZ__", &raiz.display().to_string());
+        let h = revisar_copilot_con(&raiz, Some(&config), "cfg", Some(r#"{"hooks":{"Stop":[{"hooks":[{"command":"bash \"/r/bin/harness-hook\" claude-json stop"}]}]}}"#));
+        assert_eq!(h.estado, Estado::Ok, "{}", h.detalle);
+        assert!(h.detalle.contains("claude-json"), "{}", h.detalle);
+        // Un ancestro confiado confia la raiz (Copilot confia carpetas, no repos).
+        let config_padre = CONFIG_COPILOT.replace("__RAIZ__", &dir.path().display().to_string());
+        let h = revisar_copilot_con(&raiz, Some(&config_padre), "cfg", Some("claude-json stop"));
+        assert_eq!(h.estado, Estado::Ok, "{}", h.detalle);
+        // El Stop en modo plain (instalacion anterior a la #86): falla con reinstalar.
+        let h = revisar_copilot_con(&raiz, Some(&config), "cfg", Some(r#"{"hooks":{"Stop":[{"hooks":[{"command":"bash /r/bin/harness-hook plain stop"}]}]}}"#));
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
+        assert_eq!(h.remedio.as_deref(), Some(REINSTALAR));
+        let h = revisar_copilot_con(&raiz, Some(&config), "cfg", None);
+        assert_eq!(h.estado, Estado::Falla, "{}", h.detalle);
+    }
+
+    #[test]
+    fn doctor_copilot_should_read_trusted_folders_through_the_comment_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path().to_path_buf();
+        assert!(carpeta_confiada(&CONFIG_COPILOT.replace("__RAIZ__", &raiz.display().to_string()), &raiz));
+        assert!(!carpeta_confiada("{\"trustedFolders\": []}", &raiz));
+        assert!(!carpeta_confiada("no es json", &raiz));
     }
 }
